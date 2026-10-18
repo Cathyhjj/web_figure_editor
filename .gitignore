@@ -8,6 +8,7 @@
 !/style.css
 !/app.js
 !/assets.js
+!/asset-tree.js
 !/core.js
 !/deck.js
 !/demo.js
@@ -18,6 +19,8 @@
 !/tests/*.test.mjs
 !/tests/browser.html
 !/tests/browser.js
+!/tests/folders.html
+!/tests/folders.js
 !/scripts/
 /scripts/*
 !/scripts/extract_pptx_example.py

@@ -1,6 +1,7 @@
 import { uid, projectToSVG, exportPNG, downloadBlob } from './core.js';
 import { createDeck, validateDeck, cloneDeck, currentSlide, slideProject, serializeDeck, deckSourceManifest, addSlide, duplicateSlide, deleteSlide } from './deck.js';
-import { importFiles, pickImages, linkAsset, refreshAsset, replaceAsset } from './assets.js';
+import { importFiles, pickImages, importFolderFiles, pickFolder, importDroppedFiles, linkAsset, refreshAsset, replaceAsset } from './assets.js';
+import { buildAssetTree } from './asset-tree.js';
 import { generateHTMLReport } from './report.js';
 import { initWindows } from './windows.js';
 
@@ -8,6 +9,9 @@ const $ = id => document.getElementById(id);
 const ns = 'http://www.w3.org/2000/svg';
 let project = createDeck(), selected = new Set(), zoom = .75, undoStack = [], redoStack = [];
 let gesture = null, dirty = false, relinkId = null, draftTimer, draftDb, pendingText = null, lastPointerItem = null, lastTap = null;
+const collapsedAssetFolders = new Set();
+let libraryImports = 0;
+let libraryImportNotice = { hidden: true, text: '', error: false };
 const clone = cloneDeck;
 const slide = () => currentSlide(project);
 const escapeHTML = s => String(s ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -88,11 +92,16 @@ function renderStage(){
  $('selection-count').textContent=selected.size?`${selected.size} selected`:`${slide().items.length} object${slide().items.length === 1 ? "" : "s"}`;
 }
 function renderAssets(){
- const list=$('asset-list');list.replaceChildren();
- if(!project.assets.length){const p=document.createElement('p');p.className='hint';p.textContent='Drop PNG, JPG, WebP, or SVG images here. Files are processed locally.';list.append(p);}
- for(const a of project.assets){
+ const list=$('asset-list'),scrollTop=$('assets-panel').scrollTop;
+ // Read the current state directly so even an immediate rerender preserves a toggle.
+ for(const folder of list.querySelectorAll('.asset-folder')){
+  if(folder.open)collapsedAssetFolders.delete(folder.dataset.path);else collapsedAssetFolders.add(folder.dataset.path);
+ }
+ list.replaceChildren();
+ if(!project.assets.length){const p=document.createElement('p');p.className='hint';p.textContent='Drop images or folders here to preview them. Folder structure is kept. Files are processed locally.';list.append(p);}
+ function assetCard(a){
   const card=document.createElement('div');card.className='asset-card';card.dataset.asset=a.id;card.draggable=false;
-  card.innerHTML=`<button class="asset-preview" data-action="place" title="Add to canvas"><img draggable="false" class="asset-thumb" alt="${escapeHTML(a.name)}" src="${a.dataUrl}"></button><div class="asset-name" title="${escapeHTML(a.name)}">${escapeHTML(a.name)}</div><div class="asset-meta">${a.width} × ${a.height} · ${a.sourceKind==='linked'?(a.linkPersistence==='session'?'Session link + copy':'Local link + copy'):'Portable copy'}${a.originalMime==='image/svg+xml'?' · Rasterized SVG':''}</div><div class="asset-actions"><button data-action="place">Place</button><button data-action="relink">Link</button>${a.sourceKind==='linked'?'<button data-action="refresh">Refresh</button>':''}</div>`;
+  card.innerHTML=`<button class="asset-preview" data-action="place" title="Add to canvas" aria-label="Place ${escapeHTML(a.name)} on canvas"><img draggable="false" loading="lazy" decoding="async" class="asset-thumb" alt="${escapeHTML(a.name)}" src="${a.dataUrl}"></button><div class="asset-name" title="${escapeHTML(a.relativePath||a.name)}">${escapeHTML(a.name)}</div><div class="asset-meta">${a.width} × ${a.height} · ${a.sourceKind==='linked'?(a.linkPersistence==='session'?'Session link + copy':'Local link + copy'):'Portable copy'}${a.originalMime==='image/svg+xml'?' · Rasterized SVG':''}</div><div class="asset-actions"><button data-action="place">Place</button><button data-action="relink">Link</button>${a.sourceKind==='linked'?'<button data-action="refresh">Refresh</button>':''}</div>`;
   let suppressClick=false;
   card.onpointerdown=e=>{
    if(e.button!==0||e.target.closest('.asset-actions'))return;
@@ -101,8 +110,20 @@ function renderAssets(){
    const end=ev=>{document.removeEventListener('pointermove',move);document.removeEventListener('pointerup',end);document.body.style.cursor='';if(!moved)return;suppressClick=true;const r=$('workspace').getBoundingClientRect();if(ev.clientX>=r.left&&ev.clientX<=r.right&&ev.clientY>=r.top&&ev.clientY<=r.bottom){const p=point(ev);placeAsset(a,{x:Math.max(0,p.x),y:Math.max(0,p.y)});}setTimeout(()=>suppressClick=false,0);};
    document.addEventListener('pointermove',move);document.addEventListener('pointerup',end,{once:true});
   };
-  card.onclick=async e=>{if(suppressClick)return;const action=e.target.closest('[data-action]')?.dataset.action;if(action==='place')placeAsset(a);if(action==='relink')await relink(a);if(action==='refresh')await refresh(a);};list.append(card);
+  card.onclick=async e=>{if(suppressClick)return;const action=e.target.closest('[data-action]')?.dataset.action;if(action==='place')placeAsset(a);if(action==='relink')await relink(a);if(action==='refresh')await refresh(a);};return card;
  }
+ function appendFolderContents(node,container){
+  for(const folder of node.folders){
+   const details=document.createElement('details');details.className='asset-folder';details.dataset.path=folder.path;details.open=!collapsedAssetFolders.has(folder.path);
+   const summary=document.createElement('summary');summary.title=folder.path;
+   summary.innerHTML=`<span class="folder-chevron" aria-hidden="true">›</span><svg aria-hidden="true"><use href="#i-folder"/></svg><span class="folder-name">${escapeHTML(folder.name)}</span><span class="folder-count" aria-label="${folder.count} images">${folder.count}</span>`;
+   const contents=document.createElement('div');contents.className='asset-folder-content';appendFolderContents(folder,contents);
+   details.append(summary,contents);container.append(details);
+  }
+  for(const asset of node.assets)container.append(assetCard(asset));
+ }
+ appendFolderContents(buildAssetTree(project.assets),list);
+ $('assets-panel').scrollTop=scrollTop;
 }
 function renderLayers(){
  const list=$('layer-list');list.replaceChildren();
@@ -162,35 +183,66 @@ function render(){
 function point(event){const r=$('stage').getBoundingClientRect();return{x:(event.clientX-r.left)/zoom,y:(event.clientY-r.top)/zoom};}
 function placeAsset(a,position){change(()=>{const maxW=slide().canvas.width*.43,maxH=slide().canvas.height*.65,scale=Math.min(1,maxW/a.width,maxH/a.height);const offset=slide().items.length%6*18;const i={...base('image',position?.x??60+offset,position?.y??60+offset,a.width*scale,a.height*scale),assetId:a.id,name:a.name};slide().items.push(i);selected=new Set([i.id]);});status(`Added ${a.name} to the canvas.`);}
 const importTarget=()=>({project,slideId:project.activeSlideId});
-async function importResult(result,position,target){
+async function importResult(result,position,target,{libraryOnly=false}={}){
  if(!result)return;
  const page=target?.project===project?project.slides.find(s=>s.id===target.slideId):null;
- if(!page){status('Import cancelled because the target project or slide changed. Please import again.',true);return;}
+ if(target?.project!==project||(!libraryOnly&&!page)){status('Import cancelled because the target project or slide changed. Please import again.',true);return;}
+ const errors=result.errors.map(e=>`${e.name}: ${e.message}`).join('; ');
+ const skipped=result.skipped?` Skipped ${result.skipped} unsupported file${result.skipped===1?'':'s'}.`:'';
  if(result.assets.length){
   const applied=change(()=>{for(const [j,a] of result.assets.entries()){
-   project.assets.push(a);const scale=Math.min(1,page.canvas.width*.43/a.width,page.canvas.height*.65/a.height);
+   project.assets.push(a);if(libraryOnly)continue;
+   const scale=Math.min(1,page.canvas.width*.43/a.width,page.canvas.height*.65/a.height);
    const i={...base('image',(position?.x??60)+j*22,(position?.y??60)+j*22,a.width*scale,a.height*scale),assetId:a.id,name:a.name};
    page.items.push(i);if(page.id===project.activeSlideId)selected=new Set([i.id]);
   }});
   if(!applied)return;
-  status(`Imported ${result.assets.length} asset${result.assets.length===1?'':'s'} into ${page.name}. Portable copies are included.${result.errors.length?'; '+result.errors.map(e=>`${e.name}: ${e.message}`).join('; '):''}`,!!result.errors.length);
- }else if(result.errors.length)status(result.errors.map(e=>`${e.name}: ${e.message}`).join('; '),true);
+  status(`Imported ${result.assets.length} asset${result.assets.length===1?'':'s'} into ${libraryOnly?'Assets':page.name}.${libraryOnly?' Choose a preview or Place to add it to the canvas.':' Portable copies are included.'}${skipped}${errors?' '+errors:''}`,!!errors);
+ }else if(errors)status(errors+skipped,true);
+ else if('skipped' in result)status('No supported images found. Choose a folder containing PNG, JPG, WebP, or SVG images.'+skipped);
+}
+async function importToLibrary(pending,target){
+ libraryImports++;renderLibraryImportNotice();
+ try{
+  const result=await pending;
+  if(result===null||(!result.assets.length&&!result.errors.length&&!('skipped' in result))){
+   if(result===null)$('folder-input').click();
+   return;
+  }
+  await importResult(result,undefined,target,{libraryOnly:true});
+  libraryImportNotice={hidden:false,text:$('status').textContent,error:$('status').classList.contains('error')};
+ }
+ catch(error){status(error.message,true);libraryImportNotice={hidden:false,text:error.message,error:true};}
+ finally{libraryImports--;renderLibraryImportNotice();}
+}
+function renderLibraryImportNotice(){
+ const notice=$('asset-import-status'),busy=libraryImports>0;
+ $('assets-panel').setAttribute('aria-busy',String(busy));
+ notice.hidden=!busy&&libraryImportNotice.hidden;
+ notice.textContent=busy?'Reading images and subfolders…':libraryImportNotice.text;
+ notice.classList.toggle('error',!busy&&libraryImportNotice.error);
 }
 async function relink(a){try{const updated=await linkAsset(a);if(updated)change(()=>{project.assets=project.assets.map(x=>x.id===a.id?updated:x);});else{relinkId=a.id;$('relink-input').click();}status(updated?'Local file linked and embedded copy updated.':'Select the local file to link.');}catch(e){if(e.name!=='AbortError')status(e.message,true);}}
 async function refresh(a){try{const updated=await refreshAsset(a);change(()=>{project.assets=project.assets.map(x=>x.id===a.id?updated:x);});status('Embedded copy updated from the authorized local file.');}catch(e){status(e.message,true);}}
 $('add-images').onclick=async()=>{const target=importTarget();try{const result=await pickImages();if(result===null)$('file-input').click();else await importResult(result,undefined,target);}catch(e){status(e.message,true);}};
 $('file-input').onchange=async e=>{const target=importTarget();await importResult(await importFiles([...e.target.files]),undefined,target);e.target.value='';};
+$('add-folders').onclick=async()=>{
+ const target=importTarget();
+ await importToLibrary(pickFolder(),target);
+};
+$('folder-input').onchange=async e=>{const files=[...e.target.files];e.target.value='';if(files.length)await importToLibrary(importFolderFiles(files),importTarget());};
 $('relink-input').onchange=async e=>{try{const a=assetById(relinkId);if(a&&e.target.files[0]){const updated=await replaceAsset(a,e.target.files[0]);change(()=>{project.assets=project.assets.map(x=>x.id===a.id?updated:x);});status('Asset copy updated. This browser does not retain a local file link.');}}catch(err){status(err.message,true);}e.target.value='';};
 $('workspace').ondragover=e=>{e.preventDefault();e.dataTransfer.dropEffect='copy';$('workspace').classList.add('drag-over');};
 $('workspace').ondragleave=e=>{if(!$('workspace').contains(e.relatedTarget))$('workspace').classList.remove('drag-over');};
 $('workspace').ondrop=async e=>{
  e.preventDefault();$('workspace').classList.remove('drag-over');const target=importTarget(),p=point(e);p.x=Math.max(0,p.x);p.y=Math.max(0,p.y);
  const assetId=e.dataTransfer.getData('application/x-figure-asset');if(assetId){const a=assetById(assetId);if(a)placeAsset(a,p);return;}
- const entries=[...e.dataTransfer.items].filter(i=>i.kind==='file').map(i=>({file:i.getAsFile(),handle:i.getAsFileSystemHandle?i.getAsFileSystemHandle().catch(()=>null):Promise.resolve(null)}));
- const files=[...e.dataTransfer.files],map=new Map();for(const entry of entries){const h=await entry.handle;if(h?.kind==='file')map.set(entry.file,h);}
- // Use the same File objects as handle-map keys.
- const ordered=entries.length?entries.map(e=>e.file).filter(Boolean):files;await importResult(await importFiles(ordered,map),p,target);
+ try{await importResult(await importDroppedFiles(e.dataTransfer),p,target);}catch(error){status(error.message,true);}
 };
+const libraryDropZone=document.querySelector('.library-panel');
+libraryDropZone.ondragover=e=>{if(![...e.dataTransfer.types].includes('Files'))return;e.preventDefault();e.stopPropagation();e.dataTransfer.dropEffect='copy';libraryDropZone.classList.add('drag-over');};
+libraryDropZone.ondragleave=e=>{if(!libraryDropZone.contains(e.relatedTarget))libraryDropZone.classList.remove('drag-over');};
+libraryDropZone.ondrop=async e=>{e.preventDefault();e.stopPropagation();libraryDropZone.classList.remove('drag-over');await importToLibrary(importDroppedFiles(e.dataTransfer),importTarget());};
 $('stage').onpointerdown=e=>{
  if(e.button!==0)return;flushText();const id=e.target.closest('[data-item]')?.dataset.item;lastPointerItem=id;
  if(!id){selected.clear();render();return;}
@@ -231,7 +283,7 @@ function fit(){const r=$('workspace').getBoundingClientRect();setZoom(Math.min((
 $('zoom-in').onclick=()=>setZoom(zoom*1.2);$('zoom-out').onclick=()=>setZoom(zoom/1.2);$('zoom-fit').onclick=fit;
 const filename=()=>project.name.replace(/[^\p{L}\p{N}._ -]/gu,'_').slice(0,80)||'figure';
 $('save-project').onclick=()=>{try{flushText();const file=new Blob([serializeDeck(project)],{type:'application/json'});if(file.size>240*1024*1024)throw new Error('Project exceeds the 240 MB file limit. Split it into smaller projects before saving.');downloadBlob(file,filename()+'.figure.json');dirty=false;status(`Project saved with ${project.slides.length} slide${project.slides.length===1?'':'s'} and embedded asset copies.`);}catch(e){status(e.message,true);}};
-function replaceProject(p){project=validateDeck(p);selected.clear();undoStack=[];redoStack=[];pendingText=null;dirty=false;render();fit();saveDraft();}
+function replaceProject(p){project=validateDeck(p);selected.clear();undoStack=[];redoStack=[];pendingText=null;dirty=false;collapsedAssetFolders.clear();$('asset-list').replaceChildren();libraryImportNotice={hidden:true,text:'',error:false};renderLibraryImportNotice();render();fit();saveDraft();}
 $('new-project').onclick=()=>{if(dirty&&!confirm('Creating a new project will replace the current local draft. Save your project first to keep a copy. Continue?'))return;replaceProject(createDeck());status('New project created with one blank slide.');};
 $('open-project').onclick=()=>$('project-input').click();
 $('project-input').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>240*1024*1024)throw new Error('Project exceeds 240 MB. Split it into smaller projects.');const p=validateDeck(JSON.parse(await file.text()));if(dirty&&!confirm('Opening a project will replace the current local draft. Continue?'))return;replaceProject(p);status('Editable project opened. Use Link on an asset to reconnect its local file.');}catch(err){status('Could not open project: '+err.message,true);}finally{e.target.value='';}};

@@ -152,3 +152,25 @@ dialog{border:1px solid var(--drx-border);border-radius:15px;padding:0;width:min
 @media(pointer:coarse){.window-toggle{min-height:32px}.panel-window>.window-header{min-height:48px;height:48px}.window-resize{width:30px;height:30px}}
 @media(prefers-reduced-motion:reduce){.panel-window{scroll-behavior:auto}}
 @media(forced-colors:active){.panel-window.is-floating{border:2px solid CanvasText!important}.window-grip{background:CanvasText}.window-toggle,.window-resize{border:1px solid ButtonText;color:ButtonText;background:ButtonFace}}
+
+/* Directory imports share the portable asset library and its existing previews. */
+.folder-upload-button{margin-top:8px;border-style:solid;background:#fff}
+.folder-import-hint{margin-top:12px;font-size:10px;line-height:1.7}
+.asset-import-status{margin-top:12px;padding:8px;border-radius:6px;background:var(--drx-accent-soft);font-size:10px;line-height:1.7;overflow-wrap:anywhere}
+.asset-import-status.error{color:var(--drx-danger);background:#fff2f4}
+.library-panel.drag-over{box-shadow:inset 0 0 0 2px var(--drx-accent)}
+.library-panel.drag-over .library-content{background:#fcf5fb}
+.library-panel .asset-list{display:flex;flex-direction:column}
+.asset-folder{min-width:0}
+.asset-folder>summary{display:flex;align-items:center;gap:6px;min-height:34px;padding:6px 5px;border-radius:6px;background:#f7f3f9;color:#74607e;cursor:pointer;list-style:none;font-size:11px;font-weight:550;user-select:none}
+.asset-folder>summary::-webkit-details-marker{display:none}
+.asset-folder>summary:hover{background:var(--drx-accent-soft);color:var(--drx-accent)}
+.asset-folder>summary:focus-visible{outline:2px solid var(--drx-focus);outline-offset:2px}
+.asset-folder>summary svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linejoin:round}
+.folder-chevron{font-size:18px;line-height:16px;width:8px;flex-shrink:0;text-align:center}
+.asset-folder[open]>summary .folder-chevron{transform:rotate(90deg)}
+.folder-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.folder-count{margin-left:auto;flex-shrink:0;font-size:9px;font-variant-numeric:tabular-nums;color:var(--drx-text-muted);background:#fff;padding:1px 5px;border-radius:8px}
+.asset-folder-content{display:flex;flex-direction:column;gap:10px;margin:8px 0 2px 4px;padding-left:7px;border-left:1px solid #e5dce9;min-width:0}
+@media(pointer:coarse){.asset-folder>summary{min-height:40px}}
+@media(forced-colors:active){.asset-folder>summary,.asset-folder-content{border:1px solid CanvasText}}

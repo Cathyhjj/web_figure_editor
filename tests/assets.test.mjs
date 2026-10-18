@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { importFiles, replaceAsset, refreshAsset, assetLinkStatus, pickImages, linkAsset, MAX_FILE_BYTES } from '../assets.js';
+import { importFiles, importFolderFiles, importDroppedFiles, pickFolder, replaceAsset, refreshAsset, assetLinkStatus, pickImages, linkAsset, MAX_FILE_BYTES } from '../assets.js';
 
 // Image decode itself is covered by browser checks. This stand-in keeps IO/permission tests deterministic.
 globalThis.Image = class {
@@ -121,4 +121,155 @@ test('picker fallback and cancellation keep existing state untouched', async () 
   assert.deepEqual(await pickImages(), { assets: [], errors: [] });
   await assert.rejects(linkAsset({ id: 'asset' }), { name: 'AbortError' });
   delete globalThis.showOpenFilePicker;
+});
+
+const folderFile = (name, path) => Object.assign(png(name), { webkitRelativePath: path });
+const textFile = (name = 'notes.txt') => Object.assign(new Blob(['notes'], { type: 'text/plain' }), { name });
+const fileHandle = (file) => ({ kind: 'file', name: file.name, async getFile() { return file; }, async queryPermission() { return 'granted'; } });
+const directoryHandle = (name, children) => ({ kind: 'directory', name, async *values() { yield* children; } });
+const fileEntry = (file, error) => ({ name: file.name, isFile: true, file(resolve, reject) { error ? reject(error) : resolve(file); } });
+function directoryEntry(name, batches) {
+  let reads = 0;
+  return {
+    name, isDirectory: true,
+    get reads() { return reads; },
+    createReader() {
+      return { readEntries(resolve, reject) {
+        const batch = batches[reads++] || [];
+        batch instanceof Error ? reject(batch) : resolve(batch);
+      } };
+    },
+  };
+}
+
+test('directory inputs retain root/subfolder paths and skip unrelated files before reading them', async () => {
+  const good = folderFile('plot.PNG', 'Results/Day 1/plot.PNG');
+  const spoof = Object.assign(new Blob(['not an image'], { type: 'image/png' }), { name: 'spoof.png', webkitRelativePath: 'Results/spoof.png' });
+  const ignored = { name: 'notes.txt', type: 'text/plain', size: MAX_FILE_BYTES + 1, arrayBuffer() { assert.fail('Non-images must be skipped'); } };
+  const result = await importFolderFiles([good, ignored, spoof, folderFile('plot.png', 'Results/Day 2/plot.png')]);
+  assert.deepEqual(result.assets.map((asset) => asset.relativePath), ['Results/Day 1/plot.PNG', 'Results/Day 2/plot.png']);
+  assert.equal(result.skipped, 1);
+  assert.equal(result.errors[0].name, 'Results/spoof.png');
+  assert.match(result.errors[0].message, /actual file contents/);
+  assert.equal(result.assets[0].sourceKind, 'copy');
+});
+
+test('directory filtering accepts supported MIME and retains per-file size protection', async () => {
+  const noExtension = folderFile('plot', 'Root/plot');
+  const huge = { name: 'huge.jpg', webkitRelativePath: 'Root/huge.jpg', size: MAX_FILE_BYTES + 1, arrayBuffer() { assert.fail('Oversize images must not be read'); } };
+  const result = await importFolderFiles([noExtension, huge]);
+  assert.equal(result.assets.length, 1);
+  assert.equal(result.assets[0].relativePath, 'Root/plot');
+  assert.equal(result.errors[0].name, 'Root/huge.jpg');
+  assert.match(result.errors[0].message, /25 MB/);
+});
+
+test('native folder picker recursively links images using read-only access and isolates failures', async () => {
+  const requests = [];
+  const broken = { kind: 'file', name: 'missing.png', async getFile() { throw new DOMException('gone', 'NotFoundError'); } };
+  const deniedFolder = { kind: 'directory', name: 'Private', async *values() { throw new Error('Cannot read this directory'); } };
+  const root = directoryHandle('Results', [fileHandle(png('top.png')), directoryHandle('Sub', [broken, fileHandle(textFile()), fileHandle(png('nested.png'))]), deniedFolder]);
+  globalThis.showDirectoryPicker = async (options) => { requests.push(options); return root; };
+  try {
+    const result = await pickFolder();
+    assert.deepEqual(requests, [{ mode: 'read' }]);
+    assert.deepEqual(result.assets.map((asset) => asset.relativePath), ['Results/top.png', 'Results/Sub/nested.png']);
+    assert.ok(result.assets.every((asset) => asset.sourceKind === 'linked'));
+    assert.deepEqual(result.errors.map((error) => error.name), ['Results/Sub/missing.png', 'Results/Private']);
+    assert.equal(result.skipped, 1);
+    assert.equal((await refreshAsset(result.assets[1])).relativePath, 'Results/Sub/nested.png');
+  } finally { delete globalThis.showDirectoryPicker; }
+});
+
+test('folder picker absence, blocked environments, and cancellation have explicit fallback results', async () => {
+  assert.equal(await pickFolder(), null);
+  try {
+    globalThis.showDirectoryPicker = async () => { throw new DOMException('cancelled', 'AbortError'); };
+    assert.deepEqual(await pickFolder(), { assets: [], errors: [] });
+    globalThis.showDirectoryPicker = async () => { throw new DOMException('blocked', 'SecurityError'); };
+    assert.equal(await pickFolder(), null);
+    globalThis.showDirectoryPicker = async () => { throw new DOMException('denied', 'NotAllowedError'); };
+    assert.match((await pickFolder()).errors[0].message, /permission/);
+  } finally { delete globalThis.showDirectoryPicker; }
+});
+
+test('directory drops recurse across all readEntries batches and keep valid siblings after read errors', async () => {
+  const sub = directoryEntry('Sub', [
+    [fileEntry(png('one.png')), fileEntry(png('bad.png'), new Error('Unreadable image'))],
+    [fileEntry(png('two.png')), fileEntry(textFile())],
+    [],
+  ]);
+  const blocked = directoryEntry('Blocked', [new Error('Unreadable folder')]);
+  const root = directoryEntry('Results', [[sub, blocked], [fileEntry(png('top.png'))], []]);
+  const result = await importDroppedFiles({ files: [], items: [{ kind: 'file', webkitGetAsEntry: () => root, getAsFile: () => null }] });
+  assert.deepEqual(result.assets.map((asset) => asset.relativePath), ['Results/Sub/one.png', 'Results/Sub/two.png', 'Results/top.png']);
+  assert.deepEqual(result.errors.map((error) => error.name), ['Results/Sub/bad.png', 'Results/Blocked']);
+  assert.equal(result.skipped, 1);
+  assert.equal(root.reads, 3);
+  assert.equal(sub.reads, 3);
+});
+
+test('drop snapshots all entries, files, and handle promises synchronously before browser protection', async () => {
+  let accessible = true;
+  const calls = [];
+  const files = [png('a.png'), png('b.png')];
+  const check = (method, index, value) => {
+    assert.equal(accessible, true, `${method} must be called during drop`);
+    calls.push(`${method}:${index}`);
+    return value;
+  };
+  const transfer = {
+    get files() { assert.equal(accessible, true); return files; },
+    items: files.map((file, index) => ({
+      kind: 'file',
+      getAsFile: () => check('file', index, file),
+      webkitGetAsEntry: () => check('entry', index, fileEntry(file)),
+      getAsFileSystemHandle: () => check('handle', index, index ? Promise.reject(new Error('No handle access')) : Promise.resolve(null)),
+    })),
+  };
+  const pending = importDroppedFiles(transfer);
+  accessible = false;
+  assert.equal(calls.length, 6);
+  const result = await pending;
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.assets.map((asset) => asset.name), ['a.png', 'b.png']);
+  assert.ok(result.assets.every((asset) => !asset.relativePath));
+});
+
+test('drop handles support nested directories and linked images, with plain FileList fallback', async () => {
+  const root = directoryHandle('Native', [directoryHandle('Sub', [fileHandle(png())])]);
+  const native = await importDroppedFiles({ items: [{ kind: 'file', getAsFileSystemHandle: () => Promise.resolve(root) }] });
+  assert.equal(native.assets[0].relativePath, 'Native/Sub/panel.png');
+  assert.equal(native.assets[0].sourceKind, 'linked');
+  const plain = await importDroppedFiles({ files: [png('loose.png'), textFile()] });
+  assert.equal(plain.assets[0].name, 'loose.png');
+  assert.equal(plain.assets[0].relativePath, undefined);
+  assert.equal(plain.errors[0].name, 'notes.txt');
+});
+
+test('one decoded-image budget applies across every subfolder in a recursive import', async () => {
+  const OriginalImage = globalThis.Image;
+  globalThis.Image = class extends OriginalImage { naturalWidth = 4000; naturalHeight = 4000; };
+  const root = directoryHandle('Root', Array.from({ length: 5 }, (_, index) => directoryHandle(`Sub${index}`, [fileHandle(png())])));
+  try {
+    const result = await importDroppedFiles({ items: [{ kind: 'file', getAsFileSystemHandle: () => Promise.resolve(root) }] });
+    assert.equal(result.assets.length, 4);
+    assert.equal(result.errors[0].name, 'Root/Sub4/panel.png');
+    assert.match(result.errors[0].message, /64 million pixels/);
+  } finally { globalThis.Image = OriginalImage; }
+});
+
+test('replacing, refreshing, and relinking keep directory grouping while updating the filename', async () => {
+  const original = folderFile('old.png', 'Root/Sub/old.png');
+  const handle = fileHandle(png('new.png'));
+  const asset = (await importFiles([original], new Map([[original, handle]]))).assets[0];
+  assert.equal((await refreshAsset(asset)).relativePath, 'Root/Sub/new.png');
+  assert.equal((await replaceAsset(asset, png('replacement.png'))).relativePath, 'Root/Sub/replacement.png');
+  assert.equal((await replaceAsset(asset, folderFile('other.png', 'Elsewhere/other.png'))).relativePath, 'Elsewhere/other.png');
+  globalThis.showOpenFilePicker = async () => [handle];
+  try {
+    const linked = await linkAsset(asset);
+    assert.equal(linked.relativePath, 'Root/Sub/new.png');
+    assert.equal(linked.id, asset.id);
+  } finally { delete globalThis.showOpenFilePicker; }
 });

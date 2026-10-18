@@ -105,7 +105,10 @@
       <div class="panel-heading" data-window-handle><h2 id="assets-heading"><svg><use href="#i-image"/></svg>Assets</h2><span class="panel-heading-note">PROJECT</span></div>
       <section id="assets-panel" class="library-content" aria-labelledby="assets-heading">
         <button id="add-images" class="button upload-button"><svg><use href="#i-plus"/></svg>Add local images</button>
+        <button id="add-folders" class="button upload-button folder-upload-button"><svg><use href="#i-folder"/></svg>Add folders</button>
         <p class="library-caption">PNG · JPG · WEBP · SVG</p>
+        <p class="hint folder-import-hint">Includes subfolders. Click a preview or drag it onto the canvas.</p>
+        <p id="asset-import-status" class="hint asset-import-status" role="status" aria-live="polite" hidden></p>
         <div id="asset-list" class="asset-list"><div class="library-empty"><span class="empty-symbol"><svg><use href="#i-image"/></svg></span><p>Start with an image</p><span>Drop an image on the canvas,<br>or choose a local file.</span></div></div>
         <div class="starter-card"><span class="eyebrow">QUICK START</span><p>Start from an editable example</p><button id="demo-project" class="text-button">Load example<svg><use href="#i-arrow"/></svg></button></div>
       </section>
@@ -136,6 +139,7 @@
   <footer class="status-bar"><span class="status-light" aria-hidden="true"></span><span id="status" role="status" aria-live="polite">Ready</span><span class="status-meta">FIGURE EDITOR <span>·</span> LOCAL WORKSPACE</span></footer>
 
   <input id="file-input" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" multiple hidden>
+  <input id="folder-input" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" webkitdirectory multiple hidden>
   <input id="project-input" type="file" accept=".json,.figure.json" hidden>
   <input id="relink-input" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden>
 
