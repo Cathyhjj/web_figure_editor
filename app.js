@@ -3,6 +3,7 @@ import { createDeck, validateDeck, cloneDeck, currentSlide, slideProject, serial
 import { importFiles, pickImages, importFolderFiles, pickFolder, importDroppedFiles, linkAsset, refreshAsset, replaceAsset } from './assets.js';
 import { buildAssetTree } from './asset-tree.js';
 import { generateHTMLReport } from './report.js';
+import { exportPPTX, pptxLayout } from './pptx.js';
 import { initWindows } from './windows.js';
 
 const $ = id => document.getElementById(id);
@@ -288,20 +289,36 @@ $('new-project').onclick=()=>{if(dirty&&!confirm('Creating a new project will re
 $('open-project').onclick=()=>$('project-input').click();
 $('project-input').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>240*1024*1024)throw new Error('Project exceeds 240 MB. Split it into smaller projects.');const p=validateDeck(JSON.parse(await file.text()));if(dirty&&!confirm('Opening a project will replace the current local draft. Continue?'))return;replaceProject(p);status('Editable project opened. Use Link on an asset to reconnect its local file.');}catch(err){status('Could not open project: '+err.message,true);}finally{e.target.value='';}};
 $('source-manifest').onclick=()=>downloadBlob(new Blob([JSON.stringify(deckSourceManifest(project),null,2)],{type:'application/json'}),filename()+'.sources.json');
+let exporting=false;
 function exportInfo(){
- const format=$('export-format').value,report=format==='html',png=format==='png',dpi=Number($('export-dpi').value);
- $('export-title').textContent=report?'Export HTML report':'Export current slide';
- $('export-slide-name').textContent=report?`All ${project.slides.length} slide${project.slides.length===1?'':'s'} · ${project.name}`:`Slide ${project.slides.indexOf(slide())+1} of ${project.slides.length}: ${slide().name}`;
+ if(exporting)return;
+ const format=$('export-format').value,report=format==='html',ppt=format==='pptx',png=format==='png',dpi=Number($('export-dpi').value);
+ $('export-title').textContent=ppt?'Export as PPT':report?'Export HTML report':'Export current slide';
+ $('export-slide-name').textContent=report||ppt?`All ${project.slides.length} slide${project.slides.length===1?'':'s'} · ${project.name}`:`Slide ${project.slides.indexOf(slide())+1} of ${project.slides.length}: ${slide().name}`;
  $('export-dpi').disabled=!png;
+ $('export-submit').disabled=false;
+ if(ppt){
+  try{
+   const layout=pptxLayout(project);
+   $('export-info').textContent=`PowerPoint (.pptx) · ${Number(layout.widthInches.toFixed(2))} × ${Number(layout.heightInches.toFixed(2))} in. All slides, with editable text, shapes, and separate images. ${layout.mixedSizes?'Different canvas sizes are fitted proportionally and centered on the first slide’s page size. ':''}${layout.scale!==1?'The first canvas is scaled to fit PowerPoint’s size limits. ':''}Fonts are not embedded.`;
+  }catch(e){$('export-info').textContent=e.message;$('export-submit').disabled=true;}
+  return;
+ }
  $('export-info').textContent=report?'One self-contained HTML file with all slides and a contents list. Open it offline in a browser or print it. Text and shapes remain vector; images are embedded. The report is read-only, and fonts are not embedded.':png?`${Math.round(slide().canvas.width*dpi/96)} × ${Math.round(slide().canvas.height*dpi/96)} px · ${dpi} DPI. All content is rasterized with transparency preserved. Higher DPI does not add detail to source images.`:'SVG keeps editor text and shapes as vectors. Images, including imported SVGs, are embedded rasters. Fonts are not embedded; recipients need the same fonts installed.';
 }
 $('export-open').onclick=()=>{flushText();exportInfo();$('export-dialog').showModal();};
 $('export-format').onchange=exportInfo;$('export-dpi').onchange=exportInfo;$('export-cancel').onclick=()=>$('export-dialog').close();
+$('export-dialog').addEventListener('cancel',e=>{if(exporting)e.preventDefault();});
 $('export-submit').onclick=async()=>{
+ if(exporting)return;
+ exporting=true;
  const button=$('export-submit');button.disabled=true;button.textContent='Exporting…';
+ $('export-format').disabled=$('export-dpi').disabled=$('export-cancel').disabled=true;
  try{
   flushText();const format=$('export-format').value;let blob,exportName;
-  if(format==='html'){
+  if(format==='pptx'){
+   exportName=filename()+'.pptx';blob=await exportPPTX(project);
+  }else if(format==='html'){
    blob=new Blob([generateHTMLReport(project)],{type:'text/html;charset=utf-8'});exportName=filename()+'-report.html';
   }else{
    const p=slideProject(project);exportName=(project.slides.length>1?`${filename()}-slide-${project.slides.indexOf(slide())+1}`:filename())+'.'+format;
@@ -310,8 +327,8 @@ $('export-submit').onclick=async()=>{
   }
   if(blob.size>240*1024*1024)throw new Error('Export exceeds 240 MB. Use fewer slides or smaller source images.');
   downloadBlob(blob,exportName);$('export-dialog').close();
-  status(format==='html'?`HTML report exported with all ${project.slides.length} slides. Open the file offline; save your project to keep editing.`:`Current slide exported as ${format.toUpperCase()}. Save project to keep all slides editable.`);
- }catch(e){status('Export failed: '+e.message,true);}finally{button.disabled=false;button.textContent='Export file';}
+  status(format==='pptx'?`PowerPoint exported with all ${project.slides.length} slides. Text, shapes, and images can be edited in PowerPoint.`:format==='html'?`HTML report exported with all ${project.slides.length} slides. Open the file offline; save your project to keep editing.`:`Current slide exported as ${format.toUpperCase()}. Save project to keep all slides editable.`);
+ }catch(e){$('export-info').textContent='Export failed: '+e.message;status('Export failed: '+e.message,true);}finally{exporting=false;button.disabled=false;button.textContent='Export file';$('export-format').disabled=$('export-cancel').disabled=false;$('export-dpi').disabled=$('export-format').value!=='png';}
 };
 document.addEventListener('keydown',e=>{
  if(e.defaultPrevented)return;

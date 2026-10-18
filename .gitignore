@@ -13,6 +13,7 @@
 !/deck.js
 !/demo.js
 !/report.js
+!/pptx.js
 !/windows.js
 !/tests/
 /tests/*
@@ -21,6 +22,8 @@
 !/tests/browser.js
 !/tests/folders.html
 !/tests/folders.js
+!/tests/pptx.html
+!/tests/pptx-browser.js
 !/scripts/
 /scripts/*
 !/scripts/extract_pptx_example.py
