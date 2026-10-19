@@ -359,7 +359,7 @@ async function refresh(a){try{const updated=await refreshAsset(a);change(()=>{pr
 async function locate(a){
  if(locatingAsset)return;
  locatingAsset=true;for(const button of document.querySelectorAll('[data-action="locate"]'))button.disabled=true;
- status(`Locating ${a.name}… If prompted, select its original image file.`);
+ status(`Locating ${a.name}… Finding its source file.`);
  try{const result=await locateAsset(a);status(result==='cancelled'?'Locate cancelled.':`Asked Finder to show ${a.name}.`);}
  catch(error){status(error.message,true);}
  finally{locatingAsset=false;for(const button of document.querySelectorAll('[data-action="locate"]'))button.disabled=false;}

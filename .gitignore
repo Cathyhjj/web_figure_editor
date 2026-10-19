@@ -31,6 +31,7 @@
 /tests/*
 !/tests/*.test.mjs
 !/tests/test_server.py
+!/tests/test_locate_discovery.py
 !/tests/test_desktop_launcher.py
 !/tests/browser.html
 !/tests/browser.js

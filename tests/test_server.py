@@ -36,6 +36,8 @@ class LocalServerTests(unittest.TestCase):
         self.native = mock.patch.object(server.subprocess, "run")
         self.run = self.native.start()
         self.run.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+        self.discovery = mock.patch.object(server.Locator, "indexed_sources", return_value=[])
+        self.discover = self.discovery.start()
         self.quiet = mock.patch.object(server.Handler, "log_message")
         self.quiet.start()
 
@@ -45,6 +47,7 @@ class LocalServerTests(unittest.TestCase):
         self.local.server_close()
         self.quiet.stop()
         self.native.stop()
+        self.discovery.stop()
         self.platform.stop()
         self.temporary.cleanup()
 
@@ -118,62 +121,56 @@ class LocalServerTests(unittest.TestCase):
         self.assertEqual(self.request(path="/examples/")[0], 403)
         self.assertEqual(self.request(path="/alias.json")[0], 403)
 
-    def test_missing_foreign_or_mismatched_sources_use_picker_not_basename(self):
+    def test_missing_foreign_or_mismatched_sources_fail_without_native_picker(self):
         for change in ({"relativePath": "foreign/panel.png"}, {"fingerprint": "0" * 64}):
             with self.subTest(change=change):
                 self.run.reset_mock()
                 status, raw = self.locate({**self.asset, **change})
-                self.assertEqual((status, json.loads(raw)), (200, {"status": "cancelled"}))
-                self.run.assert_called_once()
-                self.assertEqual(self.run.call_args.args[0][:3], ["/usr/bin/osascript", "-e", server.CHOOSER_SCRIPT])
+                self.assertEqual(status, 404)
+                self.assertIn("error", json.loads(raw))
+                self.run.assert_not_called()
         self.run.reset_mock()
-        self.assertEqual(self.locate({"id": "no-path", "name": "panel.png"})[0], 200)
-        self.assertEqual(self.run.call_args.args[0][0], "/usr/bin/osascript")
+        self.assertEqual(self.locate({"id": "no-path", "name": "panel.png"})[0], 404)
+        self.run.assert_not_called()
 
-    def test_explicit_picker_result_is_revealed_and_persisted_without_path_response(self):
+    def test_discovered_image_is_revealed_and_persisted_without_path_response(self):
         asset = {"id": "outside", "name": 'image "; do shell script "bad.png', "linkToken": "link-1"}
-        self.run.side_effect = [subprocess.CompletedProcess([], 0, stdout=str(self.image) + "\n"),
-                                subprocess.CompletedProcess([], 0)]
+        self.discover.return_value = [self.image.resolve()]
         status, raw = self.locate(asset)
         self.assertEqual((status, json.loads(raw)), (200, {"status": "revealed"}))
-        first, second = self.run.call_args_list
-        self.assertEqual(first.args[0][2], server.CHOOSER_SCRIPT)
-        self.assertIn(asset["name"], first.args[0][3])
-        self.assertEqual(second.args[0], ["/usr/bin/open", "-R", str(self.image.resolve())])
+        self.run.assert_called_once_with(["/usr/bin/open", "-R", str(self.image.resolve())],
+                                         capture_output=True, check=True, timeout=10)
         self.assertNotIn(str(self.root).encode(), raw)
         self.assertTrue((self.root / ".local-locations.json").is_file())
         self.assertEqual((self.root / ".local-locations.json").stat().st_mode & 0o777, 0o600)
         self.local.locator = server.Locator(self.root)
         self.run.reset_mock()
-        self.run.side_effect = None
+        self.discover.return_value = []
         self.assertEqual(self.locate(asset)[0], 200)
         self.run.assert_called_once()
         self.assertEqual(self.run.call_args.args[0][0], "/usr/bin/open")
         self.run.reset_mock()
-        self.assertEqual(self.locate({**asset, "linkToken": "link-2"})[0], 200)
-        self.assertEqual(self.run.call_args.args[0][0], "/usr/bin/osascript")
+        self.assertEqual(self.locate({**asset, "linkToken": "link-2"})[0], 404)
+        self.run.assert_not_called()
         self.image.unlink()
         self.run.reset_mock()
-        self.assertEqual(json.loads(self.locate(asset)[1]), {"status": "cancelled"})
-        self.assertEqual(self.run.call_args.args[0][0], "/usr/bin/osascript")
+        self.assertEqual(self.locate(asset)[0], 404)
+        self.run.assert_not_called()
 
-    def test_picker_cancel_timeout_and_invalid_selection(self):
+    def test_missing_and_ambiguous_sources_return_errors_without_native_dialog(self):
         asset = {"id": "unknown", "name": "unknown.png"}
-        self.assertEqual(json.loads(self.locate(asset)[1]), {"status": "cancelled"})
-        self.run.side_effect = subprocess.TimeoutExpired("osascript", 120)
-        self.assertEqual(self.locate(asset)[0], 504)
-        self.run.side_effect = None
-        self.run.return_value = subprocess.CompletedProcess([], 0, stdout=str(self.root / "missing.png") + "\n")
-        self.assertEqual(self.locate(asset)[0], 400)
-        self.run.return_value = subprocess.CompletedProcess([], 0, stdout=str(self.root / "index.html") + "\n")
-        self.assertEqual(self.locate(asset)[0], 400)
+        self.assertEqual(self.locate(asset)[0], 404)
+        second = self.root / "unknown.png"
+        second.write_bytes(b"second image")
+        self.discover.return_value = [self.image.resolve(), second.resolve()]
+        self.assertEqual(self.locate(asset)[0], 409)
+        self.run.assert_not_called()
 
-    def test_oversized_source_is_not_automatically_hashed_or_revealed(self):
+    def test_oversized_unindexed_source_is_not_automatically_hashed_or_revealed(self):
         with self.image.open("wb") as stream:
             stream.truncate(server.MAX_SOURCE_BYTES + 1)
-        self.assertEqual(json.loads(self.locate()[1]), {"status": "cancelled"})
-        self.run.assert_called_once()
-        self.assertEqual(self.run.call_args.args[0][0], "/usr/bin/osascript")
+        self.assertEqual(self.locate()[0], 404)
+        self.run.assert_not_called()
 
     def test_busy_unsupported_and_native_failure(self):
         self.local.locator.lock.acquire()

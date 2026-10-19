@@ -9,24 +9,18 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import secrets
+import stat
 import subprocess
 import sys
 import tempfile
 import threading
+import unicodedata
 from urllib.parse import unquote, urlsplit
 
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".tif", ".tiff", ".bmp", ".avif", ".heic", ".heif", ".ico"}
 MAX_BODY = 8192
 MAX_SOURCE_BYTES = 25 * 1024 * 1024  # Same per-image limit as the browser importer.
-CHOOSER_SCRIPT = '''on run argv
-    try
-        set selectedFile to choose file with prompt (item 1 of argv) of type {"public.image"} without invisibles
-        return POSIX path of selectedFile
-    on error number -128
-        return ""
-    end try
-end run'''
 
 
 class LocateError(Exception):
@@ -104,6 +98,10 @@ class Locator:
         image = self.image_file(resolved)
         if image is None:
             return None
+        return image if self.matches_fingerprint(image, asset["fingerprint"]) else None
+
+    @staticmethod
+    def matches_fingerprint(image, fingerprint):
         try:
             if image.stat().st_size > MAX_SOURCE_BYTES:
                 return None
@@ -118,26 +116,70 @@ class Locator:
                     remaining -= len(block)
                 if not remaining:
                     return None
-            return image if secrets.compare_digest(digest.hexdigest(), asset["fingerprint"]) else None
+            return secrets.compare_digest(digest.hexdigest(), fingerprint)
         except OSError:
             return None
 
-    def choose(self, name):
-        prompt = "Choose the original image for “" + name + "” to show it in Finder."
+    def indexed_sources(self, asset):
+        """Find bounded filename/path candidates without reading their contents."""
+        name = asset["name"]
+        if "/" in name or "\\" in name or Path(name).suffix.lower() not in IMAGE_EXTENSIONS:
+            return []
         try:
-            result = subprocess.run(["/usr/bin/osascript", "-e", CHOOSER_SCRIPT, prompt],
-                                    capture_output=True, text=True, check=True, timeout=120)
-        except subprocess.TimeoutExpired:
-            raise LocateError(504, "The file picker timed out. Try Locate again.")
-        except (OSError, subprocess.CalledProcessError):
-            raise LocateError(500, "The macOS file picker could not be opened.")
-        chosen = result.stdout.rstrip("\r\n")
-        if not chosen:
+            result = subprocess.run(["/usr/bin/mdfind", "-0", "-onlyin", str(Path.home()), "-name", name],
+                                    capture_output=True, text=True, check=True, timeout=3)
+        except (OSError, subprocess.SubprocessError, UnicodeError):
+            return []
+        # Never establish uniqueness from truncated results or an arbitrary subset.
+        if len(result.stdout) > 128 * 1024:
+            return []
+        expected = PurePosixPath(asset.get("relativePath") or name).parts
+        normalized = lambda parts: tuple(unicodedata.normalize("NFC", part) for part in parts)
+        expected = normalized(expected)
+        candidates = set()
+        for raw in result.stdout.split("\0"):
+            if not raw:
+                continue
+            path = Path(raw)
+            if normalized((path.name,)) != normalized((name,)) or normalized(path.parts[-len(expected):]) != expected:
+                continue
+            image = self.image_file(path)
+            if image is not None:
+                candidates.add(image)
+                if len(candidates) > 16:
+                    return []
+        return sorted(candidates)
+
+    def discover_source(self, asset):
+        candidates = self.indexed_sources(asset)
+        # Locate reveals the source's current file, including edits made since
+        # import. A unique exact filename/path match need not have old bytes.
+        if len(candidates) == 1:
+            return candidates[0]
+        if not candidates:
             return None
-        image = self.image_file(chosen)
-        if image is None:
-            raise LocateError(400, "Choose an existing image file.")
-        return image
+        matches = []
+        remaining = MAX_SOURCE_BYTES
+        if asset.get("fingerprint"):
+            for image in candidates:
+                try:
+                    metadata = image.stat()
+                except OSError:
+                    break
+                # Do not hydrate cloud files, or hash an unbounded set of copies.
+                if (getattr(metadata, "st_flags", 0) & getattr(stat, "SF_DATALESS", 0)
+                        or metadata.st_size > remaining):
+                    break
+                remaining -= metadata.st_size
+                match = self.matches_fingerprint(image, asset["fingerprint"])
+                if match is None:
+                    break
+                if match:
+                    matches.append(image)
+            else:
+                if len(matches) == 1:
+                    return matches[0]
+        raise LocateError(409, "Several files match this asset. Its original location is ambiguous; no file was opened.")
 
     def remember(self, key, path):
         self.locations[key] = str(path)
@@ -170,16 +212,17 @@ class Locator:
             image = self.image_file(remembered) if remembered else None
             if image is None:
                 image = self.source_path(asset)
-            picked = image is None
-            if picked:
-                image = self.choose(asset["name"])
-                if image is None:
-                    return {"status": "cancelled"}
+            discovered = False
+            if image is None:
+                image = self.discover_source(asset)
+                discovered = image is not None
+            if image is None:
+                raise LocateError(404, "The source file could not be found on this Mac. It may have moved, been deleted, or not been indexed by Spotlight.")
             try:
                 subprocess.run(["/usr/bin/open", "-R", str(image)], capture_output=True, check=True, timeout=10)
             except (OSError, subprocess.SubprocessError):
                 raise LocateError(500, "Finder could not reveal the image. Try Locate again.")
-            if picked:
+            if discovered:
                 self.remember(key, image)
             return {"status": "revealed"}
         finally:
