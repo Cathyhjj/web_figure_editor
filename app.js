@@ -1,7 +1,8 @@
 import { uid, projectToSVG, exportPNG, downloadBlob } from './core.js';
 import { createDeck, validateDeck, cloneDeck, currentSlide, slideProject, serializeDeck, deckSourceManifest, addSlide, duplicateSlide, deleteSlide } from './deck.js';
-import { importFiles, pickImages, importFolderFiles, pickFolder, importDroppedFiles, linkAsset, refreshAsset, replaceAsset } from './assets.js';
+import { importFiles, pickImages, importFolderFiles, pickFolder, importDroppedFiles, linkAsset, refreshAsset, replaceAsset } from './assets.js?v=locate-1';
 import { buildAssetTree } from './asset-tree.js';
+import { locateAsset } from './locate.js';
 import { generateHTMLReport } from './report.js';
 import { exportPPTX, pptxLayout } from './pptx.js';
 import { initWindows } from './windows.js';
@@ -12,6 +13,7 @@ let project = createDeck(), selected = new Set(), zoom = .75, undoStack = [], re
 let gesture = null, dirty = false, relinkId = null, draftTimer, draftDb, pendingText = null, lastPointerItem = null, lastTap = null;
 const collapsedAssetFolders = new Set();
 let selectedAssetIds = new Set();
+let locatingAsset = false;
 let libraryImports = 0;
 let libraryImportNotice = { hidden: true, text: '', error: false };
 const clone = cloneDeck;
@@ -106,6 +108,7 @@ function renderAssets(){
   card.innerHTML=`<button class="asset-preview" data-action="place" title="Add to canvas" aria-label="Place ${escapeHTML(a.name)} on canvas"><img draggable="false" loading="lazy" decoding="async" class="asset-thumb" alt="${escapeHTML(a.name)}" src="${a.dataUrl}"></button><div class="asset-name" title="${escapeHTML(a.relativePath||a.name)}">${escapeHTML(a.name)}</div><div class="asset-meta">${a.width} × ${a.height} · ${a.sourceKind==='linked'?(a.linkPersistence==='session'?'Session link + copy':'Local link + copy'):'Portable copy'}${a.originalMime==='image/svg+xml'?' · Rasterized SVG':''}</div><div class="asset-actions"><button data-action="place">Place</button><button data-action="relink">Link</button>${a.sourceKind==='linked'?'<button data-action="refresh">Refresh</button>':''}</div>`;
   card.setAttribute('role','group');
   const selectionLabel=document.createElement('div');selectionLabel.className='asset-selection-label';selectionLabel.textContent='Selected on canvas';card.append(selectionLabel);
+  const locateButton=document.createElement('button');locateButton.type='button';locateButton.dataset.action='locate';locateButton.textContent='Locate';locateButton.title='Show source image in Finder';locateButton.setAttribute('aria-label',`Show ${a.name} in Finder`);locateButton.disabled=locatingAsset;card.querySelector('.asset-actions').insertBefore(locateButton,card.querySelector('[data-action="refresh"]'));
   let suppressClick=false;
   card.onpointerdown=e=>{
    if(e.button!==0||e.target.closest('.asset-actions'))return;
@@ -114,7 +117,7 @@ function renderAssets(){
    const end=ev=>{document.removeEventListener('pointermove',move);document.removeEventListener('pointerup',end);document.body.style.cursor='';if(!moved)return;suppressClick=true;const r=$('workspace').getBoundingClientRect();if(ev.clientX>=r.left&&ev.clientX<=r.right&&ev.clientY>=r.top&&ev.clientY<=r.bottom){const p=point(ev);placeAsset(a,{x:Math.max(0,p.x),y:Math.max(0,p.y)});}setTimeout(()=>suppressClick=false,0);};
    document.addEventListener('pointermove',move);document.addEventListener('pointerup',end,{once:true});
   };
-  card.onclick=async e=>{if(suppressClick)return;const action=e.target.closest('[data-action]')?.dataset.action;if(action==='place')placeAsset(a);if(action==='relink')await relink(a);if(action==='refresh')await refresh(a);};return card;
+  card.onclick=async e=>{if(suppressClick)return;const action=e.target.closest('[data-action]')?.dataset.action;if(action==='place')placeAsset(a);if(action==='relink')await relink(a);if(action==='refresh')await refresh(a);if(action==='locate')await locate(a);};return card;
  }
  function appendFolderContents(node,container){
   for(const folder of node.folders){
@@ -250,6 +253,14 @@ function renderLibraryImportNotice(){
 }
 async function relink(a){try{const updated=await linkAsset(a);if(updated)change(()=>{project.assets=project.assets.map(x=>x.id===a.id?updated:x);});else{relinkId=a.id;$('relink-input').click();}status(updated?'Local file linked and embedded copy updated.':'Select the local file to link.');}catch(e){if(e.name!=='AbortError')status(e.message,true);}}
 async function refresh(a){try{const updated=await refreshAsset(a);change(()=>{project.assets=project.assets.map(x=>x.id===a.id?updated:x);});status('Embedded copy updated from the authorized local file.');}catch(e){status(e.message,true);}}
+async function locate(a){
+ if(locatingAsset)return;
+ locatingAsset=true;for(const button of document.querySelectorAll('[data-action="locate"]'))button.disabled=true;
+ status(`Locating ${a.name}… If prompted, select its original image file.`);
+ try{const result=await locateAsset(a);status(result==='cancelled'?'Locate cancelled.':`Asked Finder to show ${a.name}.`);}
+ catch(error){status(error.message,true);}
+ finally{locatingAsset=false;for(const button of document.querySelectorAll('[data-action="locate"]'))button.disabled=false;}
+}
 $('add-images').onclick=async()=>{const target=importTarget();try{const result=await pickImages();if(result===null)$('file-input').click();else await importResult(result,undefined,target);}catch(e){status(e.message,true);}};
 $('file-input').onchange=async e=>{const target=importTarget();await importResult(await importFiles([...e.target.files]),undefined,target);e.target.value='';};
 $('add-folders').onclick=async()=>{

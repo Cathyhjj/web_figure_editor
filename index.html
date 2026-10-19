@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <meta name="description" content="Arrange images, add annotations, and export paper figures locally.">
   <title>Figure Editor · Paper Figure Workspace</title>
-  <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./style.css?v=compact-actions-1">
 </head>
 <body class="drx-ui" data-drx-theme="light">
   <svg class="icon-definitions" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -148,6 +148,6 @@
     <div class="dialog-body"><div class="field-row"><label class="field"><span>File format</span><select id="export-format"><option value="png">PNG · High-resolution image</option><option value="svg">SVG · Vector + raster</option><option value="pptx">PPT · Editable PowerPoint · All slides</option><option value="html">HTML report · All slides</option></select></label><label class="field"><span>PNG resolution</span><select id="export-dpi"><option value="150">150 DPI</option><option value="300" selected>300 DPI</option><option value="600">600 DPI</option></select></label></div><div id="export-info" class="export-info" aria-live="polite"></div><div class="format-note"><p><strong>PNG</strong>: All content is rasterized.</p><p><strong>SVG</strong>: Editor text, rectangles, and lines remain vector. Images and imported SVGs are rasterized. Fonts are not embedded.</p><p><strong>PPT (.pptx)</strong>: All slides with editable text, rectangles, lines, and separate images. Different canvas sizes are fitted to the first slide. Fonts are not embedded; text may render differently if a font is missing.</p><p><strong>HTML report</strong>: One offline file containing all slides. Text and shapes remain vector, images are embedded, and fonts are not embedded. The report is read-only.</p><p>Save an editable project too if you plan to make changes later.</p></div></div>
     <div class="dialog-actions"><button id="export-cancel" class="button">Cancel</button><button id="export-submit" class="button primary"><svg><use href="#i-export"/></svg>Export file</button></div>
   </dialog>
-  <script type="module" src="./app.js"></script>
+  <script type="module" src="./app.js?v=locate-1"></script>
 </body>
 </html>
