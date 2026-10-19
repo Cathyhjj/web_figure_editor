@@ -31,6 +31,7 @@
 /tests/*
 !/tests/*.test.mjs
 !/tests/test_server.py
+!/tests/test_desktop_launcher.py
 !/tests/browser.html
 !/tests/browser.js
 !/tests/folders.html
@@ -57,6 +58,9 @@
 /scripts/*
 !/scripts/extract_pptx_example.py
 !/scripts/verify_pptx_example.py
+!/scripts/desktop_launcher.py
+!/scripts/create_desktop_app.py
+!/scripts/macos_icon.swift
 !/assets/
 /assets/*
 !/assets/fonts/
