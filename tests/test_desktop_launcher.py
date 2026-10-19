@@ -27,6 +27,7 @@ class DesktopLauncherTests(unittest.TestCase):
         self.root = Path(self.temporary.name).resolve()
         (self.root / "scripts").mkdir()
         shutil.copy2(REPO / "server.py", self.root / "server.py")
+        shutil.copy2(REPO / "pdf_text.py", self.root / "pdf_text.py")
         shutil.copy2(REPO / "scripts" / "desktop_launcher.py", self.root / "scripts" / "desktop_launcher.py")
         (self.root / "index.html").write_text("live editor", encoding="utf-8")
         (self.root / "app.js").write_text("const live = 1;", encoding="utf-8")

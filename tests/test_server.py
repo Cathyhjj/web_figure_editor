@@ -69,7 +69,8 @@ class LocalServerTests(unittest.TestCase):
         status, raw = self.request()
         data = json.loads(raw)
         self.assertEqual(status, 200)
-        self.assertEqual(data, {"app": "figure-editor-local", "version": 1, "locate": True, "token": self.local.token})
+        self.assertEqual(data, {"app": "figure-editor-local", "version": 1, "locate": True,
+                            "pdfTextOutlines": False, "token": self.local.token})
         self.assertEqual(self.request(path="/")[1], b"Figure Editor")
         self.assertEqual(self.request(path="/tests/browser.html")[1], b"Browser tests")
         self.assertEqual(self.request(path="/examples/panel.png")[1], self.image.read_bytes())

@@ -26,11 +26,15 @@
 !/demo.js
 !/report.js
 !/pptx.js
+!/pdf.js
+!/pdf_text.py
 !/windows.js
 !/tests/
 /tests/*
 !/tests/*.test.mjs
 !/tests/test_server.py
+!/tests/test_pdf_text.py
+!/tests/test_pdf_api.py
 !/tests/test_locate_discovery.py
 !/tests/test_desktop_launcher.py
 !/tests/browser.html
@@ -39,6 +43,8 @@
 !/tests/folders.js
 !/tests/pptx.html
 !/tests/pptx-browser.js
+!/tests/pdf.html
+!/tests/pdf-browser.js
 !/tests/locate.html
 !/tests/locate-browser.js
 !/tests/clipboard.html
@@ -62,6 +68,7 @@
 !/scripts/desktop_launcher.py
 !/scripts/create_desktop_app.py
 !/scripts/macos_icon.swift
+!/scripts/pdf_text.swift
 !/assets/
 /assets/*
 !/assets/fonts/

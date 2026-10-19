@@ -285,21 +285,22 @@ async function withPNGResolution(blob, dpi) {
   return new Blob(parts, { type: 'image/png' });
 }
 
-/** Rasterize at the requested physical DPI and write a matching PNG pHYs chunk. */
-export async function exportPNG(input, dpi = 300) {
+/** Render once at physical DPI; release the canvas and SVG URL after the consumer finishes. */
+export async function withRasterCanvas(input, dpi, consume, format = 'PNG') {
   const project = validateProject(input);
   number(dpi, 'export DPI', 1, 2400);
   const width = Math.max(1, Math.round(project.canvas.width * dpi / 96));
   const height = Math.max(1, Math.round(project.canvas.height * dpi / 96));
-  if (width > 32767 || height > 32767 || width * height > 100000000) throw new Error('PNG export exceeds 100 megapixels or 32767 pixels per side. Reduce canvas size or DPI.');
-  if (typeof document === 'undefined' || typeof Image === 'undefined') throw new Error('PNG export requires a browser.');
+  if (width > 32767 || height > 32767 || width * height > 100000000) throw new Error(`${format} export exceeds 100 megapixels or 32767 pixels per side. Reduce canvas size or DPI.`);
+  if (typeof document === 'undefined' || typeof Image === 'undefined') throw new Error(`${format} export requires a browser.`);
   if (document.fonts?.ready) await document.fonts.ready;
   const svgBlob = new Blob([svgFromCanonical(project)], { type: 'image/svg+xml;charset=utf-8' });
   const url = URL.createObjectURL(svgBlob);
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
+  let canvas;
   try {
+    canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
     const image = await new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => resolve(img);
@@ -311,13 +312,19 @@ export async function exportPNG(input, dpi = 300) {
     context.imageSmoothingEnabled = true;
     context.imageSmoothingQuality = 'high';
     context.drawImage(image, 0, 0, width, height);
-    const blob = await new Promise((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error('The browser could not encode this PNG. Reduce export size.')), 'image/png'));
-    return await withPNGResolution(blob, dpi);
+    return await consume(canvas, context, project);
   } finally {
     URL.revokeObjectURL(url);
-    canvas.width = 0;
-    canvas.height = 0;
+    if (canvas) { canvas.width = 0; canvas.height = 0; }
   }
+}
+
+/** Rasterize at the requested physical DPI and write a matching PNG pHYs chunk. */
+export async function exportPNG(input, dpi = 300) {
+  return withRasterCanvas(input, dpi, async canvas => {
+    const blob = await new Promise((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error('The browser could not encode this PNG. Reduce export size.')), 'image/png'));
+    return withPNGResolution(blob, dpi);
+  });
 }
 
 export function downloadBlob(blob, filename) {

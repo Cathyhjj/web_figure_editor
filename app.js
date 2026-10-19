@@ -6,6 +6,7 @@ import { buildAssetTree } from './asset-tree.js';
 import { locateAsset } from './locate.js';
 import { generateHTMLReport } from './report.js';
 import { exportPPTX, pptxLayout } from './pptx.js';
+import { exportPDF } from './pdf.js';
 import { initWindows } from './windows.js';
 import { imageShadowSVG } from './shadow.js';
 import { shadowEditorMarkup, bindShadowEditor } from './shadow-editor.js';
@@ -515,10 +516,11 @@ $('source-manifest').onclick=()=>downloadBlob(new Blob([JSON.stringify(deckSourc
 let exporting=false;
 function exportInfo(){
  if(exporting)return;
- const format=$('export-format').value,report=format==='html',ppt=format==='pptx',png=format==='png',dpi=Number($('export-dpi').value);
+ const format=$('export-format').value,report=format==='html',ppt=format==='pptx',png=format==='png',pdf=format==='pdf',dpi=Number($('export-dpi').value);
  $('export-title').textContent=ppt?'Export as PPT':report?'Export HTML report':'Export current slide';
  $('export-slide-name').textContent=report||ppt?`All ${project.slides.length} slide${project.slides.length===1?'':'s'} · ${project.name}`:`Slide ${project.slides.indexOf(slide())+1} of ${project.slides.length}: ${slide().name}`;
- $('export-dpi').disabled=!png;
+ $('export-dpi').disabled=!(png||pdf);
+ $('export-dpi-label').textContent=pdf?'PDF shadow resolution':'PNG resolution';
  $('export-submit').disabled=false;
  if(ppt){
   try{
@@ -527,7 +529,7 @@ function exportInfo(){
   }catch(e){$('export-info').textContent=e.message;$('export-submit').disabled=true;}
   return;
  }
- $('export-info').textContent=report?'One self-contained HTML file with all slides and a contents list. Open it offline in a browser or print it. Text and shapes remain vector; images are embedded. The report is read-only, and fonts are not embedded.':png?`${Math.round(slide().canvas.width*dpi/96)} × ${Math.round(slide().canvas.height*dpi/96)} px · ${dpi} DPI. All content is rasterized with transparency preserved. Higher DPI does not add detail to source images.`:'SVG keeps editor text and shapes as vectors. Images, including imported SVGs, are embedded rasters. Fonts are not embedded; recipients need the same fonts installed.';
+ $('export-info').textContent=report?'One self-contained HTML file with all slides and a contents list. Open it offline in a browser or print it. Text and shapes remain vector; images are embedded. The report is read-only, and fonts are not embedded.':pdf?`Single-page PDF · ${Number((slide().canvas.width*25.4/96).toFixed(2))} × ${Number((slide().canvas.height*25.4/96).toFixed(2))} mm. Text and shapes remain vector; text becomes outlines and is not searchable. Images remain raster. ${dpi} DPI applies only to images with shadows. Text outlines require the local macOS server.`:png?`${Math.round(slide().canvas.width*dpi/96)} × ${Math.round(slide().canvas.height*dpi/96)} px · ${dpi} DPI. All content is rasterized with transparency preserved. Higher DPI does not add detail to source images.`:'SVG keeps editor text and shapes as vectors. Images, including imported SVGs, are embedded rasters. Fonts are not embedded; recipients need the same fonts installed.';
 }
 $('export-open').onclick=()=>{flushText();exportInfo();$('export-dialog').showModal();};
 $('export-format').onchange=exportInfo;$('export-dpi').onchange=exportInfo;$('export-cancel').onclick=()=>$('export-dialog').close();
@@ -546,12 +548,12 @@ $('export-submit').onclick=async()=>{
   }else{
    const p=slideProject(project);exportName=(project.slides.length>1?`${filename()}-slide-${project.slides.indexOf(slide())+1}`:filename())+'.'+format;
    const usedAssets=new Set(p.items.filter(i=>i.type==='image').map(i=>i.assetId));p.assets=p.assets.filter(a=>usedAssets.has(a.id));
-   blob=format==='png'?await exportPNG(p,Number($('export-dpi').value)):new Blob([projectToSVG(p)],{type:'image/svg+xml'});
+   blob=format==='png'?await exportPNG(p,Number($('export-dpi').value)):format==='pdf'?await exportPDF(p,Number($('export-dpi').value)):new Blob([projectToSVG(p)],{type:'image/svg+xml'});
   }
   if(blob.size>240*1024*1024)throw new Error('Export exceeds 240 MB. Use fewer slides or smaller source images.');
   downloadBlob(blob,exportName);$('export-dialog').close();
   status(format==='pptx'?`PowerPoint exported with all ${project.slides.length} slides. Text, shapes, and images can be edited in PowerPoint.`:format==='html'?`HTML report exported with all ${project.slides.length} slides. Open the file offline; save your project to keep editing.`:`Current slide exported as ${format.toUpperCase()}. Save project to keep all slides editable.`);
- }catch(e){$('export-info').textContent='Export failed: '+e.message;status('Export failed: '+e.message,true);}finally{exporting=false;button.disabled=false;button.textContent='Export file';$('export-format').disabled=$('export-cancel').disabled=false;$('export-dpi').disabled=$('export-format').value!=='png';}
+ }catch(e){$('export-info').textContent='Export failed: '+e.message;status('Export failed: '+e.message,true);}finally{exporting=false;button.disabled=false;button.textContent='Export file';$('export-format').disabled=$('export-cancel').disabled=false;$('export-dpi').disabled=!['png','pdf'].includes($('export-format').value);}
 };
 const editingInput = target => /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName)||target?.isContentEditable;
 const nativeClipboard = e => e.defaultPrevented||editingInput(e.target)||$('export-dialog').open||cropEditor.open;

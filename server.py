@@ -16,6 +16,7 @@ import tempfile
 import threading
 import unicodedata
 from urllib.parse import unquote, urlsplit
+from pdf_text import MAX_PDF_TEXT_BODY, PdfTextError, PdfTextOutliner
 
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".tif", ".tiff", ".bmp", ".avif", ".heic", ".heif", ".ico"}
@@ -280,7 +281,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             path = urlsplit(self.path).path
             if path == "/api/local":
                 self.json_response(200, {"app": "figure-editor-local", "version": 1,
-                                         "locate": sys.platform == "darwin", "token": self.server.token})
+                                         "locate": sys.platform == "darwin",
+                                         "pdfTextOutlines": self.server.pdf_text.available,
+                                         "token": self.server.token})
             elif path.startswith("/api/"):
                 self.json_response(404, {"error": "Unknown local API."})
             elif not self.static_allowed():
@@ -309,26 +312,36 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         try:
             self.trusted_request(require_origin=True)
-            if urlsplit(self.path).path != "/api/locate":
+            path = urlsplit(self.path).path
+            if path not in {"/api/locate", "/api/pdf-text"}:
                 raise LocateError(404, "Unknown local API.")
+            pdf_text = path == "/api/pdf-text"
+            label = "PDF text" if pdf_text else "Locate"
+            limit = MAX_PDF_TEXT_BODY if pdf_text else MAX_BODY
             tokens = self.headers.get_all("X-Figure-Token", [])
             if len(tokens) != 1 or not secrets.compare_digest(tokens[0].encode(), self.server.token.encode()):
-                raise LocateError(403, "Reload the local Figure Editor before using Locate.")
+                raise LocateError(403, "Reload the local Figure Editor before using " + label + ".")
             if self.headers.get_content_type() != "application/json" or self.headers.get("Transfer-Encoding"):
-                raise LocateError(400, "Send a JSON asset descriptor.")
+                raise LocateError(400, "Send JSON text items for PDF outlining." if pdf_text else "Send a JSON asset descriptor.")
             lengths = self.headers.get_all("Content-Length", [])
-            if (len(lengths) != 1 or len(lengths[0]) > 5 or not lengths[0].isascii()
-                    or not lengths[0].isdigit() or not 0 < int(lengths[0]) <= MAX_BODY):
-                raise LocateError(413, "The Locate request is too large or missing its length.")
+            if (len(lengths) != 1 or len(lengths[0]) > len(str(limit)) or not lengths[0].isascii()
+                    or not lengths[0].isdigit() or not 0 < int(lengths[0]) <= limit):
+                raise LocateError(413, "The " + label + " request is too large or missing its length.")
             try:
-                data = json.loads(self.rfile.read(int(lengths[0])))
-            except (OSError, ValueError):
-                raise LocateError(400, "The Locate request is not valid JSON.")
-            if not isinstance(data, dict):
-                raise LocateError(400, "An asset descriptor is required.")
-            asset = descriptor(data.get("asset"))
-            self.json_response(200, self.server.locator.locate(asset))
-        except LocateError as error:
+                body = self.rfile.read(int(lengths[0]))
+                if len(body) != int(lengths[0]):
+                    raise ValueError("incomplete request")
+                data = json.loads(body)
+            except (OSError, ValueError, RecursionError):
+                raise LocateError(400, "The " + label + " request is not valid JSON.")
+            if pdf_text:
+                result = self.server.pdf_text.outline(data)
+            else:
+                if not isinstance(data, dict):
+                    raise LocateError(400, "An asset descriptor is required.")
+                result = self.server.locator.locate(descriptor(data.get("asset")))
+            self.json_response(200, result)
+        except (LocateError, PdfTextError) as error:
             self.json_response(error.status, {"error": str(error)})
 
 
@@ -340,6 +353,7 @@ def create_server(root, port=8766):
     server.root = root
     server.token = secrets.token_urlsafe(32)
     server.locator = Locator(root)
+    server.pdf_text = PdfTextOutliner(root)
     return server
 
 

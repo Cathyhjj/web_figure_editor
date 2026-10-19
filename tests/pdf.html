@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Figure Editor PDF checks</title>
+<style>body{font:15px system-ui;max-width:1200px;margin:32px auto;padding:0 20px}p{line-height:1.6}button{padding:12px 20px}li{padding:6px 0}li[data-pass="false"]{color:#a02034}iframe{width:100%;height:760px;border:1px solid #d5cbdc;margin-top:20px}#samples a{margin-right:20px}#samples img{display:block;max-width:384px;margin-top:16px;border:1px solid #d5cbdc;background:repeating-conic-gradient(#eee 0% 25%,white 0% 50%) 50%/16px 16px}</style>
+<h1>Figure Editor PDF checks</h1>
+<p>Run on <code>http://127.0.0.1:18766/tests/pdf.html</code> with the updated macOS <code>server.py</code> on a separate test port; vector text requires its local font-outline service. These checks replace only this test origin’s draft, use generated projects, and capture downloads without saving them. The main sample contains only the active second slide, with vector text and shapes.</p>
+<button id="run" type="button">Run PDF checks</button>
+<ol id="results"></ol><div id="samples"></div><div id="editor-host"></div>
+<script type="module" src="./pdf-browser.js"></script>
+</html>
