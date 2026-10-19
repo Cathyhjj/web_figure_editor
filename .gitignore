@@ -12,6 +12,8 @@
 !/assets.js
 !/asset-tree.js
 !/locate.js
+!/clipboard.js
+!/clipboard-image.js
 !/core.js
 !/shadow.js
 !/shadow-editor.js
@@ -35,6 +37,8 @@
 !/tests/pptx-browser.js
 !/tests/locate.html
 !/tests/locate-browser.js
+!/tests/clipboard.html
+!/tests/clipboard-browser.js
 !/tests/shadow.html
 !/tests/shadow-browser.js
 !/tests/crop.html

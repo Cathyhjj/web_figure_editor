@@ -1,5 +1,7 @@
 import { createDeck, validateDeck, slideProject } from '../deck.js';
 import { exportPNG, projectToSVG } from '../core.js';
+import { createSelection, decodeSelection } from '../clipboard.js';
+import { selectionToPNG } from '../clipboard-image.js';
 import { generateHTMLReport } from '../report.js';
 
 const checks = [];
@@ -90,7 +92,20 @@ function closeColor(actual, expected, tolerance = 4) {
   return actual.length === 4 && expected.every((value, channel) => Math.abs(actual[channel] - value) <= tolerance);
 }
 
-async function checkRasterOutput(deck) {
+async function equalBytes(a, b) {
+  const [left, right] = await Promise.all([a.arrayBuffer(), b.arrayBuffer()]);
+  return left.byteLength === right.byteLength && new Uint8Array(left).every((value, index) => value === new Uint8Array(right)[index]);
+}
+
+async function until(predicate, label) {
+  const deadline = performance.now() + 8000;
+  while (!predicate()) {
+    if (performance.now() > deadline) throw new Error(`Timed out waiting for ${label}.`);
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+}
+
+async function checkRasterOutput(deck, sourcePNG) {
   const project = slideProject(deck);
   project.items[0].shadow = { enabled: true, color: '#00cc44', transparency: 25, size: 100, blur: 0, angle: 0, distance: 24 };
   const original = JSON.stringify(project);
@@ -125,13 +140,19 @@ async function checkRasterOutput(deck) {
   const rotatedPixels = await pixels(await exportPNG(rotated, 96));
   check('A rotated image rotates its shadow geometry without losing the shadow', closeColor(rotatedPixels.at(80, 110), [0, 204, 68, 191]) && rotatedPixels.at(125, 65)[3] === 0);
 
+  const selection = createSelection(project, new Set(['shadow-image']));
+  const clipboardPNG = await selectionToPNG(selection), clipboardPixels = await pixels(clipboardPNG);
+  check('Clipboard PNG expands bounds for the shadow and bypasses the original PNG byte shortcut', clipboardPixels.width > 40 && clipboardPixels.has([0, 204, 68, 191]) && !(await equalBytes(clipboardPNG, sourcePNG)));
+  selection.items[0].shadow.enabled = false;
+  check('A disabled shadow retains original PNG bytes when no other transformation needs rendering', await equalBytes(await selectionToPNG(selection), sourcePNG));
+
   const svg = projectToSVG(project), svgDoc = new DOMParser().parseFromString(svg, 'image/svg+xml');
   check('SVG export contains a valid embedded shadow filter and the original raster image', !svgDoc.querySelector('parsererror') && svgDoc.querySelectorAll('filter').length > 0 && svg.includes('data:image/png;base64,'));
   const reportDeck = structuredClone(deck);
   reportDeck.slides[0].items = structuredClone(project.items);
   const report = new DOMParser().parseFromString(generateHTMLReport(reportDeck), 'text/html');
   check('The portable HTML report retains shadow rendering in its slide SVG', report.querySelectorAll('svg filter').length > 0 && !report.querySelector('script'));
-  check('Raster, SVG and HTML generation leave the source project unchanged', JSON.stringify(project) === original);
+  check('Raster, SVG, HTML and clipboard generation leave the source project unchanged', JSON.stringify(project) === original);
 }
 
 run.onclick = async () => {
@@ -140,19 +161,25 @@ run.onclick = async () => {
   document.title = 'RUNNING — Figure Editor image shadow checks';
   let restore = () => {};
   try {
-    if (!location.port || location.port === '8766' || !['127.0.0.1', 'localhost'].includes(location.hostname)) throw new Error('Use a separate localhost server on a test port such as 18769 to protect the normal editor draft.');
+    if (!['18767', '18770'].includes(location.port) || !['127.0.0.1', 'localhost'].includes(location.hostname)) throw new Error('Use a separate localhost server on port 18767 to protect the normal editor draft.');
     const { DEFAULT_SHADOW, SHADOW_PRESETS } = await import('../shadow.js');
-    const { deck } = await makeFixture();
+    const { deck, sourcePNG } = await makeFixture();
     const iframe = await loadEditor();
     const win = iframe.contentWindow, doc = iframe.contentDocument, get = id => doc.getElementById(id);
     const oldCreateURL = win.URL.createObjectURL, oldClick = win.HTMLAnchorElement.prototype.click, oldConfirm = win.confirm, oldSavePicker = win.showSaveFilePicker;
-    const urls = new Map(), downloads = [];
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(win.navigator, 'clipboard');
+    const urls = new Map(), downloads = [], writes = [];
     win.confirm = () => true;
     win.showSaveFilePicker = undefined;
     win.URL.createObjectURL = blob => { const url = oldCreateURL.call(win.URL, blob); urls.set(url, blob); return url; };
     win.HTMLAnchorElement.prototype.click = function () { if (this.download) downloads.push(urls.get(this.href)); else oldClick.call(this); };
+    Object.defineProperty(win.navigator, 'clipboard', { configurable: true, value: { write: async items => {
+      const record = {}; writes.push(record);
+      for (const item of items) for (const type of item.types) record[type] = await item.getType(type);
+    } } });
     restore = () => {
       win.URL.createObjectURL = oldCreateURL; win.HTMLAnchorElement.prototype.click = oldClick; win.confirm = oldConfirm; win.showSaveFilePicker = oldSavePicker;
+      if (clipboardDescriptor) Object.defineProperty(win.navigator, 'clipboard', clipboardDescriptor); else delete win.navigator.clipboard;
       for (const url of urls.keys()) win.URL.revokeObjectURL(url);
     };
     const save = async () => {
@@ -235,6 +262,12 @@ run.onclick = async () => {
     edit('distance', 40);
     check('Even synthetic shadow input events cannot mutate a locked image', JSON.stringify(await save()) === JSON.stringify(locked));
 
+    await open(custom); selectAll();
+    get('workspace').dispatchEvent(new win.ClipboardEvent('copy', { clipboardData: new win.DataTransfer(), bubbles: true, cancelable: true }));
+    await until(() => writes[0]?.['image/png'] && writes[0]?.['text/plain'], 'clipboard shadow PNG and editable payload');
+    const editable = decodeSelection(await writes[0]['text/plain'].text());
+    check('Native copy writes a rendered PNG and preserves editable shadow settings without touching the system clipboard', writes[0]['image/png'].type === 'image/png' && JSON.stringify(editable?.items[0].shadow) === JSON.stringify(customShadow));
+
     const croppedDeck = structuredClone(custom);
     croppedDeck.slides[0].items[0].crop = { x: 0.25, y: 0, width: 0.5, height: 1 };
     await open(croppedDeck); selectAll();
@@ -249,7 +282,7 @@ run.onclick = async () => {
     const thumbnailsCorrect = viewportDimensions.length === 2 && viewportDimensions.every(({ scale, expected }) => Math.abs(scale[0] - expected[0]) < 0.01 && Math.abs(scale[1] - expected[1]) < 0.01);
     check(`Slide thumbnails preserve cropped picture and shadow viewport dimensions${thumbnailsCorrect ? '' : `: ${JSON.stringify(viewportDimensions)}`}`, thumbnailsCorrect);
 
-    await checkRasterOutput(deck);
+    await checkRasterOutput(deck, sourcePNG);
   } catch (error) { check(error.stack || error.message, false); }
   finally {
     restore(); run.disabled = false;

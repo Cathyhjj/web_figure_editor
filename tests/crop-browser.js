@@ -1,5 +1,6 @@
 import { createDeck, validateDeck, slideProject } from '../deck.js';
 import { exportPNG, projectToSVG } from '../core.js';
+import { selectionToPNG } from '../clipboard-image.js';
 import { generateHTMLReport } from '../report.js';
 const checks = [], results = document.querySelector('#results');
 function check(name, pass) { checks.push({name, pass:!!pass}); const el=document.createElement('li');el.textContent=`${pass?'PASS':'FAIL'} — ${name}`;el.dataset.pass=String(!!pass);results.append(el); }
@@ -64,6 +65,7 @@ document.querySelector('#run').onclick=async()=>{
   $('object-locked').click();check('Locked images cannot crop or restore',$('crop-image').disabled&&$('restore-image').disabled);$('object-locked').click();
   const p=slideProject(cropped),png=await raster(await exportPNG(p,96));
   check('PNG export renders selected green area and excludes source red',green(png.pixel(350,110))&&png.pixel(120,100).slice(0,3).every(v=>v===255));
+  const copied=await raster(await selectionToPNG(p));check(`Clipboard output excludes cropped pixels and retains source density (${copied.width} × ${copied.height}; center ${copied.pixel(Math.floor(copied.width/2),Math.floor(copied.height/2)).join(',')})`,copied.width===100&&copied.height===60&&green(copied.pixel(50,30)));
   const svg=await raster(new Blob([projectToSVG(p)],{type:'image/svg+xml'}));check('SVG rasterization matches crop',green(svg.pixel(350,110)));
   const html=new DOMParser().parseFromString(generateHTMLReport(cropped),'text/html'),reportSVG=html.querySelector('figure svg');reportSVG.setAttribute('width','960');reportSVG.setAttribute('height','640');
   const report=await raster(new Blob([new XMLSerializer().serializeToString(reportSVG)],{type:'image/svg+xml'}));check('Offline HTML report renders the crop',green(report.pixel(350,110)));

@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { FULL_CROP, imageCrop, cropImage, dragCrop, validateCrop } from '../crop.js';
 import { createProject, validateProject, projectToSVG } from '../core.js';
-import { validateDeck, cloneDeck, duplicateSlide, serializeDeck } from '../deck.js';
+import { validateDeck, cloneDeck, duplicateSlide, serializeDeck, slideProject } from '../deck.js';
+import { createSelection, encodeSelection, decodeSelection, pasteSelection } from '../clipboard.js';
+import { selectionToPNG } from '../clipboard-image.js';
 import { generateHTMLReport } from '../report.js';
 
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nWQAAAAASUVORK5CYII=';
@@ -62,7 +64,7 @@ test('all eight drag handles clamp to source boundaries and cannot cross', () =>
   }
 });
 
-test('snapshots, slide duplicates and saved projects retain independent crops and original bytes', () => {
+test('snapshots, slide duplicates, saved projects and editable clipboard retain independent crops and original bytes', () => {
   const deck = validateDeck(fixture()), snapshot = cloneDeck(deck);
   snapshot.slides[0].items[0].crop.x = .1;
   assert.equal(deck.slides[0].items[0].crop.x, .25);
@@ -71,7 +73,13 @@ test('snapshots, slide duplicates and saved projects retain independent crops an
   assert.equal(deck.slides[0].items[0].crop.x, .25);
   const loaded = validateDeck(JSON.parse(serializeDeck(deck)));
   assert.deepEqual(loaded, deck);
+  const view = slideProject(deck), copied = decodeSelection(encodeSelection(createSelection(view, new Set([duplicate.items[0].id]))));
+  const [id] = pasteSelection(deck, copied);
+  const pasted = deck.slides[1].items.find(i => i.id === id);
+  assert.deepEqual(pasted.crop, duplicate.items[0].crop);
   assert.equal(deck.assets[0].dataUrl, asset.dataUrl);
+  pasted.crop.x = 0;
+  assert.equal(copied.items[0].crop.x, .15);
 });
 
 test('SVG and HTML exports clip using source coordinates and retain full embedded originals', () => {
@@ -81,4 +89,10 @@ test('SVG and HTML exports clip using source coordinates and retain full embedde
     assert.match(text, /<image x="0" y="0" width="1" height="1"/);
     assert.ok(text.includes(asset.dataUrl));
   }
+});
+
+test('same-aspect crops cannot use the original PNG clipboard fast path', async () => {
+  const p = fixture();
+  p.items[0].crop = { x: .25, y: .25, width: .5, height: .5 };
+  await assert.rejects(selectionToPNG(p), /requires a browser/);
 });

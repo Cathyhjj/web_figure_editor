@@ -6,7 +6,7 @@
   <meta name="color-scheme" content="light">
   <meta name="description" content="Arrange images, add annotations, and export paper figures locally.">
   <title>Figure Editor · Paper Figure Workspace</title>
-  <link rel="stylesheet" href="./style.css?v=compact-actions-1">
+  <link rel="stylesheet" href="./style.css?v=slides-multi-1">
 </head>
 <body class="drx-ui" data-drx-theme="light">
   <svg class="icon-definitions" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -27,6 +27,7 @@
       <symbol id="i-middle" viewBox="0 0 24 24"><path d="M2 12h3m5 0h4m5 0h3"/><rect x="5" y="3" width="5" height="18" rx="1"/><rect x="14" y="7" width="5" height="10" rx="1"/></symbol>
       <symbol id="i-distribute" viewBox="0 0 24 24"><path d="M3 3v18M21 3v18"/><rect x="6" y="7" width="4" height="10" rx="1"/><rect x="14" y="7" width="4" height="10" rx="1"/></symbol>
       <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M15 8V3H3v13h5"/></symbol>
+      <symbol id="i-paste" viewBox="0 0 24 24"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M8 5H5v16h14V5h-3M8 11h8M8 15h8"/></symbol>
       <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/></symbol>
       <symbol id="i-up" viewBox="0 0 24 24"><path d="m7 10 5-5 5 5M12 5v14M4 21h16"/></symbol>
       <symbol id="i-down" viewBox="0 0 24 24"><path d="m7 14 5 5 5-5M12 19V5M4 3h16"/></symbol>
@@ -94,9 +95,13 @@
         <button id="new-slide" class="button new-slide-button">New slide</button>
         <button id="duplicate-slide" class="icon-button" title="Duplicate slide" aria-label="Duplicate slide"><svg><use href="#i-copy"/></svg></button>
         <button id="delete-slide" class="icon-button danger" title="Delete slide" aria-label="Delete slide"><svg><use href="#i-trash"/></svg></button>
+        <div class="slide-clipboard-actions">
+          <button id="copy-slide" class="button quiet" title="Copy slide (⌘ / Ctrl + C when a slide is selected)" aria-label="Copy slide"><svg><use href="#i-copy"/></svg>Copy</button>
+          <button id="paste-slide" class="button quiet" title="Paste slide after current slide (⌘ / Ctrl + V)" aria-label="Paste slide"><svg><use href="#i-paste"/></svg>Paste</button>
+        </div>
       </div>
       <div id="slide-list" class="slide-list" role="navigation" aria-label="Slides"></div>
-      <p class="slides-note">One figure per slide.<br>Save them in one project.</p>
+      <p class="slides-note"><output id="slide-selection-count" aria-live="polite">1 selected</output><br>⌘ / Ctrl + click to select several.<br>Shift + click to select a range.<br>⌘ / Ctrl + C / V to copy / paste.</p>
     </aside>
 
     <section class="canvas-area" aria-label="Canvas workspace">
@@ -157,6 +162,6 @@
     <div class="dialog-body"><div class="field-row"><label class="field"><span>File format</span><select id="export-format"><option value="png">PNG · High-resolution image</option><option value="svg">SVG · Vector + raster</option><option value="pptx">PPT · Editable PowerPoint · All slides</option><option value="html">HTML report · All slides</option></select></label><label class="field"><span>PNG resolution</span><select id="export-dpi"><option value="150">150 DPI</option><option value="300" selected>300 DPI</option><option value="600">600 DPI</option></select></label></div><div id="export-info" class="export-info" aria-live="polite"></div><div class="format-note"><p><strong>PNG</strong>: All content is rasterized.</p><p><strong>SVG</strong>: Editor text, rectangles, and lines remain vector. Images and imported SVGs are rasterized. Fonts are not embedded.</p><p><strong>PPT (.pptx)</strong>: All slides with editable text, rectangles, lines, and separate images. Different canvas sizes are fitted to the first slide. Fonts are not embedded; text may render differently if a font is missing.</p><p><strong>HTML report</strong>: One offline file containing all slides. Text and shapes remain vector, images are embedded, and fonts are not embedded. The report is read-only.</p><p>Save an editable project too if you plan to make changes later.</p></div></div>
     <div class="dialog-actions"><button id="export-cancel" class="button">Cancel</button><button id="export-submit" class="button primary"><svg><use href="#i-export"/></svg>Export file</button></div>
   </dialog>
-  <script type="module" src="./app.js?v=project-save-1"></script>
+  <script type="module" src="./app.js?v=slides-multi-1"></script>
 </body>
 </html>

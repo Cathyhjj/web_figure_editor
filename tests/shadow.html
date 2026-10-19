@@ -10,8 +10,8 @@
   code{background:#f4f0f7;padding:2px 5px;border-radius:3px}
 </style>
 <h1>Figure Editor image shadow checks</h1>
-<p>Uses a generated image with transparent margins to verify shadow controls, undo, independent copies, portable saving, and actual exported pixels. Downloads stay in memory.</p>
-<p>Run on <code>http://127.0.0.1:18769/tests/shadow.html</code> with <code>python3 -m http.server 18769 --bind 127.0.0.1</code>. Running replaces only the test-origin draft, separate from the normal editor draft on port 8766.</p>
+<p>Uses a generated image with transparent margins to verify shadow controls, undo, independent copies, portable saving, and actual exported pixels. Downloads and clipboard writes stay in memory; the system clipboard is unchanged.</p>
+<p>Run on <code>http://127.0.0.1:18767/tests/shadow.html</code> with <code>python3 -m http.server 18767 --bind 127.0.0.1</code>. Running replaces only the test-origin draft, separate from the normal editor draft on port 8766.</p>
 <button id="run" type="button">Run image shadow checks</button>
 <ol id="results"></ol>
 <div id="editor-host"></div>

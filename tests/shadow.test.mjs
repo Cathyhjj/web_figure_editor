@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createProject, validateProject, serializeProject, projectToSVG } from '../core.js';
 import { createDeck, cloneDeck, duplicateSlide, currentSlide, serializeDeck, validateDeck } from '../deck.js';
+import { createSelection, encodeSelection, decodeSelection, pasteSelection } from '../clipboard.js';
+import { selectionImageProject, selectionToPNG } from '../clipboard-image.js';
 import { generateHTMLReport } from '../report.js';
 import { DEFAULT_SHADOW, SHADOW_PRESETS, validateShadow, imageShadowSVG, shadowBounds } from '../shadow.js';
 
@@ -10,6 +12,7 @@ const asset = { id: 'asset', name: 'source.png', mime: 'image/png', dataUrl: `da
 const picture = (extra = {}) => ({ id: 'picture', type: 'image', assetId: 'asset', x: 80, y: 60, width: 100, height: 50, ...extra });
 const fixture = (extra = {}) => ({ ...createProject(), id: 'project', assets: [asset], items: [picture(extra)] });
 const enabled = extra => ({ ...DEFAULT_SHADOW, enabled: true, ...extra });
+const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-7, `${actual} differs from ${expected}`);
 
 test('optional picture shadow preserves legacy records and round-trips validated settings independently', () => {
   const legacy = validateProject(fixture());
@@ -59,15 +62,30 @@ test('cropped pictures cast their visible alpha and inactive shadows add no rend
   }
 });
 
-test('shadow bounds include size, offset and blur without changing source geometry', () => {
-  const input = picture({ rotation: 90, shadow: enabled({ blur: 6, angle: 0, distance: 30 }) });
-  const before = structuredClone(input);
-  assert.deepEqual(shadowBounds(input), { x: 0, y: -17, width: 157, height: 84 });
+test('clipboard bounds include size, offset, blur and subsequent item rotation without changing sources', () => {
+  const shadow = enabled({ blur: 6, angle: 0, distance: 30 });
+  const input = fixture({ rotation: 90, shadow });
+  assert.deepEqual(shadowBounds(input.items[0]), { x: 0, y: -17, width: 157, height: 84 });
+  const before = structuredClone(input), result = selectionImageProject(input);
+  near(result.canvas.width, 84); near(result.canvas.height, 157);
+  assert.equal(result.canvas.background, 'transparent');
+  assert.deepEqual(result.items[0].shadow, shadow);
+  assert.equal(result.items[0].rotation, 90);
+  assert.equal(result.assets[0].dataUrl, asset.dataUrl);
   assert.deepEqual(input, before);
   assert.deepEqual(shadowBounds(picture({ shadow: enabled({ size: 200, blur: 0 }) })), { x: -51, y: -26, width: 202, height: 102 });
 });
 
-test('undo snapshots, slide duplication and project reopening preserve independent shadows', () => {
+test('copying an enabled shadow or crop cannot take the original-PNG shortcut', async () => {
+  const plain = await selectionToPNG(fixture());
+  assert.deepEqual(Buffer.from(await plain.arrayBuffer()), Buffer.from(PIXEL, 'base64'));
+  await assert.rejects(selectionToPNG(fixture({ shadow: enabled() })), /requires a browser/);
+  await assert.rejects(selectionToPNG(fixture({ crop: { x: 0, y: 0, width: .5, height: 1 } })), /requires a browser/);
+  const disabled = await selectionToPNG(fixture({ shadow: { ...DEFAULT_SHADOW } }));
+  assert.deepEqual(Buffer.from(await disabled.arrayBuffer()), Buffer.from(PIXEL, 'base64'));
+});
+
+test('undo snapshots, slide duplication, project reopening and editable clipboard preserve independent shadows', () => {
   const deck = createDeck();
   deck.assets = [asset];
   currentSlide(deck).items = [picture({ shadow: enabled({ blur: 9 }) })];
@@ -78,7 +96,13 @@ test('undo snapshots, slide duplication and project reopening preserve independe
   duplicate.items[0].shadow.blur = 18;
   assert.equal(deck.slides[0].items[0].shadow.blur, 9);
   assert.deepEqual(validateDeck(JSON.parse(serializeDeck(deck))), validateDeck(deck));
-
+  const selection = createSelection(fixture({ shadow: enabled({ blur: 9 }) }), new Set(['picture']));
+  const copied = decodeSelection(encodeSelection(selection));
+  assert.deepEqual(copied.items[0].shadow, enabled({ blur: 9 }));
+  const target = createDeck();
+  pasteSelection(target, copied);
+  currentSlide(target).items[0].shadow.blur = 25;
+  assert.equal(copied.items[0].shadow.blur, 9);
 });
 
 test('report shadow filters are distinct across slides and avoid collisions with object IDs', () => {
