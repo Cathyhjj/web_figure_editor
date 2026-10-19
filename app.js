@@ -12,6 +12,7 @@ import { shadowEditorMarkup, bindShadowEditor } from './shadow-editor.js';
 import { imageCrop, isCropped, cropImage } from './crop.js';
 import { createCropEditor } from './crop-editor.js';
 import { resizeItem } from './resize.js';
+import { selectionRect, enclosedItemIds } from './selection.js';
 import { initFontTools, fontValue } from './font-tools.js';
 
 import { CLIPBOARD_MIME, createSelection, encodeSelection, decodeSelection, pasteSelection, SLIDE_CLIPBOARD_MIME, SLIDES_CLIPBOARD_MIME, createSlidesClipboard, encodeSlides, decodeSlides, pasteSlides } from './clipboard.js';
@@ -175,6 +176,9 @@ function renderStage(){
   }
   stage.append(g);
  }
+ if(gesture?.mode==='select'&&gesture.moved){
+  stage.append(svg('rect',{...selectionRect(gesture.start,gesture.current),class:'selection-marquee','pointer-events':'none','aria-hidden':'true'}));
+ }
  $('empty-state').hidden=slide().items.length>0;
  $('zoom-value').textContent=`${Math.round(zoom*100)}%`;
  $('selection-count').textContent=selected.size?`${selected.size} selected`:`${slide().items.length} object${slide().items.length === 1 ? "" : "s"}`;
@@ -250,7 +254,7 @@ function renderLayers(){
 function field(label,key,value,type='number',extra=''){return `<label class="field"><span>${label}</span><input data-property="${key}" type="${type}" value="${escapeHTML(value)}" ${extra}></label>`;}
 function renderInspector(){
  const items=chosen(), box=$('inspector');
- if(items.length!==1){box.innerHTML=`<div class="section-heading">${items.length?'Multiple objects':'Object properties'}</div><p class="hint">${items.length?'Use the alignment tools to arrange selected objects. Shift + click to add or remove objects.':'Select an image, text, or shape to edit. Double-click text to edit its content.'}</p>`;return;}
+ if(items.length!==1){box.innerHTML=`<div class="section-heading">${items.length?'Multiple objects':'Object properties'}</div><p class="hint">${items.length?'Drag any selected object to move them together. Shift + click or Shift + drag on blank space to adjust the selection.':'Drag on blank canvas space to select objects, or click an image, text, or shape. Double-click text to edit its content.'}</p>`;return;}
  const i=items[0];
  box.innerHTML=`<div class="section-heading">${i.type==='image'?'Image':i.type==='text'?'Text':'Shape'} properties${i.locked?' · Locked':''}</div>${field('Name','name',i.name,'text')}<div class="field-row">${field('X / px','x',round(i.x),'number','step="1"')}${field('Y / px','y',round(i.y),'number','step="1"')}</div><div class="field-row">${field('Width / px','width',round(i.width),'number','min="1" step="1"')}${field('Height / px','height',round(i.height),'number','min="1" step="1"')}</div><div class="field-row">${field('Rotation / °','rotation',round(i.rotation))}${field('Opacity','opacity',i.opacity,'number','min="0" max="1" step="0.1"')}</div>`;
  if(i.type==='text')box.innerHTML+=`<label class="field"><span>Text content</span><textarea id="text-content" rows="4">${escapeHTML(i.text)}</textarea></label>${field('Font','fontFamily',i.fontFamily,'text','list="font-families" maxlength="200" autocomplete="off" spellcheck="false"')}<div class="field-row">${field('Size / px','fontSize',i.fontSize,'number','min="1" max="2000" step="any"')}${field('Color','color',i.color,'color')}</div><div class="field-row"><label class="field"><span>Weight</span><select data-property="fontWeight"><option value="400" ${String(i.fontWeight)==='400'?'selected':''}>Regular</option><option value="700" ${String(i.fontWeight)==='700'?'selected':''}>Bold</option></select></label><label class="field"><span>Style</span><select data-property="fontStyle"><option value="normal" ${i.fontStyle==='normal'?'selected':''}>Normal</option><option value="italic" ${i.fontStyle==='italic'?'selected':''}>Italic</option></select></label></div><label class="field"><span>Text alignment</span><select data-property="align">${[['left','Left'],['center','Center'],['right','Right']].map(([v,t])=>`<option value="${v}" ${i.align===v?'selected':''}>${t}</option>`).join('')}</select></label><p class="hint">Uses fonts installed on this computer. SVG does not embed fonts. Press Enter for a new line.</p>`;
@@ -304,6 +308,7 @@ function renderToolbar(){
  $('distribute-x').disabled=chosen().filter(i=>!i.locked).length<3;
 }
 function render(){
+ if(gesture?.mode==='select'&&!marqueeCurrent())finishMarquee(true,false);
  selected=new Set([...selected].filter(id=>byId(id)));renderStage();renderSlides();renderAssets();renderLayers();renderInspector();renderToolbar();
  $('project-name').value=project.name;$('canvas-width').value=slide().canvas.width;$('canvas-height').value=slide().canvas.height;$('canvas-background').value=slide().canvas.background;
 }
@@ -378,24 +383,60 @@ const libraryDropZone=document.querySelector('.library-panel');
 libraryDropZone.ondragover=e=>{if(![...e.dataTransfer.types].includes('Files'))return;e.preventDefault();e.stopPropagation();e.dataTransfer.dropEffect='copy';libraryDropZone.classList.add('drag-over');};
 libraryDropZone.ondragleave=e=>{if(!libraryDropZone.contains(e.relatedTarget))libraryDropZone.classList.remove('drag-over');};
 libraryDropZone.ondrop=async e=>{e.preventDefault();e.stopPropagation();libraryDropZone.classList.remove('drag-over');await importToLibrary(importDroppedFiles(e.dataTransfer),importTarget());};
-$('stage').onpointerdown=e=>{
- if(e.button!==0)return;$('workspace').focus({preventScroll:true});flushText();const id=e.target.closest('[data-item]')?.dataset.item;lastPointerItem=id;
- if(!id){selected.clear();render();return;}
+function marqueeCurrent(){return gesture.project===project&&gesture.slideId===project.activeSlideId&&gesture.revision===editRevision;}
+function releaseGesture(){
+ const ended=gesture;gesture=null;$('workspace').classList.remove('selecting');
+ if($('stage').hasPointerCapture(ended.pointerId))$('stage').releasePointerCapture(ended.pointerId);
+ return ended;
+}
+function finishMarquee(cancel=false,redraw=true){
+ const current=marqueeCurrent(),ended=releaseGesture();
+ if(cancel&&current)selected=new Set(ended.selection);
+ if(redraw)render();
+}
+function updateMarquee(e){
+ if(!marqueeCurrent()){finishMarquee(true);return;}
+ if(!gesture.moved&&Math.hypot(e.clientX-gesture.clientX,e.clientY-gesture.clientY)<3)return;
+ gesture.moved=true;gesture.current=point(e);$('workspace').classList.add('selecting');
+ const ids=enclosedItemIds(slide().items,selectionRect(gesture.start,gesture.current));
+ const next=new Set([...(gesture.additive?gesture.selection:[]),...ids]);
+ const selectionChanged=selected.size!==next.size||[...next].some(id=>!selected.has(id));
+ selected=next;renderStage();
+ if(selectionChanged){renderLayers();renderInspector();renderToolbar();syncAssetSelection();}
+}
+$('workspace').onpointerdown=e=>{
+ if(e.button!==0||gesture)return;$('workspace').focus({preventScroll:true});flushText();const id=e.target.closest('[data-item]')?.dataset.item;lastPointerItem=id;
+ if(!id){
+  const start=point(e);lastTap=null;
+  gesture={mode:'select',pointerId:e.pointerId,start,current:start,clientX:e.clientX,clientY:e.clientY,selection:new Set(selected),additive:e.shiftKey,moved:false,project,slideId:project.activeSlideId,revision:editRevision};
+  if(!e.shiftKey)selected.clear();render();$('stage').setPointerCapture(e.pointerId);e.preventDefault();return;
+ }
  const i=byId(id);if(e.shiftKey&&!e.target.dataset.resize){selected.has(id)?selected.delete(id):selected.add(id);render();return;}
  if(!selected.has(id))selected=new Set([id]);renderInspector();renderLayers();renderToolbar();renderStage();syncAssetSelection(i.type==='image'?i.assetId:undefined);
  if(i.locked)return;
- const start=point(e),items=chosen().filter(i=>!i.locked),before=snapshot();const edit=i.type==='text'&&lastTap?.id===id&&e.timeStamp-lastTap.time<500&&Math.abs(start.x-lastTap.x)+Math.abs(start.y-lastTap.y)<5;lastTap={id,time:e.timeStamp,...start};gesture={mode:e.target.dataset.resize?'resize':'move',handle:e.target.dataset.resizeHandle||'se',id,start,items:items.map(i=>({...i})),before,moved:false,edit};
+ const start=point(e),items=chosen().filter(i=>!i.locked),before=snapshot();const edit=i.type==='text'&&lastTap?.id===id&&e.timeStamp-lastTap.time<500&&Math.abs(start.x-lastTap.x)+Math.abs(start.y-lastTap.y)<5;lastTap={id,time:e.timeStamp,...start};gesture={mode:e.target.dataset.resize?'resize':'move',pointerId:e.pointerId,handle:e.target.dataset.resizeHandle||'se',id,start,items:items.map(i=>({...i})),before,moved:false,edit};
  $('stage').setPointerCapture(e.pointerId);e.preventDefault();
 };
-$('stage').onpointermove=e=>{
- if(!gesture)return;const p=point(e),dx=p.x-gesture.start.x,dy=p.y-gesture.start.y;if(Math.abs(dx)+Math.abs(dy)<.2)return;gesture.moved=true;
+$('workspace').onpointermove=e=>{
+ if(!gesture||e.pointerId!==gesture.pointerId)return;
+ if(gesture.mode==='select'){updateMarquee(e);return;}
+ const p=point(e),dx=p.x-gesture.start.x,dy=p.y-gesture.start.y;if(Math.abs(dx)+Math.abs(dy)<.2)return;gesture.moved=true;
  if(gesture.mode==='move'){for(const orig of gesture.items){const i=byId(orig.id);i.x=orig.x+dx;i.y=orig.y+dy;}}
  else{const orig=gesture.items.find(i=>i.id===gesture.id);
  Object.assign(byId(orig.id),resizeItem(orig,gesture.handle,dx,dy,{free:e.shiftKey}));
  }renderStage();
 };
-function endGesture(){if(!gesture)return;const edit=gesture.edit&&!gesture.moved;if(gesture.moved)record(gesture.before);gesture=null;render();if(edit){$('text-content')?.focus();$('text-content')?.select();}}
-$('stage').onpointerup=endGesture;$('stage').onpointercancel=endGesture;
+function endGesture(e){
+ if(!gesture||e.pointerId!==gesture.pointerId)return;
+ if(gesture.mode==='select'){
+  if(e.type==='pointerup')updateMarquee(e);
+  if(gesture)finishMarquee(e.type!=='pointerup');return;
+ }
+ const edit=gesture.edit&&!gesture.moved;if(gesture.moved)record(gesture.before);releaseGesture();render();if(edit){$('text-content')?.focus();$('text-content')?.select();}
+}
+$('workspace').onpointerup=endGesture;$('workspace').onpointercancel=endGesture;
+$('stage').onlostpointercapture=e=>{if(gesture?.mode==='select'&&e.pointerId===gesture.pointerId)finishMarquee(true);};
+window.addEventListener('blur',()=>{if(gesture?.mode==='select')finishMarquee(true);});
 $('stage').ondblclick=e=>{const i=byId(e.target.closest('[data-item]')?.dataset.item||lastPointerItem);if(i?.type==='text'&&!i.locked){selected=new Set([i.id]);render();$('text-content')?.focus();$('text-content')?.select();}};
 $('add-text').onclick=()=>{change(()=>{const i={...base('text',60,50,260,44),name:'Text',text:'Double-click to edit',fontFamily:'Arial',fontSize:28,fontWeight:400,fontStyle:'normal',color:'#20212b',align:'left'};slide().items.push(i);selected=new Set([i.id]);});$('text-content').focus();$('text-content').select();};
 $('add-rect').onclick=()=>change(()=>{const i={...base('rect',80,80,160,100),fill:'#ffffff',stroke:'#252735',strokeWidth:2};slide().items.push(i);selected=new Set([i.id]);});
@@ -657,6 +698,7 @@ document.addEventListener('paste',async e=>{
 document.addEventListener('keydown',e=>{
  if(e.defaultPrevented)return;
  if(cropEditor.open)return;
+ if(gesture?.mode==='select'){if(e.key==='Escape')finishMarquee(true);e.preventDefault();return;}
  const input=editingInput(e.target),mod=e.metaKey||e.ctrlKey;
  if(mod&&e.key.toLowerCase()==='s'){e.preventDefault();if(!e.repeat)$(e.shiftKey?'save-project-as':'save-project').click();return;}
  if(input||$('export-dialog').open)return;

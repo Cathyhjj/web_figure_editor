@@ -20,6 +20,7 @@
 !/crop.js
 !/crop-editor.js
 !/resize.js
+!/selection.js
 !/deck.js
 !/project-files.js
 !/demo.js
@@ -46,6 +47,8 @@
 !/tests/crop-browser.js
 !/tests/resize.html
 !/tests/resize-browser.js
+!/tests/marquee.html
+!/tests/marquee-browser.js
 !/tests/windows.html
 !/tests/windows-browser.js
 !/tests/project-save.html

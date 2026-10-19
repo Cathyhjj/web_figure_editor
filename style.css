@@ -84,6 +84,10 @@ dialog{border:1px solid var(--drx-border);border-radius:15px;padding:0;width:min
 .slide-name-field input:hover{border-color:#d6cadf;background:#ffffff70}
 .slide-name-field input:focus{border-color:var(--drx-control-border);background:#fff}
 .workspace-hint{flex-shrink:0}
+#workspace{touch-action:none;user-select:none;-webkit-user-select:none}
+#workspace.selecting,#workspace.selecting *{cursor:crosshair!important}
+#stage .figure-item{cursor:move}
+.selection-marquee{fill:#9c357c18;stroke:#9c357c;stroke-width:1;stroke-dasharray:5 3;vector-effect:non-scaling-stroke;pointer-events:none}
 .library-panel{grid-column:3;grid-row:1;border-left:1px solid var(--drx-border);border-right:0}
 .library-panel .library-content{padding:16px 12px}
 .library-panel .panel-heading{padding-inline:14px}
