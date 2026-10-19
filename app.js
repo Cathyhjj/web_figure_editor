@@ -6,6 +6,7 @@ import { locateAsset } from './locate.js';
 import { generateHTMLReport } from './report.js';
 import { exportPPTX, pptxLayout } from './pptx.js';
 import { initWindows } from './windows.js';
+import { initFontTools, fontValue } from './font-tools.js';
 
 const $ = id => document.getElementById(id);
 const ns = 'http://www.w3.org/2000/svg';
@@ -22,6 +23,7 @@ const escapeHTML = s => String(s ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':
 const chosen = () => slide().items.filter(i=>selected.has(i.id));
 const byId = id => slide().items.find(i=>i.id===id);
 const assetById = id => project.assets.find(a=>a.id===id);
+const fontTools = initFontTools({ getItems: chosen, change });
 function status(message, error=false) { $('status').textContent=message; $('status').classList.toggle('error',error); }
 function snapshot(){return clone(project);}
 function record(before){undoStack.push(before); if(undoStack.length>50)undoStack.shift();redoStack=[];changed();}
@@ -169,7 +171,7 @@ function renderInspector(){
  if(items.length!==1){box.innerHTML=`<div class="section-heading">${items.length?'Multiple objects':'Object properties'}</div><p class="hint">${items.length?'Use the alignment tools to arrange selected objects. Shift + click to add or remove objects.':'Select an image, text, or shape to edit. Double-click text to edit its content.'}</p>`;return;}
  const i=items[0];
  box.innerHTML=`<div class="section-heading">${i.type==='image'?'Image':i.type==='text'?'Text':'Shape'} properties${i.locked?' · Locked':''}</div>${field('Name','name',i.name,'text')}<div class="field-row">${field('X / px','x',round(i.x),'number','step="1"')}${field('Y / px','y',round(i.y),'number','step="1"')}</div><div class="field-row">${field('Width / px','width',round(i.width),'number','min="1" step="1"')}${field('Height / px','height',round(i.height),'number','min="1" step="1"')}</div><div class="field-row">${field('Rotation / °','rotation',round(i.rotation))}${field('Opacity','opacity',i.opacity,'number','min="0" max="1" step="0.1"')}</div>`;
- if(i.type==='text')box.innerHTML+=`<label class="field"><span>Text content</span><textarea id="text-content" rows="4">${escapeHTML(i.text)}</textarea></label><label class="field"><span>Font</span><select data-property="fontFamily">${[...new Set([i.fontFamily,'Arial','Helvetica','Avenir','Times New Roman','Georgia','Courier New','sans-serif','serif'])].map(f=>`<option ${i.fontFamily===f?'selected':''}>${escapeHTML(f)}</option>`).join('')}</select></label><div class="field-row">${field('Size / px','fontSize',i.fontSize,'number','min="1" max="500"')}${field('Color','color',i.color,'color')}</div><div class="field-row"><label class="field"><span>Weight</span><select data-property="fontWeight"><option value="400" ${String(i.fontWeight)==='400'?'selected':''}>Regular</option><option value="700" ${String(i.fontWeight)==='700'?'selected':''}>Bold</option></select></label><label class="field"><span>Style</span><select data-property="fontStyle"><option value="normal" ${i.fontStyle==='normal'?'selected':''}>Normal</option><option value="italic" ${i.fontStyle==='italic'?'selected':''}>Italic</option></select></label></div><label class="field"><span>Text alignment</span><select data-property="align">${[['left','Left'],['center','Center'],['right','Right']].map(([v,t])=>`<option value="${v}" ${i.align===v?'selected':''}>${t}</option>`).join('')}</select></label><p class="hint">Uses fonts installed on this computer. SVG does not embed fonts. Press Enter for a new line.</p>`;
+ if(i.type==='text')box.innerHTML+=`<label class="field"><span>Text content</span><textarea id="text-content" rows="4">${escapeHTML(i.text)}</textarea></label>${field('Font','fontFamily',i.fontFamily,'text','list="font-families" maxlength="200" autocomplete="off" spellcheck="false"')}<div class="field-row">${field('Size / px','fontSize',i.fontSize,'number','min="1" max="2000" step="any"')}${field('Color','color',i.color,'color')}</div><div class="field-row"><label class="field"><span>Weight</span><select data-property="fontWeight"><option value="400" ${String(i.fontWeight)==='400'?'selected':''}>Regular</option><option value="700" ${String(i.fontWeight)==='700'?'selected':''}>Bold</option></select></label><label class="field"><span>Style</span><select data-property="fontStyle"><option value="normal" ${i.fontStyle==='normal'?'selected':''}>Normal</option><option value="italic" ${i.fontStyle==='italic'?'selected':''}>Italic</option></select></label></div><label class="field"><span>Text alignment</span><select data-property="align">${[['left','Left'],['center','Center'],['right','Right']].map(([v,t])=>`<option value="${v}" ${i.align===v?'selected':''}>${t}</option>`).join('')}</select></label><p class="hint">Uses fonts installed on this computer. SVG does not embed fonts. Press Enter for a new line.</p>`;
  if(i.type==='image'){const a=assetById(i.assetId);const effectiveDPI=a?Math.round(Math.min(a.width/i.width,a.height/i.height)*96):0;box.innerHTML+=`<p class="hint">Source: ${escapeHTML(a?.name)}<br>Original size: ${a?.width} × ${a?.height} px<br>Effective resolution: ${effectiveDPI} DPI<br>Drag a corner to keep proportions. Hold Shift to resize freely. Changing width also updates height.</p>`;}
  if(i.type==='rect'||i.type==='line')box.innerHTML+=`<div class="field-row">${i.type==='rect'?field('Fill','fill',i.fill,'color'):''}${field('Stroke','stroke',i.stroke,'color')}</div>${field('Stroke width / px','strokeWidth',i.strokeWidth,'number','min="0" max="100" step="0.5"')}`;
  box.innerHTML+=`<label class="field inline"><input id="object-locked" type="checkbox" ${i.locked?'checked':''}> Lock object</label>`;
@@ -183,15 +185,16 @@ function renderInspector(){
    if(['width','height'].includes(key))val=Math.max(1,Math.min(20000,val));
    if(['x','y'].includes(key))val=Math.max(-100000,Math.min(100000,val));
    if(key==='rotation')val=Math.max(-36000,Math.min(36000,val));
-   if(key==='fontSize')val=Math.max(1,Math.min(500,val));if(key==='opacity')val=Math.max(0,Math.min(1,val));if(key==='strokeWidth')val=Math.max(0,Math.min(100,val));
+   if(key==='fontSize'||key==='fontFamily'){val=fontValue(key,val);if(val===null)return;}
+   if(key==='opacity')val=Math.max(0,Math.min(1,val));if(key==='strokeWidth')val=Math.max(0,Math.min(100,val));
    if(key==='name')val=val.slice(0,1000);
    if(i[key]===val)return;
    if(!pendingText)pendingText=snapshot();
    if(i.type==='image'&&(key==='width'||key==='height')){const ratio=i.width/i.height;if(key==='width')i.height=val/ratio;else i.width=val*ratio;const other=box.querySelector(`[data-property="${key==='width'?'height':'width'}"]`);if(other)other.value=round(key==='width'?i.height:i.width);}
    i[key]=val;changed();renderStage();
   };
-  input.oninput=apply;
-  input.onchange=()=>{apply();flushText();renderLayers();renderToolbar();};
+  input.oninput=()=>{if(input.dataset.property!=='fontFamily')apply();};
+  input.onchange=()=>{apply();input.value=i[input.dataset.property];flushText();renderLayers();renderToolbar();};
   input.onblur=()=>{flushText();renderLayers();renderToolbar();};
  });
  $('object-locked').onchange=e=>change(()=>i.locked=e.target.checked);
@@ -200,6 +203,7 @@ function renderInspector(){
 function flushText(){if(pendingText){const before=pendingText;pendingText=null;record(before);renderSlides();}}
 const round=n=>Math.round(n*10)/10;
 function renderToolbar(){
+ fontTools.render();
  $('undo').disabled=!undoStack.length;$('redo').disabled=!redoStack.length;
  for(const id of ['duplicate','delete-item','bring-forward','send-backward'])$(id).disabled=!selected.size;
  for(const id of ['align-left','align-center','align-top','align-middle'])$(id).disabled=!chosen().some(i=>!i.locked);

@@ -22,7 +22,7 @@ python3 server.py
 
 1. 点击 **Add local images**，或将 PNG、JPG、WebP、SVG 文件拖入画布。
 2. 点击对象后拖动位置，拖动右下角调整大小；图片默认保持比例，按住 `Shift` 拖动可自由缩放。在 **Object properties** 面板输入精确位置、尺寸、旋转及透明度。
-3. 使用 **Text** 添加标注；双击文字，在 **Object properties** 中编辑内容、字体、字号、颜色和对齐。换行请按 `Enter`。
+3. 使用 **Text** 添加标注；选中文字后，用顶部 **Font** 选择或输入本机字体名称，调整字号（px），或点击 **A⌃ / A⌄** 放大、缩小。支持多选文字统一修改，锁定对象会跳过，可用 Undo 撤销。双击文字，在 **Object properties** 中编辑内容、字体、字号、颜色和对齐。换行请按 `Enter`。字体需要安装在本机，未安装时浏览器会使用替代字体。
 4. 用 `Shift + 点击` 多选，再使用 **Align** 工具；**Distribute horizontally** 将至少三个对象水平等距排列。在 **Layers** 中选择、隐藏或锁定对象。
 5. 点击 **Save project** 下载包含全部 slides 的 `.figure.json`；以后点击 **Open** 继续编辑。点击 **Export** 可将当前 slide 导出为 PNG 或 SVG，或选择 **PPT** 导出可编辑 PowerPoint，选择 **HTML report** 导出全部 slides 的离线报告。
 

@@ -60,6 +60,14 @@
       <button id="add-rect" class="button quiet"><svg><use href="#i-rect"/></svg><span>Rectangle</span></button>
       <button id="add-line" class="button quiet"><svg><use href="#i-line"/></svg><span>Line</span></button>
     </div>
+    <div class="toolbar-group font-tools" role="group" aria-label="Text formatting" title="Format selected unlocked text">
+      <label class="toolbar-label" for="font-family">Font</label>
+      <input id="font-family" class="font-family-input" list="font-families" aria-label="Font family" placeholder="Select text" maxlength="200" autocomplete="off" spellcheck="false" title="Choose a font or type an installed font name" disabled>
+      <datalist id="font-families"></datalist>
+      <label class="font-size-control"><input id="font-size" type="number" min="1" max="2000" step="any" aria-label="Font size in pixels" title="Font size in pixels" disabled><span>px</span></label>
+      <button id="font-increase" class="icon-button" title="Increase font size" aria-label="Increase font size" disabled><span aria-hidden="true">A<sup>⌃</sup></span></button>
+      <button id="font-decrease" class="icon-button" title="Decrease font size" aria-label="Decrease font size" disabled><span aria-hidden="true">A<sup>⌄</sup></span></button>
+    </div>
     <div class="toolbar-group align-tools">
       <span class="toolbar-label">Align</span>
       <button id="align-left" class="icon-button" title="Align left" aria-label="Align left"><svg><use href="#i-left"/></svg></button>

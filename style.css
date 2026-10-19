@@ -33,6 +33,19 @@ dialog{border:1px solid var(--drx-border);border-radius:15px;padding:0;width:min
 /* Give the full English file-action labels room on narrow screens. */
 @media(max-width:600px){.file-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.file-actions .button{width:100%;margin-left:0}}
 
+/* Keep text formatting within reach, alongside the insert tools. */
+.font-tools{gap:5px}
+.font-tools input{height:31px;min-width:0;border:1px solid var(--drx-control-border);border-radius:5px;background:var(--drx-surface);font-size:12px;padding:5px 8px;line-height:20px}
+.font-tools .font-family-input{width:164px}
+.font-tools input:disabled{background:var(--drx-surface-subtle);color:var(--drx-text-muted);cursor:default}
+.font-size-control{display:flex;align-items:center;gap:4px;color:var(--drx-text-muted);font-size:10px}
+.font-size-control input{width:67px;font-variant-numeric:tabular-nums}
+.font-tools .icon-button{font-family:Arial,sans-serif;font-size:18px}
+.font-tools .icon-button sup{font-size:11px;margin-left:1px;vertical-align:top}
+#font-decrease{font-size:14px}
+@media(max-width:600px){.font-tools .font-family-input{width:140px}.font-tools{gap:4px}}
+@media(pointer:coarse){.font-tools input{height:44px}}
+
 /* A slide rail, canvas, shared assets, and visible layers/properties. */
 .editor-layout{grid-template-columns:164px minmax(0,1fr) 200px 268px;grid-template-rows:minmax(0,1fr)}
 .panel-heading{height:53px;min-height:53px;padding:0 16px;display:flex;align-items:center;justify-content:space-between;gap:8px;border-bottom:1px solid var(--drx-border)}
