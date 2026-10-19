@@ -45,7 +45,8 @@
     <nav class="file-actions" aria-label="Project actions">
       <button id="new-project" class="button quiet"><svg><use href="#i-plus"/></svg><span>New project</span></button>
       <button id="open-project" class="button quiet"><svg><use href="#i-folder"/></svg><span>Open</span></button>
-      <button id="save-project" class="button"><svg><use href="#i-save"/></svg><span>Save project</span></button>
+      <button id="save-project" class="button" title="Save (⌘ / Ctrl + S)"><svg><use href="#i-save"/></svg><span>Save</span></button>
+      <button id="save-project-as" class="button quiet" title="Save a copy to a new file (⌘ / Ctrl + Shift + S)"><svg><use href="#i-save"/></svg><span>Save As…</span></button>
       <button id="export-open" class="button primary" title="Export a slide or HTML report"><svg><use href="#i-export"/></svg><span>Export</span></button>
     </nav>
   </header>
@@ -156,6 +157,6 @@
     <div class="dialog-body"><div class="field-row"><label class="field"><span>File format</span><select id="export-format"><option value="png">PNG · High-resolution image</option><option value="svg">SVG · Vector + raster</option><option value="pptx">PPT · Editable PowerPoint · All slides</option><option value="html">HTML report · All slides</option></select></label><label class="field"><span>PNG resolution</span><select id="export-dpi"><option value="150">150 DPI</option><option value="300" selected>300 DPI</option><option value="600">600 DPI</option></select></label></div><div id="export-info" class="export-info" aria-live="polite"></div><div class="format-note"><p><strong>PNG</strong>: All content is rasterized.</p><p><strong>SVG</strong>: Editor text, rectangles, and lines remain vector. Images and imported SVGs are rasterized. Fonts are not embedded.</p><p><strong>PPT (.pptx)</strong>: All slides with editable text, rectangles, lines, and separate images. Different canvas sizes are fitted to the first slide. Fonts are not embedded; text may render differently if a font is missing.</p><p><strong>HTML report</strong>: One offline file containing all slides. Text and shapes remain vector, images are embedded, and fonts are not embedded. The report is read-only.</p><p>Save an editable project too if you plan to make changes later.</p></div></div>
     <div class="dialog-actions"><button id="export-cancel" class="button">Cancel</button><button id="export-submit" class="button primary"><svg><use href="#i-export"/></svg>Export file</button></div>
   </dialog>
-  <script type="module" src="./app.js?v=locate-1"></script>
+  <script type="module" src="./app.js?v=project-save-1"></script>
 </body>
 </html>

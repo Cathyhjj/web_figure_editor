@@ -69,11 +69,12 @@ run.onclick = async () => {
     iframe.src = '../index.html'; document.querySelector('#editor-host').replaceChildren(iframe); await loaded;
     const win = iframe.contentWindow, doc = iframe.contentDocument, get = id => doc.getElementById(id);
     const urls = new Map(), downloads = [];
-    const originalURL = win.URL.createObjectURL, originalClick = win.HTMLAnchorElement.prototype.click, originalConfirm = win.confirm;
+    const originalURL = win.URL.createObjectURL, originalClick = win.HTMLAnchorElement.prototype.click, originalConfirm = win.confirm, originalSavePicker = win.showSaveFilePicker;
     win.confirm = () => true;
+    win.showSaveFilePicker = undefined;
     win.URL.createObjectURL = blob => { const url = originalURL.call(win.URL, blob); urls.set(url, blob); return url; };
     win.HTMLAnchorElement.prototype.click = function () { if (this.download) downloads.push({ name: this.download, blob: urls.get(this.href) }); else originalClick.call(this); };
-    restore = () => { win.URL.createObjectURL = originalURL; win.HTMLAnchorElement.prototype.click = originalClick; win.confirm = originalConfirm; for (const url of urls.keys()) win.URL.revokeObjectURL(url); };
+    restore = () => { win.URL.createObjectURL = originalURL; win.HTMLAnchorElement.prototype.click = originalClick; win.confirm = originalConfirm; win.showSaveFilePicker = originalSavePicker; for (const url of urls.keys()) win.URL.revokeObjectURL(url); };
     const open = async deck => {
       const files = new win.DataTransfer(); files.items.add(new win.File([JSON.stringify(deck)], 'test.figure.json', { type: 'application/json' }));
       get('project-input').files = files.files; await get('project-input').onchange({ target: get('project-input') });
@@ -104,7 +105,7 @@ run.onclick = async () => {
     check('All XML parts are well formed', [...files].filter(([path]) => /\.xml$|\.rels$/.test(path)).every(([, bytes]) => !new DOMParser().parseFromString(decoder.decode(bytes), 'application/xml').querySelector('parsererror')));
     window.pptxChecks.sample = await new Promise(resolve => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.readAsDataURL(output.blob); });
     window.pptxChecks.project = deck;
-    get('save-project').click();
+    await get('save-project').onclick();
     check('PPT export does not change the editable project or active slide', JSON.stringify(JSON.parse(await downloads.at(-1).blob.text())) === JSON.stringify((await import('../deck.js')).validateDeck(deck)));
     get('export-open').click(); choose('png');
     check('Switching back to PNG restores resolution and current-slide scope', !get('export-dpi').disabled && get('export-title').textContent === 'Export current slide' && get('export-slide-name').textContent.includes('Slide 2'));

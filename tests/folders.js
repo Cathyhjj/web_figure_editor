@@ -64,11 +64,13 @@ runButton.onclick = async () => {
     const folder = path => [...doc.querySelectorAll('.asset-folder[data-path]')].find(node => node.dataset.path === path);
     const oldConfirm = win.confirm;
     const oldPicker = win.showDirectoryPicker;
+    const oldSavePicker = win.showSaveFilePicker;
     const oldCreateURL = win.URL.createObjectURL;
     const oldClick = win.HTMLAnchorElement.prototype.click;
     const createdURLs = new Map();
     const downloads = [];
     win.confirm = () => true;
+    win.showSaveFilePicker = undefined;
     win.URL.createObjectURL = blob => {
       const url = oldCreateURL.call(win.URL, blob);
       createdURLs.set(url, blob);
@@ -81,6 +83,7 @@ runButton.onclick = async () => {
     restore = () => {
       win.confirm = oldConfirm;
       win.showDirectoryPicker = oldPicker;
+      win.showSaveFilePicker = oldSavePicker;
       win.URL.createObjectURL = oldCreateURL;
       win.HTMLAnchorElement.prototype.click = oldClick;
       for (const url of createdURLs.keys()) win.URL.revokeObjectURL(url);

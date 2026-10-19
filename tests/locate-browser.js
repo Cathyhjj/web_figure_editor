@@ -78,6 +78,7 @@ runButton.onclick = async () => {
     const selection = () => JSON.stringify([...doc.querySelectorAll('#stage [data-item].selected')].map(node => node.dataset.item));
     const oldFetch = win.fetch;
     const oldConfirm = win.confirm;
+    const oldSavePicker = win.showSaveFilePicker;
     const oldCreateURL = win.URL.createObjectURL;
     const oldClick = win.HTMLAnchorElement.prototype.click;
     const createdURLs = new Map();
@@ -93,6 +94,7 @@ runButton.onclick = async () => {
       throw new Error(`Unexpected fetch during Locate checks: ${url}`);
     };
     win.confirm = () => true;
+    win.showSaveFilePicker = undefined;
     win.URL.createObjectURL = blob => {
       const url = oldCreateURL.call(win.URL, blob);
       createdURLs.set(url, blob);
@@ -105,6 +107,7 @@ runButton.onclick = async () => {
     restore = () => {
       win.fetch = oldFetch;
       win.confirm = oldConfirm;
+      win.showSaveFilePicker = oldSavePicker;
       win.URL.createObjectURL = oldCreateURL;
       win.HTMLAnchorElement.prototype.click = oldClick;
       for (const url of createdURLs.keys()) win.URL.revokeObjectURL(url);

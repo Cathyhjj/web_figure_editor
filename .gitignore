@@ -14,6 +14,7 @@
 !/locate.js
 !/core.js
 !/deck.js
+!/project-files.js
 !/demo.js
 !/report.js
 !/pptx.js
@@ -30,6 +31,8 @@
 !/tests/pptx-browser.js
 !/tests/locate.html
 !/tests/locate-browser.js
+!/tests/project-save.html
+!/tests/project-save-browser.js
 !/scripts/
 /scripts/*
 !/scripts/extract_pptx_example.py

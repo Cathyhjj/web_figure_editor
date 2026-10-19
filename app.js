@@ -1,5 +1,6 @@
 import { uid, projectToSVG, exportPNG, downloadBlob } from './core.js';
-import { createDeck, validateDeck, cloneDeck, currentSlide, slideProject, serializeDeck, deckSourceManifest, addSlide, duplicateSlide, deleteSlide } from './deck.js';
+import { createDeck, validateDeck, cloneDeck, currentSlide, slideProject, deckSourceManifest, addSlide, duplicateSlide, deleteSlide } from './deck.js';
+import { pickProjectFile, readProjectFile, writeProjectFile } from './project-files.js';
 import { importFiles, pickImages, importFolderFiles, pickFolder, importDroppedFiles, linkAsset, refreshAsset, replaceAsset } from './assets.js?v=locate-1';
 import { buildAssetTree } from './asset-tree.js';
 import { locateAsset } from './locate.js';
@@ -12,6 +13,9 @@ const $ = id => document.getElementById(id);
 const ns = 'http://www.w3.org/2000/svg';
 let project = createDeck(), selected = new Set(), zoom = .75, undoStack = [], redoStack = [];
 let gesture = null, dirty = false, relinkId = null, draftTimer, draftDb, pendingText = null, lastPointerItem = null, lastTap = null;
+let projectFileHandle = null, projectFileName = '', projectFilePersistent = true;
+// Keep file actions unavailable until the initial draft has finished restoring.
+let projectEpoch = 0, editRevision = 0, fileOperation = true, draftWrites = Promise.resolve();
 const collapsedAssetFolders = new Set();
 let selectedAssetIds = new Set();
 let locatingAsset = false;
@@ -28,7 +32,7 @@ function status(message, error=false) { $('status').textContent=message; $('stat
 function snapshot(){return clone(project);}
 function record(before){undoStack.push(before); if(undoStack.length>50)undoStack.shift();redoStack=[];changed();}
 function change(action){flushText();const before=snapshot();try{action();validateDeck(project);record(before);render();return true;}catch(error){project=before;render();status(error.message,true);return false;}}
-function changed(){dirty=true;clearTimeout(draftTimer);draftTimer=setTimeout(saveDraft,650);}
+function changed(){dirty=true;editRevision++;clearTimeout(draftTimer);draftTimer=setTimeout(saveDraft,650);}
 function base(type, x=80,y=80,width=160,height=80){return {id:uid(),type,name:type==='text'?'Text':type==='rect'?'Rectangle':type==='line'?'Line':'Image',x,y,width,height,rotation:0,opacity:1,locked:false,hidden:false};}
 function svg(tag, attrs={}, text){const el=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))el.setAttribute(k,v);if(text!==undefined)el.textContent=text;return el;}
 function appendItemContent(g,item){
@@ -64,7 +68,7 @@ function renderSlides(){
 }
 function selectSlide(id){
  if(id===project.activeSlideId)return;
- flushText();project.activeSlideId=id;selected.clear();lastTap=null;lastPointerItem=null;
+ flushText();project.activeSlideId=id;editRevision++;selected.clear();lastTap=null;lastPointerItem=null;
  render();fit();saveDraft();status(`Editing ${slide().name}. Assets are shared across slides.`);
 }
 function editSlides(action,message){
@@ -203,6 +207,7 @@ function renderInspector(){
 function flushText(){if(pendingText){const before=pendingText;pendingText=null;record(before);renderSlides();}}
 const round=n=>Math.round(n*10)/10;
 function renderToolbar(){
+ renderFileActions();
  fontTools.render();
  $('undo').disabled=!undoStack.length;$('redo').disabled=!redoStack.length;
  for(const id of ['duplicate','delete-item','bring-forward','send-backward'])$(id).disabled=!selected.size;
@@ -323,11 +328,59 @@ function setZoom(z){zoom=Math.max(.1,Math.min(3,z));renderStage();}
 function fit(){const r=$('workspace').getBoundingClientRect();setZoom(Math.min((r.width-100)/slide().canvas.width,(r.height-100)/slide().canvas.height,1));}
 $('zoom-in').onclick=()=>setZoom(zoom*1.2);$('zoom-out').onclick=()=>setZoom(zoom/1.2);$('zoom-fit').onclick=fit;
 const filename=()=>project.name.replace(/[^\p{L}\p{N}._ -]/gu,'_').slice(0,80)||'figure';
-$('save-project').onclick=()=>{try{flushText();const file=new Blob([serializeDeck(project)],{type:'application/json'});if(file.size>240*1024*1024)throw new Error('Project exceeds the 240 MB file limit. Split it into smaller projects before saving.');downloadBlob(file,filename()+'.figure.json');dirty=false;status(`Project saved with ${project.slides.length} slide${project.slides.length===1?'':'s'} and embedded asset copies.`);}catch(e){status(e.message,true);}};
-function replaceProject(p){project=validateDeck(p);selected.clear();undoStack=[];redoStack=[];pendingText=null;dirty=false;collapsedAssetFolders.clear();$('asset-list').replaceChildren();libraryImportNotice={hidden:true,text:'',error:false};renderLibraryImportNotice();render();fit();saveDraft();}
-$('new-project').onclick=()=>{if(dirty&&!confirm('Creating a new project will replace the current local draft. Save your project first to keep a copy. Continue?'))return;replaceProject(createDeck());status('New project created with one blank slide.');};
-$('open-project').onclick=()=>$('project-input').click();
-$('project-input').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>240*1024*1024)throw new Error('Project exceeds 240 MB. Split it into smaller projects.');const p=validateDeck(JSON.parse(await file.text()));if(dirty&&!confirm('Opening a project will replace the current local draft. Continue?'))return;replaceProject(p);status('Editable project opened. Use Link on an asset to reconnect its local file.');}catch(err){status('Could not open project: '+err.message,true);}finally{e.target.value='';}};
+function renderFileActions(){
+ for(const id of ['save-project','save-project-as','open-project','new-project','demo-project'])$(id).disabled=fileOperation;
+ const destination=projectFileHandle?`Save to ${projectFileName}`:typeof globalThis.showSaveFilePicker==='function'?'Choose where to save this project':'Download project copy (direct saving is unavailable in this browser)';
+ $('save-project').title=destination+' (⌘ / Ctrl + S)'+(projectFilePersistent?'':' · File access is remembered for this session only');
+ $('save-project').setAttribute('aria-busy',String(fileOperation));
+}
+async function saveProject(saveAs=false){
+ if(fileOperation)return;
+ flushText();
+ const savedProject=snapshot(),epoch=projectEpoch,revision=editRevision;
+ fileOperation=true;renderFileActions();status('Saving project…');
+ try{
+  const result=await writeProjectFile(savedProject,{handle:projectFileHandle,name:saveAs?filename()+'.figure.json':projectFileName||filename()+'.figure.json',saveAs});
+  if(epoch!==projectEpoch)return;
+  projectFileHandle=result.handle;projectFileName=result.name;
+  dirty=result.downloaded||revision!==editRevision;
+  status(result.downloaded?'Project download started. This browser cannot save back to the original file. Use Chrome or Edge for direct Save.':`Saved to ${projectFileName}.${revision===editRevision?'':' Newer changes are still unsaved; use Save again.'}`);
+  await saveDraft();
+ }catch(error){
+  status(error.name==='AbortError'?'Save canceled. Your changes are still in the editor.':`Could not save project: ${error.message}`,error.name!=='AbortError');
+ }finally{fileOperation=false;renderFileActions();}
+}
+$('save-project').onclick=()=>saveProject();
+$('save-project-as').onclick=()=>saveProject(true);
+function replaceProject(p,{handle=null,name=''}={}){
+ project=validateDeck(p);projectEpoch++;editRevision=0;projectFileHandle=handle;projectFileName=name;projectFilePersistent=true;
+ selected.clear();undoStack=[];redoStack=[];pendingText=null;dirty=false;collapsedAssetFolders.clear();$('asset-list').replaceChildren();libraryImportNotice={hidden:true,text:'',error:false};renderLibraryImportNotice();render();fit();saveDraft();
+}
+$('new-project').onclick=()=>{if(fileOperation)return;if(dirty&&!confirm('Creating a new project will replace the current local draft. Save your project first to keep a copy. Continue?'))return;replaceProject(createDeck());status('New project created. Use Save to choose its file location.');};
+$('open-project').onclick=async()=>{
+ if(fileOperation)return;
+ if(typeof globalThis.showOpenFilePicker!=='function'){$('project-input').click();return;}
+ fileOperation=true;renderFileActions();
+ try{
+  const opened=await pickProjectFile();
+  if(dirty&&!confirm('Opening a project will replace the current local draft. Continue?'))return;
+  replaceProject(opened.project,opened);status(`Opened ${opened.name}. Save will update this file.`);
+ }catch(error){
+  if(error.name==='SecurityError'){$('project-input').click();}
+  else if(error.name!=='AbortError')status('Could not open project: '+error.message,true);
+ }finally{fileOperation=false;renderFileActions();}
+};
+$('project-input').onchange=async e=>{
+ if(fileOperation){e.target.value='';return;}
+ const file=e.target.files[0];if(!file)return;
+ fileOperation=true;renderFileActions();
+ try{
+  const opened=await readProjectFile(file);
+  if(dirty&&!confirm('Opening a project will replace the current local draft. Continue?'))return;
+  replaceProject(opened,{name:file.name});status('Editable project opened. Save will ask for a location when supported; otherwise it downloads a copy.');
+ }catch(error){status('Could not open project: '+error.message,true);}
+ finally{e.target.value='';fileOperation=false;renderFileActions();}
+};
 $('source-manifest').onclick=()=>downloadBlob(new Blob([JSON.stringify(deckSourceManifest(project),null,2)],{type:'application/json'}),filename()+'.sources.json');
 let exporting=false;
 function exportInfo(){
@@ -373,7 +426,7 @@ $('export-submit').onclick=async()=>{
 document.addEventListener('keydown',e=>{
  if(e.defaultPrevented)return;
  const input=/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)||e.target.isContentEditable,mod=e.metaKey||e.ctrlKey;
- if(mod&&e.key.toLowerCase()==='s'){e.preventDefault();$('save-project').click();return;}
+ if(mod&&e.key.toLowerCase()==='s'){e.preventDefault();if(!e.repeat)$(e.shiftKey?'save-project-as':'save-project').click();return;}
  if(input||$('export-dialog').open)return;
  if(mod&&e.key.toLowerCase()==='z'){e.preventDefault();$(e.shiftKey?'redo':'undo').click();}
  else if(mod&&e.key.toLowerCase()==='y'){e.preventDefault();$('redo').click();}
@@ -384,11 +437,54 @@ document.addEventListener('keydown',e=>{
  else if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)&&selected.size){e.preventDefault();const n=e.shiftKey?10:1;change(()=>{for(const i of chosen().filter(i=>!i.locked)){if(e.key==='ArrowLeft')i.x-=n;if(e.key==='ArrowRight')i.x+=n;if(e.key==='ArrowUp')i.y-=n;if(e.key==='ArrowDown')i.y+=n;}});}
 });
 async function openDraftDB(){return new Promise((resolve,reject)=>{const r=indexedDB.open('figure-editor-drafts',1);r.onupgradeneeded=()=>r.result.createObjectStore('drafts');r.onerror=()=>reject(r.error);r.onsuccess=()=>resolve(r.result);});}
-async function saveDraft(){try{draftDb??=await openDraftDB();const tx=draftDb.transaction('drafts','readwrite');tx.objectStore('drafts').put(clone(project),'current');await new Promise((res,rej)=>{tx.oncomplete=res;tx.onerror=()=>rej(tx.error);});}catch(e){status('Could not save the local draft. Use Save project to download a backup. '+e.message,true);}}
-async function loadDraft(){try{draftDb=await openDraftDB();const req=draftDb.transaction('drafts').objectStore('drafts').get('current');const p=await new Promise((res,rej)=>{req.onsuccess=()=>res(req.result);req.onerror=()=>rej(req.error);});if(p){project=validateDeck(p);dirty=true;render();fit();status('Local draft restored. Save your project regularly to keep a backup.');}}catch{status('Local drafts are unavailable. Use Save project to keep a backup.');}}
+function writeDraftRecord(savedProject,file){
+ return new Promise((resolve,reject)=>{
+  const tx=draftDb.transaction('drafts','readwrite'),store=tx.objectStore('drafts');
+  tx.oncomplete=resolve;tx.onerror=tx.onabort=()=>reject(tx.error||new Error('Draft transaction aborted.'));
+  try{store.put(savedProject,'current');store.put(file,'current-file');}
+  catch(error){tx.abort();reject(error);}
+ });
+}
+function saveDraft(){
+ clearTimeout(draftTimer);
+ // Capture together before awaiting storage; keep older autosaves ahead of newer ones.
+ const savedProject=snapshot(),file={handle:projectFileHandle,name:projectFileName,dirty},epoch=projectEpoch;
+ draftWrites=draftWrites.then(async()=>{
+  draftDb??=await openDraftDB();
+  try{
+   await writeDraftRecord(savedProject,file);
+   if(epoch===projectEpoch&&file.handle===projectFileHandle)projectFilePersistent=true;
+  }catch(error){
+   if(error.name!=='DataCloneError'||!file.handle)throw error;
+   await writeDraftRecord(savedProject,{...file,handle:null});
+   if(epoch===projectEpoch&&file.handle===projectFileHandle)projectFilePersistent=false;
+  }
+  renderFileActions();
+ }).catch(error=>{if(epoch===projectEpoch)status('Could not save the local draft. Use Save to keep a project file. '+error.message,true);});
+ return draftWrites;
+}
+async function loadDraft(){
+ const epoch=projectEpoch,revision=editRevision;
+ try{
+  draftDb=await openDraftDB();
+  const store=draftDb.transaction('drafts').objectStore('drafts');
+  const read=key=>new Promise((resolve,reject)=>{const req=store.get(key);req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});
+  const [savedProject,file]=await Promise.all([read('current'),read('current-file')]);
+  if(!savedProject||epoch!==projectEpoch||revision!==editRevision)return;
+  project=validateDeck(savedProject);projectEpoch++;
+  projectFileHandle=file?.handle?.kind==='file'&&typeof file.handle.createWritable==='function'?file.handle:null;
+  projectFileName=typeof file?.name==='string'?file.name:'';
+  dirty=typeof file?.dirty==='boolean'?file.dirty:true;
+  render();fit();status(projectFileHandle?`Local draft restored. Save will update ${projectFileName}.`:'Local draft restored. Use Save to choose a project file location.');
+ }catch{status('Local drafts are unavailable. Use Save to keep a project file.');}
+}
 $('demo-project').onclick=async()=>{
+ if(fileOperation)return;
  if(dirty&&!confirm('The example will replace the current local draft. Continue?'))return;
- try{const {makeDemo}=await import('./demo.js');replaceProject(await makeDemo());status('Example loaded. Images, text, and shapes can be edited independently.');}catch(e){status(e.message,true);}
+ const revision=editRevision;
+ fileOperation=true;renderFileActions();
+ try{const {makeDemo}=await import('./demo.js');const example=await makeDemo();if(revision!==editRevision&&dirty&&!confirm('Replace the current draft with the example?'))return;replaceProject(example);status('Example loaded. Use Save to choose its file location.');}catch(e){status(e.message,true);}
+ finally{fileOperation=false;renderFileActions();}
 };
-render();initWindows({onLayoutChange:fit});requestAnimationFrame(fit);await loadDraft();
+render();initWindows({onLayoutChange:fit});requestAnimationFrame(fit);await loadDraft();fileOperation=false;renderFileActions();
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
