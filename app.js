@@ -11,6 +11,7 @@ const ns = 'http://www.w3.org/2000/svg';
 let project = createDeck(), selected = new Set(), zoom = .75, undoStack = [], redoStack = [];
 let gesture = null, dirty = false, relinkId = null, draftTimer, draftDb, pendingText = null, lastPointerItem = null, lastTap = null;
 const collapsedAssetFolders = new Set();
+let selectedAssetIds = new Set();
 let libraryImports = 0;
 let libraryImportNotice = { hidden: true, text: '', error: false };
 const clone = cloneDeck;
@@ -103,6 +104,8 @@ function renderAssets(){
  function assetCard(a){
   const card=document.createElement('div');card.className='asset-card';card.dataset.asset=a.id;card.draggable=false;
   card.innerHTML=`<button class="asset-preview" data-action="place" title="Add to canvas" aria-label="Place ${escapeHTML(a.name)} on canvas"><img draggable="false" loading="lazy" decoding="async" class="asset-thumb" alt="${escapeHTML(a.name)}" src="${a.dataUrl}"></button><div class="asset-name" title="${escapeHTML(a.relativePath||a.name)}">${escapeHTML(a.name)}</div><div class="asset-meta">${a.width} × ${a.height} · ${a.sourceKind==='linked'?(a.linkPersistence==='session'?'Session link + copy':'Local link + copy'):'Portable copy'}${a.originalMime==='image/svg+xml'?' · Rasterized SVG':''}</div><div class="asset-actions"><button data-action="place">Place</button><button data-action="relink">Link</button>${a.sourceKind==='linked'?'<button data-action="refresh">Refresh</button>':''}</div>`;
+  card.setAttribute('role','group');
+  const selectionLabel=document.createElement('div');selectionLabel.className='asset-selection-label';selectionLabel.textContent='Selected on canvas';card.append(selectionLabel);
   let suppressClick=false;
   card.onpointerdown=e=>{
    if(e.button!==0||e.target.closest('.asset-actions'))return;
@@ -125,6 +128,28 @@ function renderAssets(){
  }
  appendFolderContents(buildAssetTree(project.assets),list);
  $('assets-panel').scrollTop=scrollTop;
+ syncAssetSelection();
+}
+function syncAssetSelection(revealAssetId){
+ const nextIds=new Set(chosen().filter(i=>i.type==='image').map(i=>i.assetId));
+ const revealId=revealAssetId??[...nextIds].find(id=>!selectedAssetIds.has(id));
+ selectedAssetIds=nextIds;
+ let target;
+ for(const card of $('asset-list').querySelectorAll('.asset-card')){
+  const active=nextIds.has(card.dataset.asset);
+  card.classList.toggle('selected',active);
+  card.setAttribute('aria-label',`${card.querySelector('.asset-name').textContent}${active?' · Selected on canvas':''}`);
+  if(active&&card.dataset.asset===revealId)target=card;
+ }
+ if(!target)return;
+ // Reveal the source without scrolling the canvas or rebuilding the library during a drag.
+ for(let folder=target.closest('.asset-folder');folder;folder=folder.parentElement.closest('.asset-folder')){
+  folder.open=true;collapsedAssetFolders.delete(folder.dataset.path);
+ }
+ const panel=$('assets-panel'),bounds=panel.getBoundingClientRect(),cardBounds=target.getBoundingClientRect();
+ const top=bounds.top+panel.clientTop,bottom=top+panel.clientHeight;
+ if(cardBounds.top<top||cardBounds.height>panel.clientHeight)panel.scrollTop+=cardBounds.top-top;
+ else if(cardBounds.bottom>bottom)panel.scrollTop+=cardBounds.bottom-bottom;
 }
 function renderLayers(){
  const list=$('layer-list');list.replaceChildren();
@@ -248,7 +273,7 @@ $('stage').onpointerdown=e=>{
  if(e.button!==0)return;flushText();const id=e.target.closest('[data-item]')?.dataset.item;lastPointerItem=id;
  if(!id){selected.clear();render();return;}
  const i=byId(id);if(e.shiftKey&&!e.target.dataset.resize){selected.has(id)?selected.delete(id):selected.add(id);render();return;}
- if(!selected.has(id))selected=new Set([id]);renderInspector();renderLayers();renderToolbar();renderStage();
+ if(!selected.has(id))selected=new Set([id]);renderInspector();renderLayers();renderToolbar();renderStage();syncAssetSelection(i.type==='image'?i.assetId:undefined);
  if(i.locked)return;
  const start=point(e),items=chosen().filter(i=>!i.locked),before=snapshot();const edit=i.type==='text'&&lastTap?.id===id&&e.timeStamp-lastTap.time<500&&Math.abs(start.x-lastTap.x)+Math.abs(start.y-lastTap.y)<5;lastTap={id,time:e.timeStamp,...start};gesture={mode:e.target.dataset.resize?'resize':'move',id,start,items:items.map(i=>({...i})),before,moved:false,edit};
  $('stage').setPointerCapture(e.pointerId);e.preventDefault();
