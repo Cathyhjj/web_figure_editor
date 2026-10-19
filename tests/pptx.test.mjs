@@ -195,6 +195,71 @@ test('pictures preserve original embedded PNG/JPEG bytes and reuse assets across
   assert.equal(Number(tags(first.picture, 'a:alphaModFix')[0].amt), 40000);
 });
 
+test('picture shadows remain native editable effects with color, transparency, scale and direction', async () => {
+  const deck = createDeck();
+  deck.assets = [asset()];
+  deck.slides[0].items = [item('shadow-picture', 'image', {
+    assetId: 'png', opacity: 0.5, rotation: 30,
+    crop: { x: 0.1, y: 0.2, width: 0.6, height: 0.5 },
+    shadow: { enabled: true, color: '#12aBcD', transparency: 25, size: 125, blur: 5.5, angle: 315, distance: 8.25 },
+  })];
+  const before = JSON.stringify(deck);
+  const parts = await unzip(await exportPPTX(deck));
+  const picture = named(xml(parts, 'ppt/slides/slide1.xml'), 'shadow-picture');
+  assert.equal(JSON.stringify(deck), before, 'export leaves source settings untouched');
+  assert.deepEqual(tags(picture, 'a:outerShdw'), [{
+    blurRad: '69850', dist: '104775', dir: '18900000', sx: '125000', sy: '125000', algn: 'ctr', rotWithShape: '1',
+  }]);
+  assert.match(picture, /<p:spPr>[\s\S]*<a:effectLst><a:outerShdw[^>]*><a:srgbClr val="12ABCD"><a:alpha val="75000"\/><\/a:srgbClr><\/a:outerShdw><\/a:effectLst><\/p:spPr>/,
+    'native shadow uses its own opacity because PowerPoint already inherits picture alpha');
+  assert.equal(tags(picture, 'a:xfrm')[0].rot, '1800000');
+  assert.deepEqual(tags(picture, 'a:srcRect')[0], { l: '10000', t: '20000', r: '30000', b: '30000' });
+  assert.equal(tags(picture, 'a:alphaModFix')[0].amt, '50000');
+  const media = [...parts.keys()].filter(path => path.startsWith('ppt/media/'));
+  assert.equal(media.length, 1, 'shadow requires no additional raster asset');
+  assert.deepEqual(parts.get(media[0]), Buffer.from(PNG, 'base64'));
+});
+
+test('default shadows scale point lengths to the fitted slide while preserving relative size', async () => {
+  const deck = createDeck();
+  deck.assets = [asset()];
+  deck.slides[0].items = [item('default-shadow', 'image', { assetId: 'png', shadow: { enabled: true } })];
+  const second = addSlide(deck);
+  second.canvas = { width: 1920, height: 1280, background: '#fff' };
+  second.items = [item('fitted-shadow', 'image', { assetId: 'png', shadow: {
+    enabled: true, color: '#000000', transparency: 100, size: 0, blur: 10, angle: 360, distance: 12,
+  } })];
+  const parts = await unzip(await exportPPTX(deck));
+  const original = named(xml(parts, 'ppt/slides/slide1.xml'), 'default-shadow');
+  assert.deepEqual(tags(original, 'a:outerShdw')[0], {
+    blurRad: '63500', dist: '0', dir: '0', sx: '100000', sy: '100000', algn: 'ctr', rotWithShape: '1',
+  });
+  assert.equal(tags(original, 'a:alpha')[0].val, '40000');
+  const fitted = named(xml(parts, 'ppt/slides/slide2.xml'), 'fitted-shadow');
+  assert.deepEqual(tags(fitted, 'a:outerShdw')[0], {
+    blurRad: '63500', dist: '76200', dir: '0', sx: '0', sy: '0', algn: 'ctr', rotWithShape: '1',
+  });
+  assert.equal(tags(fitted, 'a:alpha')[0].val, '0', 'fully transparent shadow stays transparent');
+});
+
+test('absent or disabled shadows emit no effects and hidden pictures remain excluded', async () => {
+  const deck = createDeck();
+  deck.assets = [asset(), asset('hidden-only')];
+  deck.slides[0].items = [
+    item('legacy-picture', 'image', { assetId: 'png' }),
+    item('disabled-shadow', 'image', { assetId: 'png', shadow: { enabled: false, blur: 20 } }),
+    item('hidden-shadow', 'image', { assetId: 'hidden-only', hidden: true, shadow: { enabled: true } }),
+  ];
+  const parts = await unzip(await exportPPTX(deck));
+  const slide = xml(parts, 'ppt/slides/slide1.xml');
+  for (const name of ['legacy-picture', 'disabled-shadow']) {
+    assert.equal(tags(named(slide, name), 'a:effectLst').length, 0);
+  }
+  assert.equal(tags(slide, 'a:outerShdw').length, 0);
+  assert.equal(slide.includes('hidden-shadow'), false);
+  assert.equal([...parts.keys()].filter(path => path.startsWith('ppt/media/')).length, 1);
+});
+
 test('different canvas sizes fit proportionally into the first page and scale geometry and type', async () => {
   const deck = createDeck();
   const second = addSlide(deck);

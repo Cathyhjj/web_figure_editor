@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Figure Editor image shadow checks</title>
+<style>
+  body{font:15px system-ui;max-width:1280px;margin:32px auto;padding:0 20px;color:#342b3e}
+  p{line-height:1.6}button{padding:12px 20px}li{padding:6px 0}li[data-pass="false"]{color:#a02034}
+  iframe{display:block;width:100%;height:760px;border:1px solid #d5cbdc;border-radius:12px;margin-top:24px}
+  code{background:#f4f0f7;padding:2px 5px;border-radius:3px}
+</style>
+<h1>Figure Editor image shadow checks</h1>
+<p>Uses a generated image with transparent margins to verify shadow controls, undo, independent copies, portable saving, and actual exported pixels. Downloads stay in memory.</p>
+<p>Run on <code>http://127.0.0.1:18769/tests/shadow.html</code> with <code>python3 -m http.server 18769 --bind 127.0.0.1</code>. Running replaces only the test-origin draft, separate from the normal editor draft on port 8766.</p>
+<button id="run" type="button">Run image shadow checks</button>
+<ol id="results"></ol>
+<div id="editor-host"></div>
+<script type="module" src="./shadow-browser.js"></script>
+</html>

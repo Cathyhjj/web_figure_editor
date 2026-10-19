@@ -7,6 +7,8 @@ import { locateAsset } from './locate.js';
 import { generateHTMLReport } from './report.js';
 import { exportPPTX, pptxLayout } from './pptx.js';
 import { initWindows } from './windows.js';
+import { imageShadowSVG } from './shadow.js';
+import { shadowEditorMarkup, bindShadowEditor } from './shadow-editor.js';
 import { imageCrop, isCropped, cropImage } from './crop.js';
 import { createCropEditor } from './crop-editor.js';
 import { initFontTools, fontValue } from './font-tools.js';
@@ -42,7 +44,11 @@ const cropEditor=createCropEditor((id,crop)=>{
  status(isCropped(item)?'Image cropped. The original is kept; use Restore original to show it again.':'Full image restored.');return true;
 });
 function svg(tag, attrs={}, text){const el=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))el.setAttribute(k,v);if(text!==undefined)el.textContent=text;return el;}
-function appendItemContent(g,item){
+function appendItemContent(g,item,context='stage'){
+  if(item.type==='image'){
+   const a=assetById(item.assetId);
+   if(a)g.innerHTML=imageShadowSVG(item,a,`shadow-${context}-${item.id}`);
+  }
   if(item.type==='image'){const a=assetById(item.assetId);if(a){const c=imageCrop(item),parent=item.crop?svg('svg',{width:item.width,height:item.height,viewBox:`${c.x} ${c.y} ${c.width} ${c.height}`,preserveAspectRatio:'none',overflow:'hidden'}):g;parent.append(svg('image',{href:a.dataUrl,width:item.crop?1:item.width,height:item.crop?1:item.height,preserveAspectRatio:'none'}));if(parent!==g)g.append(parent);}}
   else if(item.type==='text'){
    const text=svg('text',{x:item.align==='center'?item.width/2:item.align==='right'?item.width:0,y:item.fontSize,fill:item.color,'font-family':item.fontFamily+', Arial, sans-serif','font-size':item.fontSize,'font-weight':item.fontWeight,'font-style':item.fontStyle,'text-anchor':item.align==='center'?'middle':item.align==='right'?'end':'start','xml:space':'preserve'});
@@ -61,7 +67,7 @@ function renderSlides(){
   for(const item of page.items){
    if(item.hidden)continue;
    const g=svg('g',{transform:`translate(${item.x} ${item.y}) rotate(${item.rotation} ${item.width/2} ${item.height/2})`,opacity:item.opacity});
-   appendItemContent(g,item);preview.append(g);
+   appendItemContent(g,item,`preview-${page.id}`);preview.append(g);
   }
   const caption=document.createElement('span');caption.className='slide-caption';
   caption.innerHTML=`<span>${index+1}</span><span>${escapeHTML(page.name)}</span>`;card.replaceChildren(preview,caption);
@@ -184,6 +190,7 @@ function renderInspector(){
  box.innerHTML=`<div class="section-heading">${i.type==='image'?'Image':i.type==='text'?'Text':'Shape'} properties${i.locked?' · Locked':''}</div>${field('Name','name',i.name,'text')}<div class="field-row">${field('X / px','x',round(i.x),'number','step="1"')}${field('Y / px','y',round(i.y),'number','step="1"')}</div><div class="field-row">${field('Width / px','width',round(i.width),'number','min="1" step="1"')}${field('Height / px','height',round(i.height),'number','min="1" step="1"')}</div><div class="field-row">${field('Rotation / °','rotation',round(i.rotation))}${field('Opacity','opacity',i.opacity,'number','min="0" max="1" step="0.1"')}</div>`;
  if(i.type==='text')box.innerHTML+=`<label class="field"><span>Text content</span><textarea id="text-content" rows="4">${escapeHTML(i.text)}</textarea></label>${field('Font','fontFamily',i.fontFamily,'text','list="font-families" maxlength="200" autocomplete="off" spellcheck="false"')}<div class="field-row">${field('Size / px','fontSize',i.fontSize,'number','min="1" max="2000" step="any"')}${field('Color','color',i.color,'color')}</div><div class="field-row"><label class="field"><span>Weight</span><select data-property="fontWeight"><option value="400" ${String(i.fontWeight)==='400'?'selected':''}>Regular</option><option value="700" ${String(i.fontWeight)==='700'?'selected':''}>Bold</option></select></label><label class="field"><span>Style</span><select data-property="fontStyle"><option value="normal" ${i.fontStyle==='normal'?'selected':''}>Normal</option><option value="italic" ${i.fontStyle==='italic'?'selected':''}>Italic</option></select></label></div><label class="field"><span>Text alignment</span><select data-property="align">${[['left','Left'],['center','Center'],['right','Right']].map(([v,t])=>`<option value="${v}" ${i.align===v?'selected':''}>${t}</option>`).join('')}</select></label><p class="hint">Uses fonts installed on this computer. SVG does not embed fonts. Press Enter for a new line.</p>`;
  if(i.type==='image'){const a=assetById(i.assetId),c=imageCrop(i);const effectiveDPI=a?Math.round(Math.min(a.width*c.width/i.width,a.height*c.height/i.height)*96):0;box.innerHTML+=`<div class="image-crop-actions"><button id="crop-image" class="button" ${i.locked?'disabled':''}>${isCropped(i)?'Edit crop':'Crop'}</button><button id="restore-image" class="button" ${i.locked||!isCropped(i)?'disabled':''}>Restore original</button></div><p class="hint">Source: ${escapeHTML(a?.name)}<br>Original size: ${a?.width} × ${a?.height} px${isCropped(i)?`<br>Cropped area: ${Math.round(a.width*c.width)} × ${Math.round(a.height*c.height)} px`:''}<br>Effective resolution: ${effectiveDPI} DPI<br>Drag a corner to keep proportions. Hold Shift to resize freely. Changing width also updates height.</p>`;}
+ if(i.type==='image')box.innerHTML+=shadowEditorMarkup(i);
  if(i.type==='rect'||i.type==='line')box.innerHTML+=`<div class="field-row">${i.type==='rect'?field('Fill','fill',i.fill,'color'):''}${field('Stroke','stroke',i.stroke,'color')}</div>${field('Stroke width / px','strokeWidth',i.strokeWidth,'number','min="0" max="100" step="0.5"')}`;
  box.innerHTML+=`<label class="field inline"><input id="object-locked" type="checkbox" ${i.locked?'checked':''}> Lock object</label>`;
  if(i.type==='image'){
@@ -211,6 +218,12 @@ function renderInspector(){
   input.oninput=()=>{if(input.dataset.property!=='fontFamily')apply();};
   input.onchange=()=>{apply();input.value=i[input.dataset.property];flushText();renderLayers();renderToolbar();};
   input.onblur=()=>{flushText();renderLayers();renderToolbar();};
+ });
+ bindShadowEditor(i,box,{
+  begin:()=>{if(!pendingText)pendingText=snapshot();},
+  preview:()=>{changed();renderStage();},
+  commit:()=>{flushText();renderToolbar();},
+  change,
  });
  $('object-locked').onchange=e=>change(()=>i.locked=e.target.checked);
  const text=$('text-content');if(text){text.disabled=i.locked;text.oninput=()=>{if(!pendingText)pendingText=snapshot();i.text=text.value.slice(0,20000);i.height=Math.max(i.fontSize*1.2*i.text.split('\n').length,i.height);changed();renderStage();};text.onblur=()=>{flushText();renderLayers();renderToolbar();};}

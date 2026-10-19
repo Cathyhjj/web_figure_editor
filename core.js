@@ -1,5 +1,6 @@
 /** Portable project model and exports. Geometry is measured in CSS pixels (96/in). */
 import { validateCrop, imageCrop } from './crop.js';
+import { validateShadow, imageShadowSVG } from './shadow.js';
 const LIMITS = Object.freeze({ assets: 500, items: 2000, assetBytes: 40 * 1024 * 1024, totalBytes: 160 * 1024 * 1024 });
 const RASTER_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 const PNG_SIGNATURE = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -145,6 +146,7 @@ function validateProjectInternal(input, assetCache) {
       canonical.assetId = id(item.assetId, 'item.assetId');
       if (!assetIDs.has(canonical.assetId)) fail(`image ${itemID} refers to a missing asset.`);
       if (item.crop !== undefined) canonical.crop = validateCrop(item.crop);
+      if (item.shadow !== undefined) canonical.shadow = validateShadow(item.shadow);
     } else if (type === 'text') {
       canonical.text = string(item.text, 'item.text', 100000, '').replace(/\r\n?/g, '\n');
       canonical.fontFamily = string(item.fontFamily, 'item.fontFamily', 200, 'Arial');
@@ -202,6 +204,8 @@ export function sourceManifest(project) { return manifest(validateProject(projec
 function svgFromCanonical(project) {
   const { width, height, background } = project.canvas;
   const assets = new Map(project.assets.map(a => [a.id, a]));
+  const usedIDs = new Set(project.items.map(item => item.id));
+  let shadowIndex = 0;
   const lines = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     `<svg xmlns="http://www.w3.org/2000/svg" width="${n(width / 96 * 25.4)}mm" height="${n(height / 96 * 25.4)}mm" viewBox="0 0 ${n(width)} ${n(height)}">`,
@@ -215,6 +219,11 @@ function svgFromCanonical(project) {
     const { width: w, height: h } = item;
     lines.push(`<g id="${xml(item.id)}" transform="translate(${n(item.x)} ${n(item.y)}) rotate(${n(item.rotation)} ${n(w / 2)} ${n(h / 2)})" opacity="${n(item.opacity)}">`);
     if (item.type === 'image') {
+      let filterID;
+      do { filterID = `figure-shadow-${project.id}-${item.id}-${shadowIndex++}`; } while (usedIDs.has(filterID));
+      usedIDs.add(filterID);
+      const shadowSVG = imageShadowSVG(item, assets.get(item.assetId), filterID);
+      if (shadowSVG) lines.push(shadowSVG);
       const c = imageCrop(item);
       if (item.crop) lines.push(`<svg width="${n(w)}" height="${n(h)}" viewBox="${c.x} ${c.y} ${c.width} ${c.height}" preserveAspectRatio="none" overflow="hidden">`);
       lines.push(`<image x="0" y="0" width="${item.crop ? '1' : n(w)}" height="${item.crop ? '1' : n(h)}" preserveAspectRatio="none" href="${xml(assets.get(item.assetId).dataUrl)}"/>`);

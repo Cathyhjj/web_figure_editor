@@ -19,7 +19,11 @@ function checkReportSize(deck, assets) {
     for (const item of slide.items) {
       if (item.hidden) continue;
       estimate += 2048;
-      if (item.type === 'image') estimate += assets.get(item.assetId).dataUrl.length;
+      if (item.type === 'image') {
+        const shadow = item.shadow;
+        const copies = shadow?.enabled && shadow.transparency < 100 && shadow.size > 0 ? 2 : 1;
+        estimate += assets.get(item.assetId).dataUrl.length * copies;
+      }
       else if (item.type === 'text') {
         let lines = 1;
         for (let index = 0; index < item.text.length; index++) if (item.text.charCodeAt(index) === 10) lines++;

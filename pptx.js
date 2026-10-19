@@ -2,6 +2,7 @@
 import { validateDeck } from './deck.js';
 
 const EMU_PER_PX = 9525;
+const EMU_PER_PT = 12700;
 const MIN_SLIDE_PX = 96;
 const MAX_SLIDE_PX = 56 * 96;
 const MAX_EXPORT_BYTES = 240 * 1024 * 1024;
@@ -136,12 +137,28 @@ function textShape(item, id, layout) {
   const paragraphs = item.text.split('\n').map(text => `<a:p><a:pPr algn="${alignment}" marL="0" marR="0" indent="0"><a:lnSpc><a:spcPts val="${spacing}"/></a:lnSpc><a:spcBef><a:spcPts val="0"/></a:spcBef><a:spcAft><a:spcPts val="0"/></a:spcAft><a:buNone/><a:defRPr ${runStyle}>${runContent}</a:defRPr></a:pPr><a:r><a:rPr ${runStyle}>${runContent}</a:rPr><a:t xml:space="preserve">${escapeXML(text)}</a:t></a:r><a:endParaRPr ${runStyle}>${runContent}</a:endParaRPr></a:p>`).join('');
   return `<p:sp>${nonVisual(id, item.name, true)}<p:spPr>${transform(item, layout)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="none" lIns="0" tIns="0" rIns="0" bIns="0" anchor="t" anchorCtr="0" horzOverflow="overflow" vertOverflow="overflow">${autofit}</a:bodyPr><a:lstStyle/>${paragraphs}</p:txBody></p:sp>`;
 }
+function imageShadow(item, layout) {
+  const shadow = item.shadow;
+  if (!shadow?.enabled) return '';
+  // Native DrawingML keeps the effect editable in PowerPoint's Shadow panel.
+  // Shadow lengths are points; percentages and clockwise angles are independent
+  // of canvas fitting. Center alignment scales the shadow about the picture.
+  const blur = Math.round(shadow.blur * EMU_PER_PT * layout.scale);
+  const distance = Math.round(shadow.distance * EMU_PER_PT * layout.scale);
+  const direction = Math.round(shadow.angle * 60000) % 21600000;
+  const size = Math.round(shadow.size * 1000);
+  const { hex } = color(shadow.color);
+  // The native effect already inherits alphaModFix from the picture's blip;
+  // multiplying item.opacity here would attenuate the shadow a second time.
+  const alpha = Math.round((1 - shadow.transparency / 100) * 100000);
+  return `<a:effectLst><a:outerShdw blurRad="${blur}" dist="${distance}" dir="${direction}" sx="${size}" sy="${size}" algn="ctr" rotWithShape="1"><a:srgbClr val="${hex}"><a:alpha val="${alpha}"/></a:srgbClr></a:outerShdw></a:effectLst>`;
+}
 function imageShape(item, asset, id, relationship, layout) {
   const alpha = Math.round(item.opacity * 100000);
   const c = item.crop, percent = value => Math.max(0, Math.round(value * 100000));
   const left = c ? Math.min(99999, percent(c.x)) : 0, top = c ? Math.min(99999, percent(c.y)) : 0;
   const crop = c ? `<a:srcRect l="${left}" t="${top}" r="${Math.min(99999 - left, percent(1 - c.x - c.width))}" b="${Math.min(99999 - top, percent(1 - c.y - c.height))}"/>` : '';
-  return `<p:pic><p:nvPicPr><p:cNvPr id="${id}" name="${escapeXML(item.name)}" descr="${escapeXML(asset.name)}"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="${relationship}">${alpha === 100000 ? '' : `<a:alphaModFix amt="${alpha}"/>`}</a:blip>${crop}<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>${transform(item, layout)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:ln><a:noFill/></a:ln></p:spPr></p:pic>`;
+  return `<p:pic><p:nvPicPr><p:cNvPr id="${id}" name="${escapeXML(item.name)}" descr="${escapeXML(asset.name)}"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="${relationship}">${alpha === 100000 ? '' : `<a:alphaModFix amt="${alpha}"/>`}</a:blip>${crop}<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>${transform(item, layout)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:ln><a:noFill/></a:ln>${imageShadow(item, layout)}</p:spPr></p:pic>`;
 }
 
 const emptyTree = '<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>';
