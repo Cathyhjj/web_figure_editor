@@ -164,6 +164,26 @@ dialog{border:1px solid var(--drx-border);border-radius:15px;padding:0;width:min
 .panel-pointer-active{user-select:none;-webkit-user-select:none}
 .window-resize{position:absolute;right:1px;bottom:1px;width:22px;height:22px;min-width:22px;min-height:22px;border:0;border-radius:0 0 8px 0;background:linear-gradient(135deg,transparent 48%,#a68bb3 49%,#a68bb3 53%,transparent 54%,transparent 67%,#a68bb3 68%,#a68bb3 72%,transparent 73%);background-size:12px 12px;background-position:center;background-repeat:no-repeat;cursor:nwse-resize;touch-action:none;z-index:2}
 .window-resize:focus-visible{outline-offset:-3px;background-color:var(--drx-accent-soft)}
+/* Dock edges resize the sidebar or the individual panel without floating it. */
+.panel-window{position:relative}
+.panel-window.has-dock-height:not(.is-floating){height:var(--window-dock-height);min-height:0;max-height:none;display:flex;flex-direction:column;flex:none;overflow:hidden}
+.panel-window.has-dock-height:not(.is-floating)>.window-body{flex:1;min-height:0;overflow:auto}
+.panel-window.has-dock-height[data-window="slides"]>.window-body,.panel-window.has-dock-height[data-window="assets"]>.window-body,.panel-window.has-dock-height[data-window="layers"]>.window-body{overflow:hidden}
+.panel-window.has-dock-height[data-window="assets"] .library-content{overflow:auto;min-height:0}
+.panel-window.has-dock-height[data-window="slides"] .slide-actions{flex-shrink:0}
+.panel-window.has-dock-height[data-window="slides"] .slide-list{flex:1;min-height:0;overflow:auto}
+.window-edge-resize{position:absolute;z-index:3;border:0;border-radius:0;padding:0;background:transparent;touch-action:none;user-select:none;-webkit-user-select:none}
+.window-edge-resize::after{content:"";position:absolute;background:#c8b9cf;border-radius:3px;transition:background .15s}
+.window-resize-width{left:0;top:0;bottom:0;width:8px;cursor:ew-resize}
+.window-resize-width::after{left:2px;top:calc(50% - 18px);width:3px;height:36px}
+[data-window="slides"]>.window-resize-width{left:auto;right:0}
+.window-resize-height{left:8px;right:0;bottom:0;height:8px;cursor:ns-resize}
+.window-resize-height::after{left:calc(50% - 18px);top:2px;width:36px;height:3px}
+.window-edge-resize:hover,.window-edge-resize:focus-visible{background:#8c298114;outline-offset:-2px}
+.window-edge-resize:hover::after,.window-edge-resize:focus-visible::after{background:var(--drx-accent)}
+.panel-window.is-resizing:not(.is-floating){box-shadow:inset 0 0 0 1px #b579ad}
+@media(pointer:coarse){.window-resize-width{width:12px}.window-resize-height{height:12px}}
+@media(forced-colors:active){.window-edge-resize::after{background:ButtonText}}
 .layout-tools{border-right:0!important;margin-left:auto;padding-right:0}
 .layout-tools .button{font-size:11px;color:#8c7797}
 .layout-tools+.toolbar-tip{margin-left:0}

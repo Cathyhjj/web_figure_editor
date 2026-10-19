@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Figure Editor panel layout checks</title>
+<style>
+  body{font:15px system-ui;max-width:1440px;margin:32px auto;padding:0 20px;color:#342b3e}
+  p{line-height:1.6}button{padding:12px 20px}li{padding:6px 0}li[data-pass="false"]{color:#a02034}
+  #editor-host{overflow:auto;margin-top:24px}
+  iframe{display:block;width:1400px;max-width:none;height:1000px;border:1px solid #d5cbdc;border-radius:12px}
+  code{background:#f4f0f7;padding:2px 5px;border-radius:3px}
+</style>
+<h1>Figure Editor panel layout checks</h1>
+<p>Exercises docked and floating panel resizing, cancellation, persistence, reset, and responsive layouts in the actual editor. These checks only change panel layout; they do not import files or edit the project.</p>
+<p>Run on <code>http://127.0.0.1:18768/tests/windows.html</code> with <code>python3 -m http.server 18768 --bind 127.0.0.1</code>. The test saves and restores only this separate origin’s panel layout preference.</p>
+<button id="run" type="button">Run panel layout checks</button>
+<ol id="results"></ol>
+<div id="editor-host"></div>
+<script type="module" src="./windows-browser.js"></script>
+</html>

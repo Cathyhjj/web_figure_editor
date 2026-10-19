@@ -1,6 +1,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { clampWindowRect } from '../windows.js';
+import { clampWindowRect, fitDockWidths } from '../windows.js';
+
+test('sidebar widths leave space for the canvas when restoring a wide layout', () => {
+  const requested = Object.freeze({ slides: 400, assets: 500, properties: 600 });
+  const fitted = fitDockWidths(requested, 1100);
+  assert.ok(Object.values(fitted).reduce((sum, width) => sum + width, 0) <= 820.00001);
+  assert.ok(fitted.slides >= 136 && fitted.assets >= 170 && fitted.properties >= 220);
+  assert.deepEqual(requested, { slides: 400, assets: 500, properties: 600 });
+});
+
+test('fitting docks preserves ordinary sizes and excludes floating columns', () => {
+  assert.deepEqual(fitDockWidths({ slides: 164, assets: 240, properties: 300 }, 1440), { slides: 164, assets: 240, properties: 300 });
+  assert.deepEqual(fitDockWidths({ assets: 500 }, 900), { assets: 500 });
+  assert.deepEqual(fitDockWidths({}, 700), {});
+});
+
+test('invalid or extreme sidebar preferences stay finite and usable', () => {
+  assert.deepEqual(fitDockWidths({ slides: NaN, assets: -100, properties: Infinity }, 1200), { slides: 136, assets: 170, properties: 220 });
+  assert.deepEqual(fitDockWidths({ assets: 10000 }, 1600), { assets: 600 });
+});
 
 const EPSILON = 1e-8;
 

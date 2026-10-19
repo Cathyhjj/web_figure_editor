@@ -2,6 +2,18 @@
 const STORAGE_KEY = 'figure-editor-window-layout-v1';
 const finite = (value, fallback) => typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 const limit = (value, min, max) => Math.min(max, Math.max(min, value));
+const dockMinimums = { slides: 136, assets: 170, properties: 220 };
+
+/** Fit saved sidebar widths while keeping room for the figure workspace. */
+export function fitDockWidths(widths, availableWidth, minimumCanvas = 280) {
+  const entries = Object.entries(widths).filter(([key]) => Object.hasOwn(dockMinimums, key));
+  const minimum = entries.reduce((sum, [key]) => sum + dockMinimums[key], 0);
+  const budget = Math.max(minimum, finite(availableWidth, minimum) - minimumCanvas);
+  const desired = entries.map(([key, value]) => [key, limit(finite(value, dockMinimums[key]), dockMinimums[key], 600)]);
+  const extra = desired.reduce((sum, [key, value]) => sum + value - dockMinimums[key], 0);
+  const scale = extra ? Math.min(1, Math.max(0, budget - minimum) / extra) : 1;
+  return Object.fromEntries(desired.map(([key, value]) => [key, dockMinimums[key] + (value - dockMinimums[key]) * scale]));
+}
 
 /** Keep the entire panel reachable, including in a smaller or shifted visual viewport. */
 export function clampWindowRect(rect = {}, viewport = {}, options = {}) {
@@ -27,6 +39,8 @@ export function initWindows({ onLayoutChange } = {}) {
   if (activeController) return activeController;
   const panels = new Map(), cleanup = [];
   const layout = document.querySelector('.editor-layout');
+  const properties = layout?.querySelector('.properties-panel');
+  let dockWidths = {};
   let topZ = 30, gesture = null, frame = 0, destroyed = false;
   const viewport = () => {
     const v = window.visualViewport;
@@ -40,7 +54,7 @@ export function initWindows({ onLayoutChange } = {}) {
   const help = document.createElement('p');
   help.id = 'window-keyboard-help';
   help.className = 'window-sr-only';
-  help.textContent = 'Drag the header to float and move this panel. With the header focused, arrow keys move 10 pixels; Shift and arrow keys move 1 pixel. Press Escape to cancel a drag. Use Dock to return it to its original position.';
+  help.textContent = 'Drag the header to float and move this panel. Drag panel edges to resize. With a header or resize handle focused, arrow keys adjust 10 pixels; Shift and arrow keys adjust 1 pixel. Press Escape to cancel a drag. Use Dock to return it to its original position.';
   document.body.append(help);
   const say = text => { announcer.textContent = text; };
   const listen = (target, event, fn, options) => {
@@ -53,8 +67,8 @@ export function initWindows({ onLayoutChange } = {}) {
   }
   function persist() {
     const saved = {};
-    for (const [key, panel] of panels) saved[key] = { floating: panel.floating, rect: panel.rect };
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, panels: saved })); }
+    for (const [key, panel] of panels) saved[key] = { floating: panel.floating, rect: panel.rect, dockHeight: panel.dockHeight };
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, panels: saved, dockWidths })); }
     catch { say('Panel layout could not be saved in this browser. The current layout is still usable.'); }
   }
   function dockColumns() {
@@ -62,6 +76,69 @@ export function initWindows({ onLayoutChange } = {}) {
     layout?.classList.toggle('window-assets-floating', !!panels.get('assets')?.floating);
     layout?.classList.toggle('window-layers-floating', !!panels.get('layers')?.floating);
     layout?.classList.toggle('window-all-properties-floating', ['layers', 'canvas', 'objects'].every(key => panels.get(key)?.floating));
+    syncDockSizes();
+  }
+  function widthKey(panel) {
+    return panel.key === 'slides' || panel.key === 'assets' ? panel.key : 'properties';
+  }
+  function dockWidth(panel) {
+    // Properties sections sit inside the sidebar border; measure its grid track
+    // so one-pixel keyboard adjustments do not get lost to that border.
+    return parseFloat(getComputedStyle(layout).getPropertyValue(`--${widthKey(panel)}-dock-width`));
+  }
+  function heightRange(panel) {
+    const min = panel.key === 'slides' ? 220 : 150;
+    return { min, max: Math.max(min, panel.key === 'layers' && window.innerWidth > 1050 ? layout.clientHeight - 150 : window.innerHeight - 100) };
+  }
+  function syncDockSizes() {
+    if (!layout) return;
+    const desktop = window.innerWidth > 1050, columns = window.innerWidth > 760;
+    // Read responsive defaults before applying saved preferences. Narrow windows do
+    // not overwrite those preferences, so widening the browser restores them.
+    for (const key of Object.keys(dockMinimums)) layout.style.removeProperty(`--${key}-dock-width`);
+    const defaults = getComputedStyle(layout), widths = {};
+    for (const key of Object.keys(dockMinimums)) {
+      const visible = key === 'properties' ? desktop && !layout.classList.contains('window-all-properties-floating') : !panels.get(key)?.floating;
+      if (columns && visible) widths[key] = dockWidths[key] ?? parseFloat(defaults.getPropertyValue(`--${key}-dock-width`));
+    }
+    const fitted = fitDockWidths(widths, layout.clientWidth);
+    for (const [key, value] of Object.entries(fitted)) layout.style.setProperty(`--${key}-dock-width`, `${value}px`);
+    properties?.style.removeProperty('grid-template-rows');
+    for (const panel of panels.values()) {
+      const key = widthKey(panel), range = heightRange(panel);
+      const height = panel.dockHeight === null ? null : limit(panel.dockHeight, range.min, range.max);
+      const canHeight = !['slides', 'assets'].includes(panel.key) || !columns;
+      const constrained = !panel.floating && canHeight && height !== null;
+      panel.element.classList.toggle('has-dock-height', constrained);
+      if (constrained) panel.element.style.setProperty('--window-dock-height', `${height}px`);
+      else panel.element.style.removeProperty('--window-dock-height');
+      if (constrained && panel.key === 'layers' && desktop) properties.style.gridTemplateRows = `${height}px minmax(0,1fr)`;
+      panel.widthResize.hidden = panel.floating || !columns || (key === 'properties' && !desktop);
+      panel.heightResize.hidden = panel.floating || !canHeight;
+      panel.widthResize.setAttribute('aria-valuenow', String(Math.round(fitted[key] || panel.element.getBoundingClientRect().width)));
+      panel.widthResize.setAttribute('aria-valuemin', String(dockMinimums[key]));
+      panel.widthResize.setAttribute('aria-valuemax', String(Math.floor(Math.min(600, (fitted[key] || 0) + Math.max(0, layout.clientWidth - Object.values(fitted).reduce((a, b) => a + b, 0) - 280)))));
+      panel.heightResize.setAttribute('aria-valuenow', String(Math.round(height ?? panel.element.getBoundingClientRect().height)));
+      panel.heightResize.setAttribute('aria-valuemin', String(range.min));
+      panel.heightResize.setAttribute('aria-valuemax', String(Math.round(range.max)));
+    }
+  }
+  function resizeDock(panel, axis, value) {
+    if (axis === 'width') {
+      const key = widthKey(panel), current = {};
+      const css = getComputedStyle(layout);
+      for (const name of Object.keys(dockMinimums)) {
+        const width = parseFloat(css.getPropertyValue(`--${name}-dock-width`));
+        if (width > 0 && (name !== 'properties' || window.innerWidth > 1050)) current[name] = width;
+      }
+      const others = Object.entries(current).reduce((sum, [name, width]) => sum + (name === key ? 0 : width), 0);
+      dockWidths = { ...dockWidths, ...current, [key]: limit(value, dockMinimums[key], Math.max(dockMinimums[key], Math.min(600, layout.clientWidth - others - 280))) };
+    } else {
+      const range = heightRange(panel);
+      panel.dockHeight = limit(value, range.min, range.max);
+    }
+    syncDockSizes();
+    notifyLayout();
   }
   function raise(panel) {
     if (panel.floating) panel.element.style.zIndex = String(++topZ);
@@ -111,13 +188,17 @@ export function initWindows({ onLayoutChange } = {}) {
     document.body.classList.remove('panel-pointer-active');
     g.panel.element.classList.remove('is-moving', 'is-resizing');
     if (cancel && g.moved) {
-      if (g.wasFloating) applyRect(g.panel, g.before);
+      if (g.mode.startsWith('dock-')) {
+        dockWidths = g.savedWidths;
+        g.panel.dockHeight = g.savedHeight;
+        syncDockSizes(); notifyLayout();
+      } else if (g.wasFloating) applyRect(g.panel, g.before);
       else { dock(g.panel); g.panel.rect = g.savedRect; }
       g.handle.focus({ preventScroll: true });
     }
     if (g.moved) {
       persist();
-      say(cancel ? `${g.panel.title} movement cancelled.` : `${g.panel.title} panel ${g.mode === 'resize' ? 'resized' : 'moved'}.`);
+      say(cancel ? `${g.panel.title} adjustment cancelled.` : `${g.panel.title} panel ${g.mode === 'move' ? 'moved' : 'resized'}.`);
     }
   }
   function beginGesture(event, panel, mode, handle) {
@@ -126,7 +207,7 @@ export function initWindows({ onLayoutChange } = {}) {
     event.preventDefault();
     event.stopPropagation();
     const r = panel.element.getBoundingClientRect();
-    gesture = { panel, mode, handle, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, before: { x: r.left, y: r.top, width: r.width, height: r.height }, wasFloating: panel.floating, savedRect: panel.rect && { ...panel.rect }, moved: false };
+    gesture = { panel, mode, handle, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, before: { x: r.left, y: r.top, width: mode === 'dock-width' ? dockWidth(panel) : r.width, height: r.height }, wasFloating: panel.floating, savedRect: panel.rect && { ...panel.rect }, savedWidths: { ...dockWidths }, savedHeight: panel.dockHeight, moved: false };
     handle.focus({ preventScroll: true });
     handle.setPointerCapture?.(event.pointerId);
     raise(panel);
@@ -139,16 +220,18 @@ export function initWindows({ onLayoutChange } = {}) {
     event.stopPropagation();
     if (!g.moved) {
       g.moved = true;
-      if (!g.panel.floating) {
+      if (!g.panel.floating && g.mode === 'move') {
         float(g.panel, { ...g.before, width: Math.max(220, g.before.width), height: Math.min(540, g.before.height) });
         // Reparenting the panel clears browser focus; keep keys on panel chrome.
         g.handle.focus({ preventScroll: true });
         g.handle.setPointerCapture?.(event.pointerId);
       }
       document.body.classList.add('panel-pointer-active');
-      g.panel.element.classList.add(g.mode === 'resize' ? 'is-resizing' : 'is-moving');
+      g.panel.element.classList.add(g.mode === 'move' ? 'is-moving' : 'is-resizing');
     }
-    if (g.mode === 'move') applyRect(g.panel, { ...g.panel.rect, x: g.before.x + dx, y: g.before.y + dy });
+    if (g.mode === 'dock-width') resizeDock(g.panel, 'width', g.before.width + (g.panel.key === 'slides' ? dx : -dx));
+    else if (g.mode === 'dock-height') resizeDock(g.panel, 'height', g.before.height + dy);
+    else if (g.mode === 'move') applyRect(g.panel, { ...g.panel.rect, x: g.before.x + dx, y: g.before.y + dy });
     else {
       const v = viewport();
       applyRect(g.panel, { ...g.before, width: Math.min(g.before.width + dx, v.left + v.width - 8 - g.before.x), height: Math.min(g.before.height + dy, v.top + v.height - 8 - g.before.y) });
@@ -201,7 +284,31 @@ export function initWindows({ onLayoutChange } = {}) {
     resize.title = 'Drag to resize. Arrow keys resize 10 px; Shift + arrows resize 1 px.';
     resize.setAttribute('aria-label', `Resize ${title} panel`);
     element.append(resize);
-    const panel = { key, title, element, header, body, marker, toggle, resize, grip, floating: false, rect: null };
+    const widthResize = document.createElement('button'), heightResize = document.createElement('button');
+    const panel = { key, title, element, header, body, marker, toggle, resize, widthResize, heightResize, grip, floating: false, rect: null, dockHeight: null };
+    for (const [axis, handle] of [['width', widthResize], ['height', heightResize]]) {
+      handle.type = 'button';
+      handle.className = `window-edge-resize window-resize-${axis}`;
+      handle.setAttribute('role', 'separator');
+      handle.setAttribute('aria-orientation', axis === 'width' ? 'vertical' : 'horizontal');
+      const label = axis === 'width' && widthKey(panel) === 'properties' ? 'Resize properties sidebar width' : `Resize ${title} panel ${axis}`;
+      handle.setAttribute('aria-label', label);
+      handle.title = `${label}. Drag or use arrow keys; Shift + arrows adjusts 1 px.`;
+      element.append(handle);
+      listen(handle, 'pointerdown', event => beginGesture(event, panel, `dock-${axis}`, handle));
+      listen(handle, 'keydown', event => {
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') return;
+        event.stopPropagation();
+        if (event.key === 'Escape' && gesture) { event.preventDefault(); finishGesture(true); return; }
+        const keys = axis === 'width' ? ['ArrowLeft', 'ArrowRight'] : ['ArrowUp', 'ArrowDown'];
+        if (!keys.includes(event.key)) return;
+        event.preventDefault();
+        const direction = axis === 'width' && key !== 'slides' ? -1 : 1;
+        const delta = (event.shiftKey ? 1 : 10) * (event.key === keys[0] ? -1 : 1) * direction;
+        resizeDock(panel, axis, (axis === 'width' ? dockWidth(panel) : element.getBoundingClientRect().height) + delta);
+        persist();
+      });
+    }
     panels.set(key, panel);
     chrome(panel);
     listen(toggle, 'click', event => {
@@ -233,7 +340,9 @@ export function initWindows({ onLayoutChange } = {}) {
 
   function reset() {
     finishGesture(true);
-    for (const panel of panels.values()) { dock(panel); panel.rect = null; }
+    dockWidths = {};
+    for (const panel of panels.values()) { panel.dockHeight = null; dock(panel); panel.rect = null; }
+    syncDockSizes();
     persist();
     say('All panels returned to their default docks.');
     notifyLayout();
@@ -248,6 +357,7 @@ export function initWindows({ onLayoutChange } = {}) {
   const viewportChanged = () => {
     finishGesture(true);
     for (const panel of panels.values()) if (panel.floating) applyRect(panel, panel.rect);
+    syncDockSizes();
     persist(); notifyLayout();
   };
   listen(window, 'resize', viewportChanged);
@@ -259,8 +369,13 @@ export function initWindows({ onLayoutChange } = {}) {
     const value = localStorage.getItem(STORAGE_KEY);
     const saved = value && value.length < 50000 ? JSON.parse(value) : null;
     if (saved?.version === 1 && saved.panels && typeof saved.panels === 'object') {
+      for (const key of Object.keys(dockMinimums)) {
+        const width = saved.dockWidths?.[key];
+        if (typeof width === 'number' && Number.isFinite(width)) dockWidths[key] = limit(width, dockMinimums[key], 600);
+      }
       for (const [key, panel] of panels) {
         const entry = saved.panels[key];
+        if (typeof entry?.dockHeight === 'number' && Number.isFinite(entry.dockHeight)) panel.dockHeight = limit(entry.dockHeight, 150, 2000);
         if (entry?.rect && typeof entry.rect === 'object') panel.rect = clampWindowRect(entry.rect, viewport());
         if (entry?.floating === true) float(panel);
       }
@@ -271,11 +386,12 @@ export function initWindows({ onLayoutChange } = {}) {
     reset,
     destroy() {
       finishGesture(true);
+      for (const panel of panels.values()) dock(panel);
       for (const panel of panels.values()) {
-        dock(panel);
         panel.body.replaceWith(...panel.body.childNodes);
-        panel.toggle.remove(); panel.resize.remove(); panel.grip.remove(); panel.marker.remove();
-        panel.element.classList.remove('panel-window', 'is-floating');
+        panel.toggle.remove(); panel.resize.remove(); panel.widthResize.remove(); panel.heightResize.remove(); panel.grip.remove(); panel.marker.remove();
+        panel.element.classList.remove('panel-window', 'is-floating', 'has-dock-height');
+        panel.element.style.removeProperty('--window-dock-height');
         delete panel.element.dataset.windowState;
         panel.header.classList.remove('window-header');
         for (const attr of ['tabindex', 'role', 'aria-label', 'aria-describedby', 'title']) panel.header.removeAttribute(attr);
@@ -285,6 +401,8 @@ export function initWindows({ onLayoutChange } = {}) {
       cleanup.forEach(remove => remove());
       announcer.remove(); help.remove();
       layout?.classList.remove('windows-ready', 'window-slides-floating', 'window-assets-floating', 'window-layers-floating', 'window-all-properties-floating');
+      for (const key of Object.keys(dockMinimums)) layout?.style.removeProperty(`--${key}-dock-width`);
+      properties?.style.removeProperty('grid-template-rows');
       activeController = null;
     },
   };

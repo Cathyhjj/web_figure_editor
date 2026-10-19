@@ -43,6 +43,8 @@
 !/tests/shadow-browser.js
 !/tests/crop.html
 !/tests/crop-browser.js
+!/tests/windows.html
+!/tests/windows-browser.js
 !/tests/project-save.html
 !/tests/project-save-browser.js
 !/scripts/

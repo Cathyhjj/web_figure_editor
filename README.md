@@ -42,7 +42,7 @@ python3 server.py
 - **Copy / Paste**：复制所有选中 slides，再按原项目顺序一次插入当前页之后；也可用 **⌘ / Ctrl + C、V**。可跨项目粘贴，保留每页名称、尺寸、背景、原图、图层顺序及隐藏/锁定状态。空白页同样支持，共享素材只保留一份；一次撤销/重做处理整批 slides。
 - **Delete slide**：删除选中 slides，可用 **Undo** 恢复；至少保留一页，全选时删除按钮禁用。在 Slides 面板按 **⌘ / Ctrl + D** 生成副本，按 **Delete / Backspace** 删除选中页。
 
-**Slides、Assets、Layers、Canvas settings、Object properties** 是五个独立面板。拖动面板标题栏即可将它浮起并移动，也可点击 **Float**；浮动后拖动右下角调整面板大小。点击面板标题栏的 **Dock** 可将它放回原来的停靠位置，点击 **Reset layout** 可恢复全部面板的默认布局。
+**Slides、Assets、Layers、Canvas settings、Object properties** 是五个独立面板。拖动面板标题栏即可将它浮起并移动，也可点击 **Float**；浮动后拖动右下角调整面板大小。停靠时，拖动 Slides 的右边缘、Assets 的左边缘或右侧属性栏的左边缘调整栏宽；拖动 Layers、Canvas settings、Object properties 的底边调整各面板高度，内容较多时可在面板内滚动。窄屏下各栏自动堆叠，可调整面板高度。点击面板标题栏的 **Dock** 可将它放回原来的停靠位置并恢复停靠尺寸，点击 **Reset layout** 可恢复全部面板的默认位置和尺寸。用 Tab 聚焦尺寸手柄后，方向键可调整 10 px，按住 Shift 可微调 1 px；拖动时按 Esc 取消。
 
 面板的位置、大小和浮动状态会保存在当前浏览器中，刷新或重新打开同一本地地址时恢复；此布局不包含在 `.figure.json` 中。清理浏览器数据会清除保存的布局。面板布局只影响操作界面，不改变画布对象或导出内容。
 
@@ -155,6 +155,8 @@ python3 -m unittest discover -s tests -p 'test_server.py'
 ```
 
 启动本地服务器后，打开 <http://127.0.0.1:8766/tests/browser.html>，点击 **Run checks**，验证实际图片解码、SVG 安全检查和 PNG/SVG 导出。所有自动测试均使用合成数据，无须私人论文素材。
+
+面板布局检查使用独立端口：`python3 -m http.server 18768 --bind 127.0.0.1`，打开 <http://127.0.0.1:18768/tests/windows.html>，点击 **Run panel layout checks**。验证停靠尺寸调整、取消、浮动与停靠、刷新恢复、重置及窄屏布局；检查完成后恢复测试端口原有的布局设置。
 
 PPT 导出的浏览器集成检查使用 <http://127.0.0.1:18766/tests/pptx.html>，点击 **Run PPT checks**，验证实际 Export 窗口、多页下载、WebP 转 PNG、出错后恢复及其他格式切换。它仅使用合成素材并替换测试端口下的草稿。
 
