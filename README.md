@@ -21,7 +21,7 @@ python3 server.py
 ## 基本流程
 
 1. 点击 **Add local images**，或将 PNG、JPG、WebP、SVG 文件拖入画布。
-2. 点击对象后拖动位置，拖动右下角调整大小；图片默认保持比例，按住 `Shift` 拖动可自由缩放。在 **Object properties** 面板输入精确位置、尺寸、旋转及透明度。
+2. 点击对象后拖动位置，拖动右下角调整大小；图片默认保持比例，按住 `Shift` 拖动可自由缩放。拖动图片左右边的中点只改变宽度，拖动上下边的中点只改变高度；旋转后的图片沿自身方向拉伸，对边保持固定。在 **Object properties** 面板输入精确位置、尺寸、旋转及透明度。
 3. 使用 **Text** 添加标注；选中文字后，用顶部 **Font** 选择或输入本机字体名称，调整字号（px），或点击 **A⌃ / A⌄** 放大、缩小。支持多选文字统一修改，锁定对象会跳过，可用 Undo 撤销。双击文字，在 **Object properties** 中编辑内容、字体、字号、颜色和对齐。换行请按 `Enter`。字体需要安装在本机，未安装时浏览器会使用替代字体。
 4. 用 `Shift + 点击` 多选，再使用 **Align** 工具；**Distribute horizontally** 将至少三个对象水平等距排列。在 **Layers** 中选择、隐藏或锁定对象。
 5. 点击 **Save** 保存包含全部 slides 的 `.figure.json`：新项目首次选择位置，**Open** 打开的项目直接保存回原文件；**Save As…** 另选位置保存副本。点击 **Export** 可将当前 slide 导出为 PNG 或 SVG，或选择 **PPT** 导出可编辑 PowerPoint，选择 **HTML report** 导出全部 slides 的离线报告。
@@ -171,6 +171,8 @@ Locate 的浏览器检查使用同一独立测试端口的 `/tests/locate.html`�
 复制粘贴的浏览器检查使用 `/tests/clipboard.html`，通过合成剪贴板事件、模拟系统写入与 PNG 解码验证同页/跨页粘贴、撤销重做、外部图片导入、文本输入保护和图像输出；**Run Clipboard checks** 不修改系统剪贴板。单独点击 **Copy test selection to system clipboard** 会把测试素材写入系统剪贴板，可切换到其他应用粘贴验证；也可在测试画布实际按 Cmd/Ctrl+C、Cmd/Ctrl+V 检查。
 
 图片裁切的浏览器检查使用独立测试端口的 `/tests/crop.html`，点击 **Run crop checks**，验证八个裁切手柄、移动选区、取消、撤销/重做、恢复原图、保存重开和像素级导出结果；仅使用合成图片。
+
+图片拉伸检查使用 `python3 server.py --port 18767`，打开 <http://127.0.0.1:18767/tests/resize.html>，点击 **Run stretch checks**，验证四边独立拉伸、等比例缩放、撤销/重做、保存重开及 PNG/SVG 输出；仅替换此测试端口的合成草稿。
 
 `.gitignore` 仅允许应用代码、测试、文档、启动配置和字体进入仓库。添加新代码文件时请同步更新允许列表；不要强制添加用户图稿、凭据、运行数据或生成包。
 

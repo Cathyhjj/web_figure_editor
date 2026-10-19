@@ -11,6 +11,7 @@ import { imageShadowSVG } from './shadow.js';
 import { shadowEditorMarkup, bindShadowEditor } from './shadow-editor.js';
 import { imageCrop, isCropped, cropImage } from './crop.js';
 import { createCropEditor } from './crop-editor.js';
+import { resizeItem } from './resize.js';
 import { initFontTools, fontValue } from './font-tools.js';
 
 import { CLIPBOARD_MIME, createSelection, encodeSelection, decodeSelection, pasteSelection, SLIDE_CLIPBOARD_MIME, SLIDES_CLIPBOARD_MIME, createSlidesClipboard, encodeSlides, decodeSlides, pasteSlides } from './clipboard.js';
@@ -159,7 +160,18 @@ function renderStage(){
   g.append(svg('rect',{width:item.width,height:item.height,fill:'transparent','pointer-events':'all',class:'item-hit'}));
   if(selected.has(item.id)){
    g.append(svg('rect',{width:item.width,height:item.height,fill:'none',stroke:item.locked?'#777':'#9c357c','stroke-width':1.4/zoom,'stroke-dasharray':item.locked?`${4/zoom} ${3/zoom}`:'none','pointer-events':'none'}));
-   if(selected.size===1&&!item.locked)g.append(svg('rect',{x:item.width-5/zoom,y:item.height-5/zoom,width:10/zoom,height:10/zoom,fill:'#fff',stroke:'#9c357c','stroke-width':1.5/zoom,'data-resize':item.id,class:'resize-handle'}));
+   if(selected.size===1&&!item.locked){
+    const handles=item.type==='image'?[
+     ['w',0,item.height/2,'Stretch width',0],['e',item.width,item.height/2,'Stretch width',0],
+     ['n',item.width/2,0,'Stretch height',90],['s',item.width/2,item.height,'Stretch height',90],
+    ]:[];
+    handles.push(['se',item.width,item.height,item.type==='image'?'Scale proportionally (Shift: resize freely)':'Resize',45]);
+    for(const [direction,x,y,label,angle] of handles){
+     const cursor=['ew-resize','nwse-resize','ns-resize','nesw-resize'][((Math.round((item.rotation+angle)/45)%4)+4)%4];
+     const handle=svg('rect',{x:x-5/zoom,y:y-5/zoom,width:10/zoom,height:10/zoom,fill:'#fff',stroke:'#9c357c','stroke-width':1.5/zoom,'data-resize':item.id,'data-resize-handle':direction,'aria-label':label,class:'resize-handle',style:`cursor:${cursor}`});
+     handle.append(svg('title',{},label));g.append(handle);
+    }
+   }
   }
   stage.append(g);
  }
@@ -242,7 +254,7 @@ function renderInspector(){
  const i=items[0];
  box.innerHTML=`<div class="section-heading">${i.type==='image'?'Image':i.type==='text'?'Text':'Shape'} properties${i.locked?' · Locked':''}</div>${field('Name','name',i.name,'text')}<div class="field-row">${field('X / px','x',round(i.x),'number','step="1"')}${field('Y / px','y',round(i.y),'number','step="1"')}</div><div class="field-row">${field('Width / px','width',round(i.width),'number','min="1" step="1"')}${field('Height / px','height',round(i.height),'number','min="1" step="1"')}</div><div class="field-row">${field('Rotation / °','rotation',round(i.rotation))}${field('Opacity','opacity',i.opacity,'number','min="0" max="1" step="0.1"')}</div>`;
  if(i.type==='text')box.innerHTML+=`<label class="field"><span>Text content</span><textarea id="text-content" rows="4">${escapeHTML(i.text)}</textarea></label>${field('Font','fontFamily',i.fontFamily,'text','list="font-families" maxlength="200" autocomplete="off" spellcheck="false"')}<div class="field-row">${field('Size / px','fontSize',i.fontSize,'number','min="1" max="2000" step="any"')}${field('Color','color',i.color,'color')}</div><div class="field-row"><label class="field"><span>Weight</span><select data-property="fontWeight"><option value="400" ${String(i.fontWeight)==='400'?'selected':''}>Regular</option><option value="700" ${String(i.fontWeight)==='700'?'selected':''}>Bold</option></select></label><label class="field"><span>Style</span><select data-property="fontStyle"><option value="normal" ${i.fontStyle==='normal'?'selected':''}>Normal</option><option value="italic" ${i.fontStyle==='italic'?'selected':''}>Italic</option></select></label></div><label class="field"><span>Text alignment</span><select data-property="align">${[['left','Left'],['center','Center'],['right','Right']].map(([v,t])=>`<option value="${v}" ${i.align===v?'selected':''}>${t}</option>`).join('')}</select></label><p class="hint">Uses fonts installed on this computer. SVG does not embed fonts. Press Enter for a new line.</p>`;
- if(i.type==='image'){const a=assetById(i.assetId),c=imageCrop(i);const effectiveDPI=a?Math.round(Math.min(a.width*c.width/i.width,a.height*c.height/i.height)*96):0;box.innerHTML+=`<div class="image-crop-actions"><button id="crop-image" class="button" ${i.locked?'disabled':''}>${isCropped(i)?'Edit crop':'Crop'}</button><button id="restore-image" class="button" ${i.locked||!isCropped(i)?'disabled':''}>Restore original</button></div><p class="hint">Source: ${escapeHTML(a?.name)}<br>Original size: ${a?.width} × ${a?.height} px${isCropped(i)?`<br>Cropped area: ${Math.round(a.width*c.width)} × ${Math.round(a.height*c.height)} px`:''}<br>Effective resolution: ${effectiveDPI} DPI<br>Drag a corner to keep proportions. Hold Shift to resize freely. Changing width also updates height.</p>`;}
+ if(i.type==='image'){const a=assetById(i.assetId),c=imageCrop(i);const effectiveDPI=a?Math.round(Math.min(a.width*c.width/i.width,a.height*c.height/i.height)*96):0;box.innerHTML+=`<div class="image-crop-actions"><button id="crop-image" class="button" ${i.locked?'disabled':''}>${isCropped(i)?'Edit crop':'Crop'}</button><button id="restore-image" class="button" ${i.locked||!isCropped(i)?'disabled':''}>Restore original</button></div><p class="hint">Source: ${escapeHTML(a?.name)}<br>Original size: ${a?.width} × ${a?.height} px${isCropped(i)?`<br>Cropped area: ${Math.round(a.width*c.width)} × ${Math.round(a.height*c.height)} px`:''}<br>Effective resolution: ${effectiveDPI} DPI<br>Drag the bottom-right corner to keep proportions; hold Shift to resize freely. Drag side handles to stretch width or height. Width and height fields keep proportions.</p>`;}
  if(i.type==='image')box.innerHTML+=shadowEditorMarkup(i);
  if(i.type==='rect'||i.type==='line')box.innerHTML+=`<div class="field-row">${i.type==='rect'?field('Fill','fill',i.fill,'color'):''}${field('Stroke','stroke',i.stroke,'color')}</div>${field('Stroke width / px','strokeWidth',i.strokeWidth,'number','min="0" max="100" step="0.5"')}`;
  box.innerHTML+=`<label class="field inline"><input id="object-locked" type="checkbox" ${i.locked?'checked':''}> Lock object</label>`;
@@ -295,7 +307,7 @@ function render(){
  selected=new Set([...selected].filter(id=>byId(id)));renderStage();renderSlides();renderAssets();renderLayers();renderInspector();renderToolbar();
  $('project-name').value=project.name;$('canvas-width').value=slide().canvas.width;$('canvas-height').value=slide().canvas.height;$('canvas-background').value=slide().canvas.background;
 }
-function point(event){const r=$('stage').getBoundingClientRect();return{x:(event.clientX-r.left)/zoom,y:(event.clientY-r.top)/zoom};}
+function point(event){const p=new DOMPoint(event.clientX,event.clientY).matrixTransform($('stage').getScreenCTM().inverse());return{x:p.x,y:p.y};}
 function placeAsset(a,position){change(()=>{const maxW=slide().canvas.width*.43,maxH=slide().canvas.height*.65,scale=Math.min(1,maxW/a.width,maxH/a.height);const offset=slide().items.length%6*18;const i={...base('image',position?.x??60+offset,position?.y??60+offset,a.width*scale,a.height*scale),assetId:a.id,name:a.name};slide().items.push(i);selected=new Set([i.id]);});status(`Added ${a.name} to the canvas.`);}
 const importTarget=()=>({project,slideId:project.activeSlideId});
 async function importResult(result,position,target,{libraryOnly=false}={}){
@@ -372,15 +384,14 @@ $('stage').onpointerdown=e=>{
  const i=byId(id);if(e.shiftKey&&!e.target.dataset.resize){selected.has(id)?selected.delete(id):selected.add(id);render();return;}
  if(!selected.has(id))selected=new Set([id]);renderInspector();renderLayers();renderToolbar();renderStage();syncAssetSelection(i.type==='image'?i.assetId:undefined);
  if(i.locked)return;
- const start=point(e),items=chosen().filter(i=>!i.locked),before=snapshot();const edit=i.type==='text'&&lastTap?.id===id&&e.timeStamp-lastTap.time<500&&Math.abs(start.x-lastTap.x)+Math.abs(start.y-lastTap.y)<5;lastTap={id,time:e.timeStamp,...start};gesture={mode:e.target.dataset.resize?'resize':'move',id,start,items:items.map(i=>({...i})),before,moved:false,edit};
+ const start=point(e),items=chosen().filter(i=>!i.locked),before=snapshot();const edit=i.type==='text'&&lastTap?.id===id&&e.timeStamp-lastTap.time<500&&Math.abs(start.x-lastTap.x)+Math.abs(start.y-lastTap.y)<5;lastTap={id,time:e.timeStamp,...start};gesture={mode:e.target.dataset.resize?'resize':'move',handle:e.target.dataset.resizeHandle||'se',id,start,items:items.map(i=>({...i})),before,moved:false,edit};
  $('stage').setPointerCapture(e.pointerId);e.preventDefault();
 };
 $('stage').onpointermove=e=>{
  if(!gesture)return;const p=point(e),dx=p.x-gesture.start.x,dy=p.y-gesture.start.y;if(Math.abs(dx)+Math.abs(dy)<.2)return;gesture.moved=true;
  if(gesture.mode==='move'){for(const orig of gesture.items){const i=byId(orig.id);i.x=orig.x+dx;i.y=orig.y+dy;}}
- else{const orig=gesture.items.find(i=>i.id===gesture.id),i=byId(orig.id),angle=orig.rotation*Math.PI/180;let w=Math.max(4,orig.width+dx*Math.cos(angle)+dy*Math.sin(angle)),h=Math.max(4,orig.height-dx*Math.sin(angle)+dy*Math.cos(angle));if(orig.type==='image'&&!e.shiftKey)h=w*orig.height/orig.width;
- // Keep the rotated top-left corner fixed while resizing around the center.
- const dw=w-orig.width,dh=h-orig.height;i.x=orig.x+(dw*Math.cos(angle)-dh*Math.sin(angle)-dw)/2;i.y=orig.y+(dw*Math.sin(angle)+dh*Math.cos(angle)-dh)/2;i.width=w;i.height=h;
+ else{const orig=gesture.items.find(i=>i.id===gesture.id);
+ Object.assign(byId(orig.id),resizeItem(orig,gesture.handle,dx,dy,{free:e.shiftKey}));
  }renderStage();
 };
 function endGesture(){if(!gesture)return;const edit=gesture.edit&&!gesture.moved;if(gesture.moved)record(gesture.before);gesture=null;render();if(edit){$('text-content')?.focus();$('text-content')?.select();}}

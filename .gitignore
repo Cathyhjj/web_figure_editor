@@ -19,6 +19,7 @@
 !/shadow-editor.js
 !/crop.js
 !/crop-editor.js
+!/resize.js
 !/deck.js
 !/project-files.js
 !/demo.js
@@ -43,6 +44,8 @@
 !/tests/shadow-browser.js
 !/tests/crop.html
 !/tests/crop-browser.js
+!/tests/resize.html
+!/tests/resize-browser.js
 !/tests/windows.html
 !/tests/windows-browser.js
 !/tests/project-save.html
