@@ -138,7 +138,10 @@ function textShape(item, id, layout) {
 }
 function imageShape(item, asset, id, relationship, layout) {
   const alpha = Math.round(item.opacity * 100000);
-  return `<p:pic><p:nvPicPr><p:cNvPr id="${id}" name="${escapeXML(item.name)}" descr="${escapeXML(asset.name)}"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="${relationship}">${alpha === 100000 ? '' : `<a:alphaModFix amt="${alpha}"/>`}</a:blip><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>${transform(item, layout)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:ln><a:noFill/></a:ln></p:spPr></p:pic>`;
+  const c = item.crop, percent = value => Math.max(0, Math.round(value * 100000));
+  const left = c ? Math.min(99999, percent(c.x)) : 0, top = c ? Math.min(99999, percent(c.y)) : 0;
+  const crop = c ? `<a:srcRect l="${left}" t="${top}" r="${Math.min(99999 - left, percent(1 - c.x - c.width))}" b="${Math.min(99999 - top, percent(1 - c.y - c.height))}"/>` : '';
+  return `<p:pic><p:nvPicPr><p:cNvPr id="${id}" name="${escapeXML(item.name)}" descr="${escapeXML(asset.name)}"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="${relationship}">${alpha === 100000 ? '' : `<a:alphaModFix amt="${alpha}"/>`}</a:blip>${crop}<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>${transform(item, layout)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:ln><a:noFill/></a:ln></p:spPr></p:pic>`;
 }
 
 const emptyTree = '<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>';

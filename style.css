@@ -191,3 +191,9 @@ dialog{border:1px solid var(--drx-border);border-radius:15px;padding:0;width:min
 .asset-folder-content{display:flex;flex-direction:column;gap:10px;margin:8px 0 2px 4px;padding-left:7px;border-left:1px solid #e5dce9;min-width:0}
 @media(pointer:coarse){.asset-folder>summary{min-height:40px}}
 @media(forced-colors:active){.asset-folder>summary,.asset-folder-content{border:1px solid CanvasText}}
+
+
+/* Non-destructive image crop editor. */
+.image-crop-actions{display:flex;gap:8px;margin:12px 0;flex-wrap:wrap}.image-crop-actions .button{font-size:11px;padding:7px 10px}
+.crop-dialog{width:min(860px,calc(100vw - 32px))}.crop-dialog .dialog-header{padding:20px 28px 16px}.crop-dialog .dialog-header h2{margin:6px 0}.crop-body{padding:24px 32px 8px}.crop-body>svg{display:block;width:100%;height:48vh;max-height:480px;min-height:160px;overflow:visible;touch-action:none;user-select:none;background:#f1eff4;border-radius:4px}.crop-body>output{display:block;margin:16px 0 8px;font-size:12px;font-variant-numeric:tabular-nums;color:var(--drx-text)}.crop-body .hint{line-height:1.6}.crop-frame{stroke:#fff;stroke-width:2;vector-effect:non-scaling-stroke;cursor:move}.crop-grid{stroke:#fff9;stroke-width:1;vector-effect:non-scaling-stroke}.crop-handle{fill:#fff;stroke:#80326d;stroke-width:2;vector-effect:non-scaling-stroke}.crop-handle:focus,.crop-frame:focus{outline:none;stroke:#d842ab;stroke-width:3}.crop-action-spacer{flex:1}.crop-dialog .dialog-actions{flex-wrap:wrap}
+@media(max-width:600px){.crop-body{padding:18px 22px 8px}.crop-dialog .dialog-actions{padding:12px 18px 20px;gap:6px}.crop-dialog .dialog-actions .button{padding-inline:12px}}

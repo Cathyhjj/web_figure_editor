@@ -7,6 +7,8 @@ import { locateAsset } from './locate.js';
 import { generateHTMLReport } from './report.js';
 import { exportPPTX, pptxLayout } from './pptx.js';
 import { initWindows } from './windows.js';
+import { imageCrop, isCropped, cropImage } from './crop.js';
+import { createCropEditor } from './crop-editor.js';
 import { initFontTools, fontValue } from './font-tools.js';
 
 const $ = id => document.getElementById(id);
@@ -34,9 +36,14 @@ function record(before){undoStack.push(before); if(undoStack.length>50)undoStack
 function change(action){flushText();const before=snapshot();try{action();validateDeck(project);record(before);render();return true;}catch(error){project=before;render();status(error.message,true);return false;}}
 function changed(){dirty=true;editRevision++;clearTimeout(draftTimer);draftTimer=setTimeout(saveDraft,650);}
 function base(type, x=80,y=80,width=160,height=80){return {id:uid(),type,name:type==='text'?'Text':type==='rect'?'Rectangle':type==='line'?'Line':'Image',x,y,width,height,rotation:0,opacity:1,locked:false,hidden:false};}
+const cropEditor=createCropEditor((id,crop)=>{
+ const item=byId(id);if(!item||item.locked)return false;
+ if(!change(()=>{const updated=cropImage(item,crop);delete item.crop;Object.assign(item,updated);}))return false;
+ status(isCropped(item)?'Image cropped. The original is kept; use Restore original to show it again.':'Full image restored.');return true;
+});
 function svg(tag, attrs={}, text){const el=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))el.setAttribute(k,v);if(text!==undefined)el.textContent=text;return el;}
 function appendItemContent(g,item){
-  if(item.type==='image'){const a=assetById(item.assetId);if(a)g.append(svg('image',{href:a.dataUrl,width:item.width,height:item.height,preserveAspectRatio:'none'}));}
+  if(item.type==='image'){const a=assetById(item.assetId);if(a){const c=imageCrop(item),parent=item.crop?svg('svg',{width:item.width,height:item.height,viewBox:`${c.x} ${c.y} ${c.width} ${c.height}`,preserveAspectRatio:'none',overflow:'hidden'}):g;parent.append(svg('image',{href:a.dataUrl,width:item.crop?1:item.width,height:item.crop?1:item.height,preserveAspectRatio:'none'}));if(parent!==g)g.append(parent);}}
   else if(item.type==='text'){
    const text=svg('text',{x:item.align==='center'?item.width/2:item.align==='right'?item.width:0,y:item.fontSize,fill:item.color,'font-family':item.fontFamily+', Arial, sans-serif','font-size':item.fontSize,'font-weight':item.fontWeight,'font-style':item.fontStyle,'text-anchor':item.align==='center'?'middle':item.align==='right'?'end':'start','xml:space':'preserve'});
    String(item.text).split('\n').forEach((line,j)=>text.append(svg('tspan',{x:item.align==='center'?item.width/2:item.align==='right'?item.width:0,dy:j?item.fontSize*1.2:0},line||' ')));g.append(text);
@@ -176,9 +183,13 @@ function renderInspector(){
  const i=items[0];
  box.innerHTML=`<div class="section-heading">${i.type==='image'?'Image':i.type==='text'?'Text':'Shape'} properties${i.locked?' · Locked':''}</div>${field('Name','name',i.name,'text')}<div class="field-row">${field('X / px','x',round(i.x),'number','step="1"')}${field('Y / px','y',round(i.y),'number','step="1"')}</div><div class="field-row">${field('Width / px','width',round(i.width),'number','min="1" step="1"')}${field('Height / px','height',round(i.height),'number','min="1" step="1"')}</div><div class="field-row">${field('Rotation / °','rotation',round(i.rotation))}${field('Opacity','opacity',i.opacity,'number','min="0" max="1" step="0.1"')}</div>`;
  if(i.type==='text')box.innerHTML+=`<label class="field"><span>Text content</span><textarea id="text-content" rows="4">${escapeHTML(i.text)}</textarea></label>${field('Font','fontFamily',i.fontFamily,'text','list="font-families" maxlength="200" autocomplete="off" spellcheck="false"')}<div class="field-row">${field('Size / px','fontSize',i.fontSize,'number','min="1" max="2000" step="any"')}${field('Color','color',i.color,'color')}</div><div class="field-row"><label class="field"><span>Weight</span><select data-property="fontWeight"><option value="400" ${String(i.fontWeight)==='400'?'selected':''}>Regular</option><option value="700" ${String(i.fontWeight)==='700'?'selected':''}>Bold</option></select></label><label class="field"><span>Style</span><select data-property="fontStyle"><option value="normal" ${i.fontStyle==='normal'?'selected':''}>Normal</option><option value="italic" ${i.fontStyle==='italic'?'selected':''}>Italic</option></select></label></div><label class="field"><span>Text alignment</span><select data-property="align">${[['left','Left'],['center','Center'],['right','Right']].map(([v,t])=>`<option value="${v}" ${i.align===v?'selected':''}>${t}</option>`).join('')}</select></label><p class="hint">Uses fonts installed on this computer. SVG does not embed fonts. Press Enter for a new line.</p>`;
- if(i.type==='image'){const a=assetById(i.assetId);const effectiveDPI=a?Math.round(Math.min(a.width/i.width,a.height/i.height)*96):0;box.innerHTML+=`<p class="hint">Source: ${escapeHTML(a?.name)}<br>Original size: ${a?.width} × ${a?.height} px<br>Effective resolution: ${effectiveDPI} DPI<br>Drag a corner to keep proportions. Hold Shift to resize freely. Changing width also updates height.</p>`;}
+ if(i.type==='image'){const a=assetById(i.assetId),c=imageCrop(i);const effectiveDPI=a?Math.round(Math.min(a.width*c.width/i.width,a.height*c.height/i.height)*96):0;box.innerHTML+=`<div class="image-crop-actions"><button id="crop-image" class="button" ${i.locked?'disabled':''}>${isCropped(i)?'Edit crop':'Crop'}</button><button id="restore-image" class="button" ${i.locked||!isCropped(i)?'disabled':''}>Restore original</button></div><p class="hint">Source: ${escapeHTML(a?.name)}<br>Original size: ${a?.width} × ${a?.height} px${isCropped(i)?`<br>Cropped area: ${Math.round(a.width*c.width)} × ${Math.round(a.height*c.height)} px`:''}<br>Effective resolution: ${effectiveDPI} DPI<br>Drag a corner to keep proportions. Hold Shift to resize freely. Changing width also updates height.</p>`;}
  if(i.type==='rect'||i.type==='line')box.innerHTML+=`<div class="field-row">${i.type==='rect'?field('Fill','fill',i.fill,'color'):''}${field('Stroke','stroke',i.stroke,'color')}</div>${field('Stroke width / px','strokeWidth',i.strokeWidth,'number','min="0" max="100" step="0.5"')}`;
  box.innerHTML+=`<label class="field inline"><input id="object-locked" type="checkbox" ${i.locked?'checked':''}> Lock object</label>`;
+ if(i.type==='image'){
+  $('crop-image').onclick=()=>{flushText();cropEditor.show(i,assetById(i.assetId));};
+  $('restore-image').onclick=()=>{if(i.locked||!isCropped(i))return;if(change(()=>{const restored=cropImage(i);delete i.crop;Object.assign(i,restored);}))status('Full image restored. Use Undo to return to the crop.');};
+ }
  box.querySelectorAll('[data-property]').forEach(input=>{
   input.disabled=i.locked;
   const apply=()=>{
@@ -314,7 +325,7 @@ $('add-rect').onclick=()=>change(()=>{const i={...base('rect',80,80,160,100),fil
 $('add-line').onclick=()=>change(()=>{const i={...base('line',80,80,160,1),stroke:'#252735',strokeWidth:2};slide().items.push(i);selected=new Set([i.id]);});
 $('undo').onclick=()=>{flushText();if(!undoStack.length)return;redoStack.push(snapshot());project=undoStack.pop();selected.clear();changed();render();fit();status('Undone');};
 $('redo').onclick=()=>{flushText();if(!redoStack.length)return;undoStack.push(snapshot());project=redoStack.pop();selected.clear();changed();render();fit();status('Redone');};
-$('duplicate').onclick=()=>{if(!selected.size)return;change(()=>{const copies=chosen().filter(i=>!i.locked).map(i=>({...i,id:uid(),name:i.name+' copy',x:i.x+20,y:i.y+20}));slide().items.push(...copies);selected=new Set(copies.map(i=>i.id));});};
+$('duplicate').onclick=()=>{if(!selected.size)return;change(()=>{const copies=chosen().filter(i=>!i.locked).map(i=>({...i,...(i.crop?{crop:{...i.crop}}:{}),id:uid(),name:i.name+' copy',x:i.x+20,y:i.y+20}));slide().items.push(...copies);selected=new Set(copies.map(i=>i.id));});};
 $('delete-item').onclick=()=>{if(!selected.size)return;change(()=>{slide().items=slide().items.filter(i=>!selected.has(i.id)||i.locked);selected=new Set(chosen().map(i=>i.id));});};
 function reorder(direction){if(!selected.size)return;change(()=>{if(direction>0){for(let j=slide().items.length-2;j>=0;j--)if(selected.has(slide().items[j].id)&&!slide().items[j].locked&&!selected.has(slide().items[j+1].id))[slide().items[j],slide().items[j+1]]=[slide().items[j+1],slide().items[j]];}else{for(let j=1;j<slide().items.length;j++)if(selected.has(slide().items[j].id)&&!slide().items[j].locked&&!selected.has(slide().items[j-1].id))[slide().items[j],slide().items[j-1]]=[slide().items[j-1],slide().items[j]];}});}
 $('bring-forward').onclick=()=>reorder(1);$('send-backward').onclick=()=>reorder(-1);
@@ -425,6 +436,7 @@ $('export-submit').onclick=async()=>{
 };
 document.addEventListener('keydown',e=>{
  if(e.defaultPrevented)return;
+ if(cropEditor.open)return;
  const input=/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)||e.target.isContentEditable,mod=e.metaKey||e.ctrlKey;
  if(mod&&e.key.toLowerCase()==='s'){e.preventDefault();if(!e.repeat)$(e.shiftKey?'save-project-as':'save-project').click();return;}
  if(input||$('export-dialog').open)return;

@@ -1,4 +1,5 @@
 /** Portable project model and exports. Geometry is measured in CSS pixels (96/in). */
+import { validateCrop, imageCrop } from './crop.js';
 const LIMITS = Object.freeze({ assets: 500, items: 2000, assetBytes: 40 * 1024 * 1024, totalBytes: 160 * 1024 * 1024 });
 const RASTER_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 const PNG_SIGNATURE = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -143,6 +144,7 @@ function validateProjectInternal(input, assetCache) {
     if (type === 'image') {
       canonical.assetId = id(item.assetId, 'item.assetId');
       if (!assetIDs.has(canonical.assetId)) fail(`image ${itemID} refers to a missing asset.`);
+      if (item.crop !== undefined) canonical.crop = validateCrop(item.crop);
     } else if (type === 'text') {
       canonical.text = string(item.text, 'item.text', 100000, '').replace(/\r\n?/g, '\n');
       canonical.fontFamily = string(item.fontFamily, 'item.fontFamily', 200, 'Arial');
@@ -178,6 +180,7 @@ function manifest(project) {
     exportNotes: {
       svg: 'Text and editor shapes are vector. Imported PNG, JPEG, WebP, and flattened SVG images are embedded rasters. Fonts are referenced by family and are not embedded.',
       png: 'All content is rasterized. DPI changes export pixel dimensions and the PNG resolution metadata, not the resolution of the original images.',
+      crop: 'Image crops retain the complete embedded source and store a per-object visible rectangle. Restore original reveals the full source at its current scale.',
       localSources: 'Portable projects embed material copies. Local file handles are browser-local permissions, are not serialized, and may require permission or relinking after reopening.',
     },
     sources: project.assets.map(a => ({
@@ -212,7 +215,10 @@ function svgFromCanonical(project) {
     const { width: w, height: h } = item;
     lines.push(`<g id="${xml(item.id)}" transform="translate(${n(item.x)} ${n(item.y)}) rotate(${n(item.rotation)} ${n(w / 2)} ${n(h / 2)})" opacity="${n(item.opacity)}">`);
     if (item.type === 'image') {
-      lines.push(`<image x="0" y="0" width="${n(w)}" height="${n(h)}" preserveAspectRatio="none" href="${xml(assets.get(item.assetId).dataUrl)}"/>`);
+      const c = imageCrop(item);
+      if (item.crop) lines.push(`<svg width="${n(w)}" height="${n(h)}" viewBox="${c.x} ${c.y} ${c.width} ${c.height}" preserveAspectRatio="none" overflow="hidden">`);
+      lines.push(`<image x="0" y="0" width="${item.crop ? '1' : n(w)}" height="${item.crop ? '1' : n(h)}" preserveAspectRatio="none" href="${xml(assets.get(item.assetId).dataUrl)}"/>`);
+      if (item.crop) lines.push('</svg>');
     } else if (item.type === 'text') {
       const textX = item.align === 'center' ? w / 2 : item.align === 'right' ? w : 0;
       const anchor = item.align === 'center' ? 'middle' : item.align === 'right' ? 'end' : 'start';

@@ -13,6 +13,8 @@
 !/asset-tree.js
 !/locate.js
 !/core.js
+!/crop.js
+!/crop-editor.js
 !/deck.js
 !/project-files.js
 !/demo.js
@@ -31,6 +33,8 @@
 !/tests/pptx-browser.js
 !/tests/locate.html
 !/tests/locate-browser.js
+!/tests/crop.html
+!/tests/crop-browser.js
 !/tests/project-save.html
 !/tests/project-save-browser.js
 !/scripts/

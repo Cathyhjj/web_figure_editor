@@ -438,3 +438,19 @@ test('scaled text respects DrawingML font and paragraph-spacing limits without s
   assert.ok(tags(smallText, 'a:rPr').some(r => r.sz === '100'), 'nominal font stays within the schema range');
   assert.equal(tags(smallText, 'a:normAutofit')[0].fontScale, '1800', 'autofit retains the requested 0.018pt effective size');
 });
+
+test('image crops are editable srcRect metadata and keep complete original media', async () => {
+  const p = createProject();
+  p.assets = [{ id: 'crop-source', name: 'original.png', mime: 'image/png', dataUrl: `data:image/png;base64,${PNG}`, width: 1, height: 1, sourceKind: 'copy' }];
+  const image = { id: 'cropped', type: 'image', assetId: 'crop-source', x: 30, y: 40, width: 200, height: 120, rotation: 37, opacity: .6 };
+  p.items = [{ ...image, crop: { x: .25, y: .1, width: .5, height: .6 } }, { ...image, id: 'tiny', crop: { x: .100005, y: .100005, width: .00001, height: .00001 } }];
+  const parts = await unzip(await exportPPTX(p));
+  const xml = parts.get('ppt/slides/slide1.xml').toString();
+  assert.match(xml, /<a:srcRect l="25000" t="10000" r="25000" b="30000"\/>/);
+  const crops = [...xml.matchAll(/<a:srcRect l="(\d+)" t="(\d+)" r="(\d+)" b="(\d+)"/g)];
+  assert.equal(crops.length, 2);
+  for (const c of crops) { assert.ok(Number(c[1]) + Number(c[3]) < 100000); assert.ok(Number(c[2]) + Number(c[4]) < 100000); }
+  const media = [...parts].filter(([name]) => name.startsWith('ppt/media/'));
+  assert.equal(media.length, 1);
+  assert.deepEqual(media[0][1], Buffer.from(PNG, 'base64'));
+});
