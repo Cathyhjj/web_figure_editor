@@ -7,6 +7,7 @@ import { buildAssetTree } from './asset-tree.js';
 import { locateAsset } from './locate.js';
 import { generateHTMLReport } from './report.js';
 import { exportPPTX, pptxLayout } from './pptx.js';
+import { initPPTXImport } from './pptx-import.js';
 import { exportPDF } from './pdf.js';
 import { initWindows } from './windows.js';
 import { imageShadowSVG } from './shadow.js';
@@ -329,6 +330,16 @@ function render(){
 function point(event){const p=new DOMPoint(event.clientX,event.clientY).matrixTransform($('stage').getScreenCTM().inverse());return{x:p.x,y:p.y};}
 function placeAsset(a,position){change(()=>{const maxW=slide().canvas.width*.43,maxH=slide().canvas.height*.65,scale=Math.min(1,maxW/a.width,maxH/a.height);const offset=slide().items.length%6*18;const i={...base(a.mime==='video/mp4'?'video':'image',position?.x??60+offset,position?.y??60+offset,a.width*scale,a.height*scale),assetId:a.id,name:a.name};slide().items.push(i);selected=new Set([i.id]);});status(`Added ${a.name} to the canvas.`);}
 const importTarget=()=>({project,slideId:project.activeSlideId});
+initPPTXImport({
+ captureTarget:importTarget,
+ targetIsCurrent:target=>target.project===project&&target.slideId===project.activeSlideId&&!fileOperation,
+ insert:(deck,warnings)=>{
+  const applied=change(()=>{const pages=pasteSlides(project,deck);selectedSlideIds=new Set(pages.map(page=>page.id));slideSelectionAnchor=pages[0].id;selected.clear();lastPaste=null;});
+  if(applied){fit();focusCurrentSlide();status(`Imported ${slide().name}. Images and text are independently editable. Use Undo to remove this slide.${warnings.some(w=>/omitted|not retained/i.test(w))?' Some PowerPoint features were not retained; see the import preview notes.':''}`);}
+  else throw new Error($('status').textContent);
+  return applied;
+ }
+});
 async function importResult(result,position,target,{libraryOnly=false}={}){
  if(!result)return;
  const page=target?.project===project?project.slides.find(s=>s.id===target.slideId):null;
@@ -472,7 +483,7 @@ function fit(){const r=$('workspace').getBoundingClientRect();setZoom(Math.min((
 $('zoom-in').onclick=()=>setZoom(zoom*1.2);$('zoom-out').onclick=()=>setZoom(zoom/1.2);$('zoom-fit').onclick=fit;
 const filename=()=>project.name.replace(/[^\p{L}\p{N}._ -]/gu,'_').slice(0,80)||'figure';
 function renderFileActions(){
- for(const id of ['save-project','save-project-as','open-project','new-project','demo-project'])$(id).disabled=fileOperation;
+ for(const id of ['save-project','save-project-as','open-project','new-project','demo-project','import-pptx'])$(id).disabled=fileOperation;
  const destination=projectFileHandle?`Save to ${projectFileName}`:typeof globalThis.showSaveFilePicker==='function'?'Choose where to save this project':'Download project copy (direct saving is unavailable in this browser)';
  $('save-project').title=destination+' (⌘ / Ctrl + S)'+(projectFilePersistent?'':' · File access is remembered for this session only');
  $('save-project').setAttribute('aria-busy',String(fileOperation));

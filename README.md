@@ -144,7 +144,17 @@ PNG、SVG、PDF、HTML 报告、页面缩略图和跨应用复制均显示裁切
 
 本地的 `examples/`、`evidence/`、`chat_history.md`、`.local-backups/` 和用户保存的图稿不纳入 Git。已有的论文示例、PPTX、原始图片、派生图片、来源清单与报告保留在本机。通过 **Open** 可以直接打开保存在其他位置的 `.figure.json`，无须复制到仓库。
 
-应用目前没有通用 PPT 导入。`scripts/extract_pptx_example.py` 是针对已检查的第 4 页布局编写的转换工具，不保证适用于其他 PPT；必须显式提供本地 PPTX 路径：
+### 从 PowerPoint 导入一页
+
+点击顶部 **Import PPTX**，选择 `.pptx` 文件，然后在 **Choose a slide** 中选择页码。窗口显示转换后的预览、独立对象数量和 **Import notes**；点击 **Insert as new slide**，在当前页之后插入该页，自动切换到新页。一次 Undo 可撤销整页导入，Redo 可恢复；导入不会替换现有页面或改写原 PPTX。
+
+图片与文字分别可编辑，保留画布尺寸、对象位置、尺寸、旋转、图层顺序及常见主题/母版样式。PNG、JPEG、WebP 图片保留源数据，普通裁剪保留完整原图，可用 **Restore original** 恢复。SVG 会沿用图片导入器生成栅格显示副本并保留原始 SVG。分组展开为独立对象；文本按本机字体测量换行，混合样式、特殊行距可能拆成多个可编辑文字对象。编辑后的内容随 `.figure.json`、保存/重开及现有导出一起保留。
+
+这是支持常见科研排图元素的导入器，不是完整 PowerPoint 渲染器。矩形、直线保持原生可编辑；椭圆、圆角矩形及简单渐变作为独立图片。图表、表格、SmartArt、OLE、未支持的复杂形状或 EMF/WMF 等图片会跳过并在预览中说明；箭头头部、部分文字装饰和特效不保留。字体替换和 PowerPoint/浏览器的文字测量差异可能影响排版，请检查预览。图内已有曲线和坐标轴仍然是图片内容。
+
+需要通过 **start.command** 或 **npm start** 运行本地服务；旧服务需重启后刷新页面。PPTX 在本机读取，不上传到云端，不需安装 PowerPoint。单个 PPTX 上限 100 MB、1–500 页，单页最多 2,000 个转换后对象，图片仍受现有素材限制。`.ppt` 请先在 PowerPoint 中另存为 `.pptx`。
+
+旧的 `scripts/extract_pptx_example.py` 仍是针对已检查的第 4 页布局编写的示例转换工具，不保证适用于其他 PPT；必须显式提供本地 PPTX 路径：
 
 ```sh
 python3 scripts/extract_pptx_example.py /path/to/source.pptx
@@ -158,7 +168,7 @@ python3 scripts/verify_pptx_example.py
 
 默认只输出检查结果，不改写素材或报告。追加 `--check-original` 可读取清单记录的原始文件路径并核对哈希；追加 `--report /path/to/report.json` 可保存报告。私人图稿及转换清单始终保持本地。
 
-图片内部已有的曲线、坐标轴和公式仍是图片内容。应用不包含自动换行、富文本或组合。转换示例中预先烘焙到派生图片的裁剪，只能恢复到该派生图片自身的完整范围；原始 PPT 图片另行保留。
+图片内部已有的曲线、坐标轴和公式仍是图片内容。编辑器没有持续自动重排的富文本框或组合对象；PPTX 导入时将换行和分组转换为普通对象。旧转换示例中预先烘焙到派生图片的裁剪，只能恢复到该派生图片自身的完整范围；原始 PPT 图片另行保留。
 
 ## 开发
 
@@ -176,6 +186,8 @@ python3 -m unittest discover -s tests -p 'test_server.py'
 面板布局检查使用独立端口：`python3 -m http.server 18768 --bind 127.0.0.1`，打开 <http://127.0.0.1:18768/tests/windows.html>，点击 **Run panel layout checks**。验证停靠尺寸调整、取消、浮动与停靠、刷新恢复、重置及窄屏布局；检查完成后恢复测试端口原有的布局设置。
 
 PPT 导出的浏览器集成检查使用 <http://127.0.0.1:18766/tests/pptx.html>，点击 **Run PPT checks**，验证实际 Export 窗口、多页下载、WebP 转 PNG、出错后恢复及其他格式切换。它仅使用合成素材并替换测试端口下的草稿。
+
+PPTX 导入检查需运行本地 API：`python3 server.py --port 18767`，打开 <http://127.0.0.1:18767/tests/pptx-import.html>，点击 **Run PPTX import checks**。覆盖选页/预览、独立文字编辑、裁剪素材、保存/重开、撤销/重做、取消与无效文件；只使用合成 PPTX，并替换该测试端口的草稿。解析器及 API 测试：`python3 -m unittest discover -s tests -p 'test_pptx_import*.py' -v`。
 
 PDF 导出的浏览器集成检查须使用 macOS 上新版 `server.py` 的独立测试端口 `18766`，打开 <http://127.0.0.1:18766/tests/pdf.html>，点击 **Run PDF checks**，验证当前页下载、物理尺寸、矢量形状和希腊/中文文字轮廓、图片源像素、阴影 DPI、透明度、格式切换及导出错误后的恢复；页面也提供合成 PDF 和 PNG 对照文件。它同样仅替换测试端口下的草稿。
 

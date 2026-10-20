@@ -1,5 +1,6 @@
 """Finder bridge tests; no test opens Finder or a native file picker."""
 
+import ast
 import hashlib
 import http.client
 import json
@@ -70,7 +71,7 @@ class LocalServerTests(unittest.TestCase):
         data = json.loads(raw)
         self.assertEqual(status, 200)
         self.assertEqual(data, {"app": "figure-editor-local", "version": 1, "locate": True,
-                            "pdfTextOutlines": False, "token": self.local.token})
+                            "pdfTextOutlines": False, "pptxImport": True, "token": self.local.token})
         self.assertEqual(self.request(path="/")[1], b"Figure Editor")
         self.assertEqual(self.request(path="/tests/browser.html")[1], b"Browser tests")
         self.assertEqual(self.request(path="/examples/panel.png")[1], self.image.read_bytes())
@@ -195,6 +196,28 @@ class LocalServerTests(unittest.TestCase):
         self.assertEqual(self.locate(**{"Content-Type": "text/plain"})[0], 400)
         self.assertEqual(self.locate(**{"Content-Length": "9" * 5000})[0], 413)
         self.run.assert_not_called()
+
+
+class StartupCapabilityTests(unittest.TestCase):
+    def test_existing_backend_requires_current_local_capabilities(self):
+        source = (Path(__file__).resolve().parents[1] / "start.command").read_text().split("<<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
+        check = next(node for node in ast.parse(source).body
+                     if isinstance(node, ast.FunctionDef) and node.name == "has_local_backend")
+        import urllib.error
+        import urllib.request
+        opener = mock.Mock()
+        # A context manager response, without launching the startup script or any server.
+        opener.open.return_value = mock.MagicMock()
+        response = opener.open.return_value.__enter__.return_value
+        response.status = 200
+        namespace = {"urllib": urllib, "opener": opener, "json": json, "url": "http://127.0.0.1:8766/"}
+        exec(compile(ast.Module(body=[check], type_ignores=[]), "start.command", "exec"), namespace)
+        identity = {"app": "figure-editor-local", "version": 1, "locate": True, "token": "test", "pptxImport": True}
+        for name in ("pptxImport",):
+            for capability, expected in ((None, False), (False, False), ("true", False), (True, True)):
+                with self.subTest(name=name,capability=capability):
+                    response.read.return_value = json.dumps({**identity, name: capability}).encode()
+                    self.assertEqual(namespace["has_local_backend"](), expected)
 
 
 if __name__ == "__main__":

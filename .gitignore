@@ -26,6 +26,8 @@
 !/demo.js
 !/report.js
 !/pptx.js
+!/pptx-import.js
+!/pptx_import.py
 !/video.js
 !/pdf.js
 !/pdf_text.py
@@ -36,6 +38,8 @@
 !/tests/test_server.py
 !/tests/test_pdf_text.py
 !/tests/test_pdf_api.py
+!/tests/test_pptx_import.py
+!/tests/test_pptx_import_api.py
 !/tests/test_locate_discovery.py
 !/tests/test_desktop_launcher.py
 !/tests/browser.html
@@ -44,6 +48,8 @@
 !/tests/folders.js
 !/tests/pptx.html
 !/tests/pptx-browser.js
+!/tests/pptx-import.html
+!/tests/pptx-import-browser.js
 !/tests/video.html
 !/tests/video-browser.js
 !/tests/fixtures/

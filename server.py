@@ -17,6 +17,7 @@ import threading
 import unicodedata
 from urllib.parse import unquote, urlsplit
 from pdf_text import MAX_PDF_TEXT_BODY, PdfTextError, PdfTextOutliner
+from pptx_import import MAX_PPTX_BODY, PptxImportError, import_pptx
 
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".tif", ".tiff", ".bmp", ".avif", ".heic", ".heif", ".ico", ".mp4"}
@@ -283,6 +284,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.json_response(200, {"app": "figure-editor-local", "version": 1,
                                          "locate": sys.platform == "darwin",
                                          "pdfTextOutlines": self.server.pdf_text.available,
+                                         "pptxImport": True,
                                          "token": self.server.token})
             elif path.startswith("/api/"):
                 self.json_response(404, {"error": "Unknown local API."})
@@ -313,16 +315,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         try:
             self.trusted_request(require_origin=True)
             path = urlsplit(self.path).path
-            if path not in {"/api/locate", "/api/pdf-text"}:
+            if path not in {"/api/locate", "/api/pdf-text", "/api/pptx-import"}:
                 raise LocateError(404, "Unknown local API.")
             pdf_text = path == "/api/pdf-text"
-            label = "PDF text" if pdf_text else "Locate"
-            limit = MAX_PDF_TEXT_BODY if pdf_text else MAX_BODY
+            pptx = path == "/api/pptx-import"
+            label = "PPTX import" if pptx else "PDF text" if pdf_text else "Locate"
+            limit = MAX_PPTX_BODY if pptx else MAX_PDF_TEXT_BODY if pdf_text else MAX_BODY
             tokens = self.headers.get_all("X-Figure-Token", [])
             if len(tokens) != 1 or not secrets.compare_digest(tokens[0].encode(), self.server.token.encode()):
                 raise LocateError(403, "Reload the local Figure Editor before using " + label + ".")
             if self.headers.get_content_type() != "application/json" or self.headers.get("Transfer-Encoding"):
-                raise LocateError(400, "Send JSON text items for PDF outlining." if pdf_text else "Send a JSON asset descriptor.")
+                raise LocateError(400, "Send a JSON PPTX import request." if pptx else "Send JSON text items for PDF outlining." if pdf_text else "Send a JSON asset descriptor.")
             lengths = self.headers.get_all("Content-Length", [])
             if (len(lengths) != 1 or len(lengths[0]) > len(str(limit)) or not lengths[0].isascii()
                     or not lengths[0].isdigit() or not 0 < int(lengths[0]) <= limit):
@@ -334,14 +337,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 data = json.loads(body)
             except (OSError, ValueError, RecursionError):
                 raise LocateError(400, "The " + label + " request is not valid JSON.")
-            if pdf_text:
+            if pptx:
+                result = import_pptx(data)
+            elif pdf_text:
                 result = self.server.pdf_text.outline(data)
             else:
                 if not isinstance(data, dict):
                     raise LocateError(400, "An asset descriptor is required.")
                 result = self.server.locator.locate(descriptor(data.get("asset")))
             self.json_response(200, result)
-        except (LocateError, PdfTextError) as error:
+        except (LocateError, PdfTextError, PptxImportError) as error:
             self.json_response(error.status, {"error": str(error)})
 
 
