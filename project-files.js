@@ -19,10 +19,20 @@ export async function pickProjectFile({ pickerHost = globalThis } = {}) {
   return { project: await readProjectFile(file), handle, name: handle.name || file.name };
 }
 
-/** Resolve only after the selected file has been committed by close(). */
-export async function writeProjectFile(project, { handle = null, name = 'figure.figure.json', saveAs = false, pickerHost = globalThis, download = downloadBlob } = {}) {
+/** Resolve only after close(); automatic writes require an already-authorized destination. */
+export async function writeProjectFile(project, { handle = null, name = 'figure.figure.json', saveAs = false, automatic = false, pickerHost = globalThis, download = downloadBlob } = {}) {
   let target = handle;
-  if (target && !saveAs && typeof target.requestPermission === 'function') {
+  if (automatic) {
+    const denied = () => new DOMException('Autosave needs an existing file with write access. Use Save to choose a file or allow access.', 'NotAllowedError');
+    if (!target || saveAs || typeof target.queryPermission !== 'function') throw denied();
+    let permission;
+    try {
+      permission = await target.queryPermission({ mode: 'readwrite' });
+    } catch {
+      throw denied();
+    }
+    if (permission !== 'granted') throw denied();
+  } else if (target && !saveAs && typeof target.requestPermission === 'function') {
     const denied = () => new DOMException('Write access was not granted. Allow access to this file or use Save As to choose another destination.', 'NotAllowedError');
     let permission;
     try {

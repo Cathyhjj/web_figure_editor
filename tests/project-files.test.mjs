@@ -59,6 +59,69 @@ test('denied write permission explains recovery and leaves the file untouched', 
   }
 });
 
+test('automatic Save checks existing access, commits a complete project, and never prompts', async () => {
+  const project = createDeck(), target = destination(), events = [];
+  Object.defineProperty(project, 'name', { get() { events.push('serialize'); return 'Autosaved project'; } });
+  target.handle.queryPermission = async options => {
+    events.push('queryPermission');
+    assert.deepEqual(options, { mode: 'readwrite' });
+    return 'granted';
+  };
+  target.handle.requestPermission = () => assert.fail('Autosave must never request permission.');
+  const result = await writeProjectFile(project, {
+    automatic: true, handle: target.handle, download: noDownload,
+    pickerHost: { showSaveFilePicker() { assert.fail('Autosave must never open a picker.'); } },
+  });
+  assert.equal(events[0], 'queryPermission');
+  assert.ok(events.includes('serialize'));
+  assert.deepEqual(result, { handle: target.handle, name: target.handle.name, downloaded: false });
+  assert.deepEqual(target.calls.map(([step]) => step), ['createWritable', 'write', 'close']);
+  assert.deepEqual(JSON.parse(await target.calls[1][1].text()), validateDeck(project));
+});
+
+test('automatic Save refuses missing or unconfirmed access without serializing, prompting, or downloading', async () => {
+  for (const permission of ['denied', 'prompt', undefined, 'unavailable', 'throw', 'missing-handle', 'save-as']) {
+    const project = createDeck(), target = destination();
+    Object.defineProperty(project, 'name', { get() { assert.fail('Unauthorized autosave must not serialize.'); } });
+    target.handle.requestPermission = () => assert.fail('Autosave must never request permission.');
+    if (permission !== 'unavailable') target.handle.queryPermission = async () => {
+      assert.notEqual(permission, 'save-as', 'Autosave must reject Save As before checking access.');
+      if (permission === 'throw') throw new Error('Unable to query access.');
+      return permission;
+    };
+    await assert.rejects(writeProjectFile(project, {
+      automatic: true, handle: permission === 'missing-handle' ? null : target.handle,
+      saveAs: permission === 'save-as', download: noDownload,
+      pickerHost: { showSaveFilePicker() { assert.fail('Autosave must never open a picker.'); } },
+    }), error => {
+      assert.equal(error.name, 'NotAllowedError', `Permission state: ${permission}`);
+      assert.match(error.message, /Use Save/);
+      return true;
+    });
+    assert.deepEqual(target.calls, []);
+  }
+});
+
+test('automatic Save waits for close and aborts the writer when close fails', async () => {
+  const target = destination(), failure = new Error('Autosave close failed');
+  target.handle.queryPermission = async () => 'granted';
+  let failClose, enteredClose, settled = false;
+  const closing = new Promise(resolve => { enteredClose = resolve; });
+  target.writer.close = () => {
+    enteredClose();
+    return new Promise((resolve, reject) => { failClose = reject; });
+  };
+  const saving = writeProjectFile(createDeck(), {
+    automatic: true, handle: target.handle, download: noDownload,
+  });
+  saving.then(() => { settled = true; }, () => { settled = true; });
+  await closing;
+  assert.equal(settled, false);
+  failClose(failure);
+  await assert.rejects(saving, error => error === failure);
+  assert.equal(target.calls.at(-1)[0], 'abort');
+});
+
 test('first Save picks its destination before serializing project content', async () => {
   const project = createDeck(), { handle } = destination('chosen.figure.json');
   const events = [];
@@ -189,6 +252,8 @@ test('serialized size limit is checked before opening a writer or downloading', 
   globalThis.Blob = class extends NativeBlob { get size() { return MAX_PROJECT_BYTES + 1; } };
   try {
     await assert.rejects(writeProjectFile(createDeck(), { handle: target.handle, download: noDownload }), /240 MB/);
+    target.handle.queryPermission = async () => 'granted';
+    await assert.rejects(writeProjectFile(createDeck(), { automatic: true, handle: target.handle, download: noDownload }), /240 MB/);
     await assert.rejects(writeProjectFile(createDeck(), { pickerHost: {}, download: noDownload }), /240 MB/);
     assert.deepEqual(target.calls, []);
   } finally { globalThis.Blob = NativeBlob; }

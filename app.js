@@ -30,6 +30,10 @@ let gesture = null, dirty = false, relinkId = null, draftTimer, draftDb, pending
 let projectFileHandle = null, projectFileName = '', projectFilePersistent = true;
 // Keep file actions unavailable until the initial draft has finished restoring.
 let projectEpoch = 0, editRevision = 0, fileOperation = true, draftWrites = Promise.resolve();
+const AUTOSAVE_DELAY = 1500;
+let autosaveEnabled = true, autosaveTimer, autosaveWriting = false, autosaveError = null;
+let draftRevision = -1, draftError = null, lastFileSave = null;
+try { autosaveEnabled = localStorage.getItem('figure-editor-autosave') !== 'off'; } catch { /* Keep the default when preferences are unavailable. */ }
 const collapsedAssetFolders = new Set();
 let selectedAssetIds = new Set();
 let locatingAsset = false;
@@ -51,7 +55,7 @@ function resetSlideSelection(){selectedSlideIds=new Set([project.activeSlideId])
 function restoreSlideSelection(saved){const state=slideSelectionSnapshots.get(saved);if(state){selectedSlideIds=new Set(state.ids);slideSelectionAnchor=state.anchor;}else resetSlideSelection();}
 function record(before){undoStack.push(before); if(undoStack.length>50)undoStack.shift();redoStack=[];changed();}
 function change(action){flushText();const before=snapshot();try{action();validateDeck(project);record(before);render();return true;}catch(error){project=before;restoreSlideSelection(before);render();status(error.message,true);return false;}}
-function changed(){dirty=true;editRevision++;clearTimeout(draftTimer);draftTimer=setTimeout(saveDraft,650);}
+function changed(){dirty=true;editRevision++;clearTimeout(draftTimer);draftTimer=setTimeout(saveDraft,650);scheduleAutosave();renderAutosave();}
 function base(type, x=80,y=80,width=160,height=80){return {id:uid(),type,name:type==='text'?'Text':type==='rect'?'Rectangle':type==='line'?'Line':'Image',x,y,width,height,rotation:0,opacity:1,locked:false,hidden:false};}
 const cropEditor=createCropEditor((id,crop)=>{
  const item=byId(id);if(!item||item.locked)return false;
@@ -332,7 +336,7 @@ function placeAsset(a,position){change(()=>{const maxW=slide().canvas.width*.43,
 const importTarget=()=>({project,slideId:project.activeSlideId});
 initPPTXImport({
  captureTarget:importTarget,
- targetIsCurrent:target=>target.project===project&&target.slideId===project.activeSlideId&&!fileOperation,
+ targetIsCurrent:target=>target.project===project&&target.slideId===project.activeSlideId&&(!fileOperation||autosaveWriting),
  insert:(deck,warnings)=>{
   const applied=change(()=>{const pages=pasteSlides(project,deck);selectedSlideIds=new Set(pages.map(page=>page.id));slideSelectionAnchor=pages[0].id;selected.clear();lastPaste=null;});
   if(applied){fit();focusCurrentSlide();status(`Imported ${slide().name}. Images and text are independently editable. Use Undo to remove this slide.${warnings.some(w=>/omitted|not retained/i.test(w))?' Some PowerPoint features were not retained; see the import preview notes.':''}`);}
@@ -482,32 +486,74 @@ function setZoom(z){zoom=Math.max(.1,Math.min(3,z));renderStage();}
 function fit(){const r=$('workspace').getBoundingClientRect();setZoom(Math.min((r.width-100)/slide().canvas.width,(r.height-100)/slide().canvas.height,1));}
 $('zoom-in').onclick=()=>setZoom(zoom*1.2);$('zoom-out').onclick=()=>setZoom(zoom/1.2);$('zoom-fit').onclick=fit;
 const filename=()=>project.name.replace(/[^\p{L}\p{N}._ -]/gu,'_').slice(0,80)||'figure';
+function renderAutosave(){
+ const indicator=$('autosave-status'),toggle=$('autosave-toggle');
+ toggle.checked=autosaveEnabled;
+ let state='local',label='Local draft',detail='Use Save once to choose a project file. Browser drafts stay in this browser and can be removed by clearing site data.';
+ if(autosaveWriting){state='saving';label='Saving…';detail=`Saving to ${projectFileName}.`;}
+ else if(dirty&&draftError){state='draft-error';label='Draft not saved';detail=draftError+' Use Save to keep a project file.';}
+ else if(autosaveEnabled&&autosaveError){({state,label,detail}=autosaveError);}
+ else if(!autosaveEnabled){state='off';label='AutoSave off';detail='File AutoSave is off. Local draft recovery remains on; use Save to update the file.';}
+ else if(projectFileHandle&&!dirty){state='saved';label='Saved to file';detail=lastFileSave?`Saved to ${projectFileName} at ${lastFileSave.toLocaleTimeString()}.`:`File: ${projectFileName}. Changes will save automatically.`;}
+ else if(dirty&&(projectFileHandle||draftRevision!==editRevision)){state='pending';label='Changes pending';detail=projectFileHandle?`Changes will save to ${projectFileName} after you pause editing.`:'Saving a local draft in this browser…';}
+ else if(draftRevision===editRevision){label='Saved locally';}
+ if(projectFileHandle&&!projectFilePersistent)detail+=' File access is remembered for this session only.';
+ indicator.dataset.state=state;indicator.textContent=label;indicator.title=detail;
+}
+function scheduleAutosave(){
+ clearTimeout(autosaveTimer);
+ if(!autosaveEnabled||!dirty||!projectFileHandle||autosaveError)return;
+ const epoch=projectEpoch;
+ autosaveTimer=setTimeout(()=>{
+  if(epoch!==projectEpoch)return;
+  if(fileOperation||gesture){scheduleAutosave();return;}
+  void saveProject(false,{automatic:true});
+ },AUTOSAVE_DELAY);
+}
+$('autosave-toggle').onchange=e=>{
+ autosaveEnabled=e.target.checked;
+ try{localStorage.setItem('figure-editor-autosave',autosaveEnabled?'on':'off');}catch{ /* The setting still applies for this session. */ }
+ if(autosaveEnabled)autosaveError=null;
+ scheduleAutosave();renderAutosave();
+};
 function renderFileActions(){
  for(const id of ['save-project','save-project-as','open-project','new-project','demo-project','import-pptx'])$(id).disabled=fileOperation;
  const destination=projectFileHandle?`Save to ${projectFileName}`:typeof globalThis.showSaveFilePicker==='function'?'Choose where to save this project':'Download project copy (direct saving is unavailable in this browser)';
  $('save-project').title=destination+' (⌘ / Ctrl + S)'+(projectFilePersistent?'':' · File access is remembered for this session only');
  $('save-project').setAttribute('aria-busy',String(fileOperation));
+ renderAutosave();
 }
-async function saveProject(saveAs=false){
+async function saveProject(saveAs=false,{automatic=false}={}){
  if(fileOperation)return;
- flushText();
+ if(automatic&&(!autosaveEnabled||!dirty||!projectFileHandle||autosaveError))return;
+ if(!automatic)flushText();
+ clearTimeout(autosaveTimer);
  const savedProject=snapshot(),epoch=projectEpoch,revision=editRevision;
- fileOperation=true;renderFileActions();status('Saving project…');
+ fileOperation=true;autosaveWriting=automatic;renderFileActions();if(!automatic)status('Saving project…');
  try{
-  const result=await writeProjectFile(savedProject,{handle:projectFileHandle,name:saveAs?filename()+'.figure.json':projectFileName||filename()+'.figure.json',saveAs});
+  const result=await writeProjectFile(savedProject,{handle:projectFileHandle,name:saveAs?filename()+'.figure.json':projectFileName||filename()+'.figure.json',saveAs,automatic});
   if(epoch!==projectEpoch)return;
   projectFileHandle=result.handle;projectFileName=result.name;
-  dirty=result.downloaded||revision!==editRevision;
-  status(result.downloaded?'Project download started. This browser cannot save back to the original file. Use Chrome or Edge for direct Save.':`Saved to ${projectFileName}.${revision===editRevision?'':' Newer changes are still unsaved; use Save again.'}`);
+  // Drag geometry changes before its undo/revision entry is committed on pointerup.
+  dirty=result.downloaded||revision!==editRevision||Boolean(gesture?.moved&&gesture.mode!=='select');
+  autosaveError=null;if(!result.downloaded)lastFileSave=new Date();
+  if(!automatic)status(result.downloaded?'Project download started. This browser cannot save back to the original file. Use Chrome or Edge for direct Save.':`Saved to ${projectFileName}.${!dirty?'':autosaveEnabled?' Newer changes will save automatically.':' Newer changes are still unsaved; use Save again.'}`);
   await saveDraft();
  }catch(error){
-  status(error.name==='AbortError'?'Save canceled. Your changes are still in the editor.':`Could not save project: ${error.message}`,error.name!=='AbortError');
- }finally{fileOperation=false;renderFileActions();}
+  if(epoch!==projectEpoch)return;
+  if(automatic)autosaveError=error.name==='NotAllowedError'
+   ?{state:'permission',label:'Click Save to allow',detail:'AutoSave needs write access. Click Save to grant permission. Local draft recovery remains on.'}
+   :{state:'error',label:'AutoSave failed',detail:`Could not save to ${projectFileName}: ${error.message} Click Save to retry; local draft recovery remains on.`};
+  else status(error.name==='AbortError'?'Save canceled. Your changes are still in the editor.':`Could not save project: ${error.message}`,error.name!=='AbortError');
+ }finally{fileOperation=false;autosaveWriting=false;renderFileActions();scheduleAutosave();}
 }
 $('save-project').onclick=()=>saveProject();
 $('save-project-as').onclick=()=>saveProject(true);
 function replaceProject(p,{handle=null,name=''}={}){
- project=validateDeck(p);projectEpoch++;editRevision=0;projectFileHandle=handle;projectFileName=name;projectFilePersistent=true;
+ const next=validateDeck(p);
+ clearTimeout(autosaveTimer);clearTimeout(draftTimer);
+ project=next;projectEpoch++;editRevision=0;projectFileHandle=handle;projectFileName=name;projectFilePersistent=true;
+ autosaveError=null;draftError=null;draftRevision=-1;lastFileSave=null;
  resetSlideSelection();
  selected.clear();undoStack=[];redoStack=[];pendingText=null;dirty=false;collapsedAssetFolders.clear();$('asset-list').replaceChildren();libraryImportNotice={hidden:true,text:'',error:false};renderLibraryImportNotice();render();fit();saveDraft();
 }
@@ -753,7 +799,7 @@ function writeDraftRecord(savedProject,file){
 function saveDraft(){
  clearTimeout(draftTimer);
  // Capture together before awaiting storage; keep older autosaves ahead of newer ones.
- const savedProject=snapshot(),file={handle:projectFileHandle,name:projectFileName,dirty},epoch=projectEpoch;
+ const savedProject=snapshot(),file={handle:projectFileHandle,name:projectFileName,dirty},epoch=projectEpoch,revision=editRevision;
  draftWrites=draftWrites.then(async()=>{
   draftDb??=await openDraftDB();
   try{
@@ -764,8 +810,9 @@ function saveDraft(){
    await writeDraftRecord(savedProject,{...file,handle:null});
    if(epoch===projectEpoch&&file.handle===projectFileHandle)projectFilePersistent=false;
   }
+  if(epoch===projectEpoch){draftRevision=revision;draftError=null;}
   renderFileActions();
- }).catch(error=>{if(epoch===projectEpoch)status('Could not save the local draft. Use Save to keep a project file. '+error.message,true);});
+ }).catch(error=>{if(epoch===projectEpoch){draftError=error.message;renderAutosave();status('Could not save the local draft. Use Save to keep a project file. '+error.message,true);}});
  return draftWrites;
 }
 async function loadDraft(){
@@ -780,8 +827,9 @@ async function loadDraft(){
   projectFileHandle=file?.handle?.kind==='file'&&typeof file.handle.createWritable==='function'?file.handle:null;
   projectFileName=typeof file?.name==='string'?file.name:'';
   dirty=typeof file?.dirty==='boolean'?file.dirty:true;
+  draftRevision=editRevision;
   render();fit();status(projectFileHandle?`Local draft restored. Save will update ${projectFileName}.`:'Local draft restored. Use Save to choose a project file location.');
- }catch{status('Local drafts are unavailable. Use Save to keep a project file.');}
+ }catch{draftError='Local drafts are unavailable.';renderAutosave();status('Local drafts are unavailable. Use Save to keep a project file.');}
 }
 $('demo-project').onclick=async()=>{
  if(fileOperation)return;
@@ -791,5 +839,6 @@ $('demo-project').onclick=async()=>{
  try{const {makeDemo}=await import('./demo.js');const example=await makeDemo();if(revision!==editRevision&&dirty&&!confirm('Replace the current draft with the example?'))return;replaceProject(example);status('Example loaded. Use Save to choose its file location.');}catch(e){status(e.message,true);}
  finally{fileOperation=false;renderFileActions();}
 };
-render();initWindows({onLayoutChange:fit});requestAnimationFrame(fit);await loadDraft();fileOperation=false;renderFileActions();
+render();initWindows({onLayoutChange:fit});requestAnimationFrame(fit);await loadDraft();fileOperation=false;renderFileActions();scheduleAutosave();
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){if(dirty)void saveDraft();if(!fileOperation&&!gesture)void saveProject(false,{automatic:true});}});
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
