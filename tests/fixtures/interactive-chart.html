@@ -1,0 +1,19 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Interactive spectrum</title>
+<style>html,body{margin:0;font:18px sans-serif;background:#fff}svg{display:block;width:960px;height:600px}#tooltip{position:absolute;top:28px;left:110px;background:#eef0fc;padding:8px;display:none}button{position:absolute;right:32px;top:24px;padding:10px}circle{cursor:crosshair}</style></head><body>
+<svg viewBox="0 0 960 600" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Interactive spectrum">
+<rect width="960" height="600" fill="white"/><text x="80" y="55" font-size="24">Interactive spectrum · synthetic data</text>
+<path d="M80 100V510H880" fill="none" stroke="#666" stroke-width="2"/>
+<g id="series"><path d="M80 470 L200 440 L320 410 L440 190 L560 310 L680 250 L800 285 L880 275" fill="none" stroke="#8b3d76" stroke-width="4"/>
+<circle id="peak" cx="440" cy="190" r="12" fill="#8b3d76"/></g>
+<text x="400" y="560">Energy (arbitrary units)</text><text id="zoom-level" x="80" y="90" font-size="16">Zoom: 1</text>
+</svg><div id="tooltip" role="status">Peak: x = 440, y = 190</div><button id="zoom-chart">Zoom in</button>
+<script>
+let zoom=1;
+function update(){document.getElementById('series').setAttribute('transform',`translate(440 350) scale(${zoom}) translate(-440 -350)`);document.getElementById('zoom-level').textContent='Zoom: '+zoom.toFixed(1);}
+document.getElementById('zoom-chart').onclick=()=>{zoom+=.2;update();};
+document.querySelector('svg').addEventListener('wheel',event=>{event.preventDefault();zoom=Math.max(.2,zoom+(event.deltaY<0?.1:-.1));update();},{passive:false});
+document.getElementById('peak').onmouseenter=()=>document.getElementById('tooltip').style.display='block';
+document.getElementById('peak').onmouseleave=()=>document.getElementById('tooltip').style.display='none';
+try{parent.document.body.dataset.htmlEscaped='yes';window.parentAccess=true;}catch{window.parentAccess=false;}
+try{localStorage.setItem('html-chart-probe','yes');window.storageAccess=true;}catch{window.storageAccess=false;}
+</script></body></html>

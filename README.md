@@ -1,5 +1,19 @@
 # Figure Editor
 
+### 交互式 HTML 图表
+
+使用 **Import HTML chart** 选择 `.html` / `.htm`，或把文件拖入画布。文件夹导入也会保留 HTML 素材；点击 **Place** 放置。HTML 原文嵌入 `.figure.json` 项目，保存、重新打开、复制对象和复制 slide 都会保留。
+
+单击图表可以排版；**双击**或在属性中点击 **Interact with chart** 进入画布内的交互视图，使用图表本身的缩放、平移、悬停和图例功能。**Done / Escape** 返回排版。调整编辑器缩放不会重新加载当前交互图表。交互视图内的数据缩放等状态是临时的，重新进入时从原 HTML 初始化。
+
+首次交互会尝试生成 PNG 快照，也可点击 **Save snapshot** 保存当前视图。快照对该素材的所有副本生效，用于缩略图以及 PNG、SVG、PDF、PPTX 和只读 HTML report；这些导出不保留 HTML 交互。没有成功快照时，静态导出会给出提示。Plotly、ECharts、SVG 和 canvas 图表可生成快照；普通 HTML 布局仍可交互，但不会自动截图其 DOM 文本或 CSS 装饰。
+
+建议使用 UTF-8 的单文件图表（内嵌脚本、数据、图片）；Plotly 的 `full_html=True, include_plotlyjs=True` 导出可离线使用。也接受以 `<div>` / `<script>` 开头的 HTML 片段。支持从 `cdn.plot.ly`、`cdn.jsdelivr.net`、`unpkg.com`、`cdnjs.cloudflare.com` 加载库，这类文件需要联网。相对路径脚本、数据文件和其他远程资源不会自动打包，须先内嵌。每个 HTML 文件最多 25 MB。
+
+图表脚本仅在独立的 sandbox iframe 中执行，无法读取编辑器 DOM、项目存储或本地文件。导入素材库、保存及静态导出不会执行原 HTML。
+
+开发验证：`npm test` 包含 HTML 格式识别、模型校验、复制粘贴和导出检查。启动独立测试服务 `python3 server.py --port 18766` 后，运行 `node tests/html-chart-browser.mjs`（需要 Playwright 和 Chrome；可用 `PLAYWRIGHT_MODULE` 指定 Playwright 模块路径），验证真实指针悬停、图表缩放、iframe 隔离、保存重开和五种导出。测试使用合成数据与独立浏览器上下文，截图和下载保存到系统临时目录。
+
 本地论文组图编辑器：拖入图片，像在 PPT 中一样移动、缩放、添加文字，再保存项目或导出论文图。应用使用原生 HTML、CSS 和 JavaScript，无须安装 npm 依赖，不使用云端服务或上传素材。
 
 ## 启动

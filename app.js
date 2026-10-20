@@ -1,4 +1,5 @@
 import { isMediaItem, posterSource } from './video.js';
+import { createChartFrame } from './html-chart.js';
 import { uid, projectToSVG, exportPNG, downloadBlob } from './core.js';
 import { createDeck, validateDeck, cloneDeck, currentSlide, slideProject, deckSourceManifest, addSlide } from './deck.js';
 import { pickProjectFile, readProjectFile, writeProjectFile } from './project-files.js';
@@ -41,6 +42,7 @@ let lastPaste = null;
 let clipboardWriteId = 0;
 let readingSlideClipboard = false;
 let libraryImports = 0;
+let activeHTMLChart = null;
 let libraryImportNotice = { hidden: true, text: '', error: false };
 const clone = cloneDeck;
 const slide = () => currentSlide(project);
@@ -63,12 +65,64 @@ const cropEditor=createCropEditor((id,crop)=>{
  status(isCropped(item)?'Image cropped. The original is kept; use Restore original to show it again.':'Full image restored.');return true;
 });
 function svg(tag, attrs={}, text){const el=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))el.setAttribute(k,v);if(text!==undefined)el.textContent=text;return el;}
+function closeHTMLChart(){
+ if(activeHTMLChart){activeHTMLChart.viewer.dispose();activeHTMLChart=null;}
+ $('html-chart-overlay').hidden=true;$('html-chart-controls').hidden=true;
+}
+function syncHTMLChart(){
+ if(!activeHTMLChart)return;
+ const state=activeHTMLChart,item=byId(state.itemId),asset=assetById(state.assetId);
+ if(state.project!==project||state.slideId!==project.activeSlideId||!item||item.hidden||!selected.has(item.id)||selected.size!==1||asset?.dataUrl!==state.source){closeHTMLChart();return;}
+ const host=$('html-chart-overlay'),frame=state.viewer.frame;
+ Object.assign(host.style,{left:`${item.x*zoom}px`,top:`${item.y*zoom}px`,width:`${item.width*zoom}px`,height:`${item.height*zoom}px`,transform:`rotate(${item.rotation}deg)`,opacity:item.opacity});
+ Object.assign(frame.style,{width:`${asset.width}px`,height:`${asset.height}px`,transform:`scale(${item.width*zoom/asset.width},${item.height*zoom/asset.height})`});
+}
+async function saveHTMLSnapshot(state=activeHTMLChart,{automatic=false}={}){
+ if(!state||state.capturing)return;
+ state.capturing=true;$('html-chart-snapshot').disabled=true;
+ try{
+  const captured=await state.viewer.capture();
+  if(activeHTMLChart!==state||state.project!==project||assetById(state.assetId)?.dataUrl!==state.source)return;
+  // Decode as well as checking PNG signature/dimensions before accepting child data.
+  const image=new Image();image.src=captured.posterDataUrl;await image.decode();
+  if(activeHTMLChart!==state||state.project!==project||assetById(state.assetId)?.dataUrl!==state.source)return;
+  if(automatic){Object.assign(assetById(state.assetId),captured);changed();render();}
+  else if(!change(()=>Object.assign(assetById(state.assetId),captured)))return;
+  status('Chart snapshot saved for static exports and every placement of this asset. The HTML original remains interactive.');
+ }catch(error){
+  if(activeHTMLChart===state)status(automatic?'Chart is open. Use Save snapshot when it has finished drawing. '+error.message:error.message,!automatic);
+ }finally{
+  state.capturing=false;if(activeHTMLChart===state)$('html-chart-snapshot').disabled=false;
+ }
+}
+function openHTMLChart(item){
+ const asset=item&&assetById(item.assetId);if(item?.type!=='html'||!asset||item.hidden)return;
+ if(activeHTMLChart?.itemId===item.id){syncHTMLChart();return;}
+ closeHTMLChart();flushText();selected=new Set([item.id]);render();
+ const state={itemId:item.id,assetId:asset.id,source:asset.dataUrl,project,slideId:project.activeSlideId,capturing:false};
+ try{state.viewer=createChartFrame(asset,{
+  onEscape:()=>{if(activeHTMLChart===state){closeHTMLChart();$('workspace').focus({preventScroll:true});status('Back to layout. Double-click the chart to interact again.');}},
+  onWarning:message=>{if(activeHTMLChart===state)status(message,true);},
+ });}catch(error){status('Could not open HTML chart. Choose a valid UTF-8 HTML file. '+error.message,true);return;}
+ activeHTMLChart=state;
+ $('html-chart-overlay').replaceChildren(state.viewer.frame);$('html-chart-overlay').hidden=false;
+ $('html-chart-controls').hidden=false;$('html-chart-snapshot').disabled=false;syncHTMLChart();
+ status('Chart interaction: hover or use its zoom controls. Done / Escape returns to layout. Save snapshot updates static exports.');
+ state.viewer.ready.then(ready=>{
+  if(!ready||activeHTMLChart!==state){if(activeHTMLChart===state)status('Chart loading timed out. Check that scripts and data are embedded or available.',true);return;}
+  if(!asset.hasSnapshot)setTimeout(()=>{if(activeHTMLChart===state)saveHTMLSnapshot(state,{automatic:true});},500);
+ });
+}
+$('html-chart-done').onclick=()=>{closeHTMLChart();$('workspace').focus({preventScroll:true});status('Back to layout. The chart HTML is kept in the project; interactive view changes are temporary.');};
+$('html-chart-snapshot').onclick=()=>saveHTMLSnapshot();
+$('html-chart-controls').onpointerdown=e=>e.stopPropagation();
 function appendItemContent(g,item,context='stage'){
   if(item.type==='image'){
    const a=assetById(item.assetId);
    if(a)g.innerHTML=imageShadowSVG(item,a,`shadow-${context}-${item.id}`);
   }
   if(item.type==='image'){const a=assetById(item.assetId);if(a){const c=imageCrop(item),parent=item.crop?svg('svg',{width:item.width,height:item.height,viewBox:`${c.x} ${c.y} ${c.width} ${c.height}`,preserveAspectRatio:'none',overflow:'hidden'}):g;parent.append(svg('image',{href:a.dataUrl,width:item.crop?1:item.width,height:item.crop?1:item.height,preserveAspectRatio:'none'}));if(parent!==g)g.append(parent);}}
+  else if(item.type==='html'){const a=assetById(item.assetId);if(a)g.append(svg('image',{href:a.posterDataUrl,width:item.width,height:item.height,preserveAspectRatio:'none'}));}
   else if(item.type==='video'){const a=assetById(item.assetId);if(a){g.append(svg('image',{href:a.posterDataUrl,width:item.width,height:item.height,preserveAspectRatio:'none'}));const r=Math.min(item.width,item.height)*.09;g.append(svg('circle',{cx:item.width/2,cy:item.height/2,r,fill:'#111827b3'}));g.append(svg('path',{d:`M ${item.width/2-r*.3} ${item.height/2-r*.5} L ${item.width/2+r*.55} ${item.height/2} L ${item.width/2-r*.3} ${item.height/2+r*.5} Z`,fill:'#fff'}));}}
   else if(item.type==='text'){
    const text=svg('text',{x:item.align==='center'?item.width/2:item.align==='right'?item.width:0,y:item.fontSize,fill:item.color,'font-family':item.fontFamily+', Arial, sans-serif','font-size':item.fontSize,'font-weight':item.fontWeight,'font-style':item.fontStyle,'text-anchor':item.align==='center'?'middle':item.align==='right'?'end':'start','xml:space':'preserve'});
@@ -165,6 +219,7 @@ $('delete-slide').onclick=()=>{
 $('slide-name').oninput=e=>{if(!pendingText)pendingText=snapshot();slide().name=e.target.value.trim().slice(0,120)||'Untitled slide';changed();};
 $('slide-name').onblur=()=>{flushText();renderToolbar();};
 function renderStage(){
+ syncHTMLChart();
  const stage=$('stage');stage.replaceChildren();stage.setAttribute('viewBox',`0 0 ${slide().canvas.width} ${slide().canvas.height}`);
  stage.style.width=`${slide().canvas.width*zoom}px`;stage.style.height=`${slide().canvas.height*zoom}px`;
  $('stage-wrap').style.width=`${slide().canvas.width*zoom}px`;$('stage-wrap').style.height=`${slide().canvas.height*zoom}px`;
@@ -206,10 +261,10 @@ function renderAssets(){
   if(folder.open)collapsedAssetFolders.delete(folder.dataset.path);else collapsedAssetFolders.add(folder.dataset.path);
  }
  list.replaceChildren();
- if(!project.assets.length){const p=document.createElement('p');p.className='hint';p.textContent='Drop images, MP4 videos, or folders here to preview them. Folder structure is kept. Files are processed locally.';list.append(p);}
+ if(!project.assets.length){const p=document.createElement('p');p.className='hint';p.textContent='Drop images, HTML charts, MP4 videos, or folders here to preview them. Folder structure is kept. Files are processed locally.';list.append(p);}
  function assetCard(a){
   const card=document.createElement('div');card.className='asset-card';card.dataset.asset=a.id;card.draggable=false;
-  card.innerHTML=`<button class="asset-preview" data-action="place" title="Add to canvas" aria-label="Place ${escapeHTML(a.name)} on canvas"><img draggable="false" loading="lazy" decoding="async" class="asset-thumb" alt="${escapeHTML(a.name)}" src="${posterSource(a)}"></button><div class="asset-name" title="${escapeHTML(a.relativePath||a.name)}">${escapeHTML(a.name)}</div><div class="asset-meta">${a.width} × ${a.height}${a.mime==='video/mp4'?` · MP4 · ${a.duration.toFixed(1)} s`:''} · ${a.sourceKind==='linked'?(a.linkPersistence==='session'?'Session link + copy':'Local link + copy'):'Portable copy'}${a.originalMime==='image/svg+xml'?' · Rasterized SVG':''}</div><div class="asset-actions"><button data-action="place">Place</button><button data-action="relink">Link</button>${a.sourceKind==='linked'?'<button data-action="refresh">Refresh</button>':''}</div>`;
+  card.innerHTML=`<button class="asset-preview" data-action="place" title="Add to canvas" aria-label="Place ${escapeHTML(a.name)} on canvas"><img draggable="false" loading="lazy" decoding="async" class="asset-thumb" alt="${escapeHTML(a.name)}" src="${posterSource(a)}"></button><div class="asset-name" title="${escapeHTML(a.relativePath||a.name)}">${escapeHTML(a.name)}</div><div class="asset-meta">${a.width} × ${a.height}${a.mime==='text/html'?' · Interactive HTML':''}${a.mime==='video/mp4'?` · MP4 · ${a.duration.toFixed(1)} s`:''} · ${a.sourceKind==='linked'?(a.linkPersistence==='session'?'Session link + copy':'Local link + copy'):'Portable copy'}${a.originalMime==='image/svg+xml'?' · Rasterized SVG':''}</div><div class="asset-actions"><button data-action="place">Place</button><button data-action="relink">Link</button>${a.sourceKind==='linked'?'<button data-action="refresh">Refresh</button>':''}</div>`;
   card.setAttribute('role','group');
   const selectionLabel=document.createElement('div');selectionLabel.className='asset-selection-label';selectionLabel.textContent='Selected on canvas';card.append(selectionLabel);
   const locateButton=document.createElement('button');locateButton.type='button';locateButton.dataset.action='locate';locateButton.textContent='Locate';locateButton.title='Show source image in Finder';locateButton.setAttribute('aria-label',`Show ${a.name} in Finder`);locateButton.disabled=locatingAsset;card.querySelector('.asset-actions').insertBefore(locateButton,card.querySelector('[data-action="refresh"]'));
@@ -264,7 +319,7 @@ function renderLayers(){
  if(!slide().items.length){const p=document.createElement('p');p.className='hint';p.textContent='No objects on this slide yet.';list.append(p);}
  for(const i of [...slide().items].reverse()){
   const row=document.createElement('div');row.className=`layer-row ${selected.has(i.id)?'selected':''}`;row.dataset.layer=i.id;
-  row.innerHTML=`<button class="layer-select" title="Select object">${i.type==='video'?'▶':i.type==='image'?'▧':i.type==='text'?'T':i.type==='rect'?'□':'╱'} <span>${escapeHTML(i.name)}</span></button><button data-action="hide" title="${i.hidden?'Show':'Hide'}">${i.hidden?'○':'●'}</button><button data-action="lock" title="${i.locked?'Unlock':'Lock'}">${i.locked?'▣':'◇'}</button>`;
+  row.innerHTML=`<button class="layer-select" title="Select object">${i.type==='html'?'◇':i.type==='video'?'▶':i.type==='image'?'▧':i.type==='text'?'T':i.type==='rect'?'□':'╱'} <span>${escapeHTML(i.name)}</span></button><button data-action="hide" title="${i.hidden?'Show':'Hide'}">${i.hidden?'○':'●'}</button><button data-action="lock" title="${i.locked?'Unlock':'Lock'}">${i.locked?'▣':'◇'}</button>`;
   row.onclick=e=>{const action=e.target.closest('[data-action]')?.dataset.action;if(action)change(()=>{if(action==='hide')i.hidden=!i.hidden;else i.locked=!i.locked;});else{flushText();if(e.shiftKey){selected.has(i.id)?selected.delete(i.id):selected.add(i.id);}else selected=new Set([i.id]);render();}};list.append(row);
  }
 }
@@ -273,7 +328,7 @@ function renderInspector(){
  const items=chosen(), box=$('inspector');
  if(items.length!==1){box.innerHTML=`<div class="section-heading">${items.length?'Multiple objects':'Object properties'}</div><p class="hint">${items.length?'Drag any selected object to move them together. Shift + click or Shift + drag on blank space to adjust the selection.':'Drag on blank canvas space to select objects, or click an image, text, or shape. Double-click text to edit its content.'}</p>`;return;}
  const i=items[0];
- box.innerHTML=`<div class="section-heading">${i.type==='video'?'Video':i.type==='image'?'Image':i.type==='text'?'Text':'Shape'} properties${i.locked?' · Locked':''}</div>${field('Name','name',i.name,'text')}<div class="field-row">${field('X / px','x',round(i.x),'number','step="1"')}${field('Y / px','y',round(i.y),'number','step="1"')}</div><div class="field-row">${field('Width / px','width',round(i.width),'number','min="1" step="1"')}${field('Height / px','height',round(i.height),'number','min="1" step="1"')}</div><div class="field-row">${field('Rotation / °','rotation',round(i.rotation))}${field('Opacity','opacity',i.opacity,'number','min="0" max="1" step="0.1"')}</div>`;
+ box.innerHTML=`<div class="section-heading">${i.type==='html'?'HTML chart':i.type==='video'?'Video':i.type==='image'?'Image':i.type==='text'?'Text':'Shape'} properties${i.locked?' · Locked':''}</div>${field('Name','name',i.name,'text')}<div class="field-row">${field('X / px','x',round(i.x),'number','step="1"')}${field('Y / px','y',round(i.y),'number','step="1"')}</div><div class="field-row">${field('Width / px','width',round(i.width),'number','min="1" step="1"')}${field('Height / px','height',round(i.height),'number','min="1" step="1"')}</div><div class="field-row">${field('Rotation / °','rotation',round(i.rotation))}${field('Opacity','opacity',i.opacity,'number','min="0" max="1" step="0.1"')}</div>`;
  if(i.type==='text')box.innerHTML+=`<label class="field"><span>Text content</span><textarea id="text-content" rows="4">${escapeHTML(i.text)}</textarea></label>${field('Font','fontFamily',i.fontFamily,'text','list="font-families" maxlength="200" autocomplete="off" spellcheck="false"')}<div class="field-row">${field('Size / px','fontSize',i.fontSize,'number','min="1" max="2000" step="any"')}${field('Color','color',i.color,'color')}</div><div class="field-row"><label class="field"><span>Weight</span><select data-property="fontWeight"><option value="400" ${String(i.fontWeight)==='400'?'selected':''}>Regular</option><option value="700" ${String(i.fontWeight)==='700'?'selected':''}>Bold</option></select></label><label class="field"><span>Style</span><select data-property="fontStyle"><option value="normal" ${i.fontStyle==='normal'?'selected':''}>Normal</option><option value="italic" ${i.fontStyle==='italic'?'selected':''}>Italic</option></select></label></div><label class="field"><span>Text alignment</span><select data-property="align">${[['left','Left'],['center','Center'],['right','Right']].map(([v,t])=>`<option value="${v}" ${i.align===v?'selected':''}>${t}</option>`).join('')}</select></label><p class="hint">Uses fonts installed on this computer. SVG does not embed fonts. Press Enter for a new line.</p>`;
  if(i.type==='image'){const a=assetById(i.assetId),c=imageCrop(i);const effectiveDPI=a?Math.round(Math.min(a.width*c.width/i.width,a.height*c.height/i.height)*96):0;box.innerHTML+=`<div class="image-crop-actions"><button id="crop-image" class="button" ${i.locked?'disabled':''}>${isCropped(i)?'Edit crop':'Crop'}</button><button id="restore-image" class="button" ${i.locked||!isCropped(i)?'disabled':''}>Restore original</button></div><p class="hint">Source: ${escapeHTML(a?.name)}<br>Original size: ${a?.width} × ${a?.height} px${isCropped(i)?`<br>Cropped area: ${Math.round(a.width*c.width)} × ${Math.round(a.height*c.height)} px`:''}<br>Effective resolution: ${effectiveDPI} DPI<br>Drag the bottom-right corner to keep proportions; hold Shift to resize freely. Drag side handles to stretch width or height. Width and height fields keep proportions.</p>`;}
  if(i.type==='video'){const a=assetById(i.assetId);box.innerHTML+=`<div class="image-crop-actions"><button id="preview-video" class="button">▶ Preview video</button></div><p class="hint">MP4 · ${a.width} × ${a.height} px · ${a.duration.toFixed(1)} s<br>Embedded in PowerPoint; click the video during Slide Show to play. H.264 video with AAC audio is recommended.<br>PNG, SVG, PDF, and HTML reports use the poster frame.</p>`;}
@@ -285,6 +340,11 @@ function renderInspector(){
   $('restore-image').onclick=()=>{if(i.locked||!isCropped(i))return;if(change(()=>{const restored=cropImage(i);delete i.crop;Object.assign(i,restored);}))status('Full image restored. Use Undo to return to the crop.');};
  }
  if(i.type==='video')$('preview-video').onclick=()=>previewVideo(assetById(i.assetId));
+ if(i.type==='html'){
+  const note=document.createElement('p');note.className='hint';note.textContent='Double-click to zoom and hover. Save snapshot updates all copies of this asset for PNG, SVG, PDF, PPTX and HTML reports. View changes are temporary; the original HTML is saved.';
+  const button=document.createElement('button');button.id='interact-html';button.className='button';button.textContent='Interact with chart';button.onclick=()=>openHTMLChart(i);
+  box.append(button,note);
+ }
  box.querySelectorAll('[data-property]').forEach(input=>{
   input.disabled=i.locked;
   const apply=()=>{
@@ -332,7 +392,7 @@ function render(){
  $('project-name').value=project.name;$('canvas-width').value=slide().canvas.width;$('canvas-height').value=slide().canvas.height;$('canvas-background').value=slide().canvas.background;
 }
 function point(event){const p=new DOMPoint(event.clientX,event.clientY).matrixTransform($('stage').getScreenCTM().inverse());return{x:p.x,y:p.y};}
-function placeAsset(a,position){change(()=>{const maxW=slide().canvas.width*.43,maxH=slide().canvas.height*.65,scale=Math.min(1,maxW/a.width,maxH/a.height);const offset=slide().items.length%6*18;const i={...base(a.mime==='video/mp4'?'video':'image',position?.x??60+offset,position?.y??60+offset,a.width*scale,a.height*scale),assetId:a.id,name:a.name};slide().items.push(i);selected=new Set([i.id]);});status(`Added ${a.name} to the canvas.`);}
+function placeAsset(a,position){change(()=>{const maxW=slide().canvas.width*.43,maxH=slide().canvas.height*.65,scale=Math.min(1,maxW/a.width,maxH/a.height);const offset=slide().items.length%6*18;const i={...base(a.mime==='text/html'?'html':a.mime==='video/mp4'?'video':'image',position?.x??60+offset,position?.y??60+offset,a.width*scale,a.height*scale),assetId:a.id,name:a.name};slide().items.push(i);selected=new Set([i.id]);});status(`Added ${a.name} to the canvas.`);if(a.mime==='text/html')openHTMLChart(chosen()[0]);}
 const importTarget=()=>({project,slideId:project.activeSlideId});
 initPPTXImport({
  captureTarget:importTarget,
@@ -354,13 +414,14 @@ async function importResult(result,position,target,{libraryOnly=false}={}){
   const applied=change(()=>{for(const [j,a] of result.assets.entries()){
    project.assets.push(a);if(libraryOnly)continue;
    const scale=Math.min(1,page.canvas.width*.43/a.width,page.canvas.height*.65/a.height);
-   const i={...base(a.mime==='video/mp4'?'video':'image',(position?.x??60)+j*22,(position?.y??60)+j*22,a.width*scale,a.height*scale),assetId:a.id,name:a.name};
+   const i={...base(a.mime==='text/html'?'html':a.mime==='video/mp4'?'video':'image',(position?.x??60)+j*22,(position?.y??60)+j*22,a.width*scale,a.height*scale),assetId:a.id,name:a.name};
    page.items.push(i);if(page.id===project.activeSlideId)selected=new Set([i.id]);
   }});
   if(!applied)return;
   status(`Imported ${result.assets.length} asset${result.assets.length===1?'':'s'} into ${libraryOnly?'Assets':page.name}.${libraryOnly?' Choose a preview or Place to add it to the canvas.':' Portable copies are included.'}${skipped}${errors?' '+errors:''}`,!!errors);
+  if(!libraryOnly&&page.id===project.activeSlideId&&chosen()[0]?.type==='html')openHTMLChart(chosen()[0]);
  }else if(errors)status(errors+skipped,true);
- else if('skipped' in result)status('No supported media found. Choose a folder containing PNG, JPG, WebP, SVG, or MP4 files.'+skipped);
+ else if('skipped' in result)status('No supported media found. Choose a folder containing PNG, JPG, WebP, SVG, MP4, or HTML files.'+skipped);
 }
 async function importToLibrary(pending,target){
  libraryImports++;renderLibraryImportNotice();
@@ -394,6 +455,8 @@ async function locate(a){
  finally{locatingAsset=false;for(const button of document.querySelectorAll('[data-action="locate"]'))button.disabled=false;}
 }
 $('add-images').onclick=async()=>{const target=importTarget();try{const result=await pickImages();if(result===null)$('file-input').click();else await importResult(result,undefined,target);}catch(e){status(e.message,true);}};
+$('add-html').onclick=()=>$('html-file-input').click();
+$('html-file-input').onchange=async e=>{const target=importTarget();status('Importing HTML charts…');await importResult(await importFiles([...e.target.files]),undefined,target);e.target.value='';};
 $('file-input').onchange=async e=>{const target=importTarget();await importResult(await importFiles([...e.target.files]),undefined,target);e.target.value='';};
 $('add-folders').onclick=async()=>{
  const target=importTarget();
@@ -434,6 +497,7 @@ function updateMarquee(e){
  if(selectionChanged){renderLayers();renderInspector();renderToolbar();syncAssetSelection();}
 }
 $('workspace').onpointerdown=e=>{
+ if(e.target.closest('#html-chart-overlay'))return;
  if(e.button!==0||gesture)return;$('workspace').focus({preventScroll:true});flushText();const id=e.target.closest('[data-item]')?.dataset.item;lastPointerItem=id;
  if(!id){
   const start=point(e);lastTap=null;
@@ -466,7 +530,7 @@ function endGesture(e){
 $('workspace').onpointerup=endGesture;$('workspace').onpointercancel=endGesture;
 $('stage').onlostpointercapture=e=>{if(gesture?.mode==='select'&&e.pointerId===gesture.pointerId)finishMarquee(true);};
 window.addEventListener('blur',()=>{if(gesture?.mode==='select')finishMarquee(true);});
-$('stage').ondblclick=e=>{const i=byId(e.target.closest('[data-item]')?.dataset.item||lastPointerItem);if(i?.type==='text'&&!i.locked){selected=new Set([i.id]);render();$('text-content')?.focus();$('text-content')?.select();}};
+$('stage').ondblclick=e=>{const i=byId(e.target.closest('[data-item]')?.dataset.item||lastPointerItem);if(i?.type==='html'){openHTMLChart(i);return;}if(i?.type==='text'&&!i.locked){selected=new Set([i.id]);render();$('text-content')?.focus();$('text-content')?.select();}};
 $('add-text').onclick=()=>{change(()=>{const i={...base('text',60,50,260,44),name:'Text',text:'Double-click to edit',fontFamily:'Arial',fontSize:28,fontWeight:400,fontStyle:'normal',color:'#20212b',align:'left'};slide().items.push(i);selected=new Set([i.id]);});$('text-content').focus();$('text-content').select();};
 $('add-rect').onclick=()=>change(()=>{const i={...base('rect',80,80,160,100),fill:'#ffffff',stroke:'#252735',strokeWidth:2};slide().items.push(i);selected=new Set([i.id]);});
 $('add-line').onclick=()=>change(()=>{const i={...base('line',80,80,160,1),stroke:'#252735',strokeWidth:2};slide().items.push(i);selected=new Set([i.id]);});
@@ -719,7 +783,10 @@ function writeSelectionToClipboard(e,cut=false){
    }
    status(legacy?`Objects ${cut?'cut':'copied'} for this editor. This browser cannot copy images to other apps; use Chrome or Edge, or Export.`:cut?'Cut. Paste into a slide or another app. Use Undo to restore the original objects.':'Copied. Paste into a slide to keep objects editable, or into another app as an image.');
   };
-  if(navigator.clipboard?.write&&globalThis.ClipboardItem){
+  if(selection.assets.some(asset=>asset.mime==='text/html'&&!asset.hasSnapshot)){
+   e.clipboardData.setData(CLIPBOARD_MIME,text);e.clipboardData.setData('text/plain',text);complete();
+   status(`Editable objects ${cut?'cut':'copied'}. Save a chart snapshot before copying an image to another app.`);
+  }else if(navigator.clipboard?.write&&globalThis.ClipboardItem){
    // Use one writer: committing copy-event data while an async write is pending
    // changes Safari's pasteboard revision and rejects the async image write.
    // Keep the editable payload in the same ClipboardItem as the PNG instead.
@@ -770,6 +837,7 @@ document.addEventListener('paste',async e=>{
 });
 document.addEventListener('keydown',e=>{
  if(e.defaultPrevented)return;
+ if(e.key==='Escape'&&activeHTMLChart){e.preventDefault();closeHTMLChart();$('workspace').focus({preventScroll:true});return;}
  if(cropEditor.open||$('video-dialog').open)return;
  if(gesture?.mode==='select'){if(e.key==='Escape')finishMarquee(true);e.preventDefault();return;}
  const input=editingInput(e.target),mod=e.metaKey||e.ctrlKey;

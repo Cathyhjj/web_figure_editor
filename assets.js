@@ -1,4 +1,5 @@
 import { isMP4, readVideoMetadata } from './video.js';
+import { HTML_MIME, looksLikeHTML, readHTMLMetadata } from './html-chart.js';
 /** Local image IO. The editable project embeds copies; filesystem handles never leave IndexedDB. */
 export const MAX_FILE_BYTES = 25 * 1024 * 1024;
 export const MAX_IMPORT_BYTES = 100 * 1024 * 1024;
@@ -14,9 +15,9 @@ let databasePromise;
 const pickerOptions = {
   multiple: true,
   excludeAcceptAllOption: true,
-  types: [{ description: 'Images and MP4 videos', accept: {
+  types: [{ description: 'Images, MP4 videos and HTML charts', accept: {
     'image/png': ['.png'], 'image/jpeg': ['.jpg', '.jpeg'],
-    'image/webp': ['.webp'], 'image/svg+xml': ['.svg'], 'video/mp4': ['.mp4'],
+    'image/webp': ['.webp'], 'image/svg+xml': ['.svg'], 'video/mp4': ['.mp4'], 'text/html': ['.html', '.htm'],
   } }],
 };
 
@@ -136,9 +137,10 @@ function detectMime(bytes) {
   if (bytes[0] === 0x89 && String.fromCharCode(...bytes.subarray(1, 4)) === 'PNG' && bytes[4] === 13 && bytes[5] === 10 && bytes[6] === 26 && bytes[7] === 10) return 'image/png';
   if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
   if (String.fromCharCode(...bytes.subarray(0, 4)) === 'RIFF' && String.fromCharCode(...bytes.subarray(8, 12)) === 'WEBP') return 'image/webp';
+  if (looksLikeHTML(bytes)) return HTML_MIME;
   const start = new TextDecoder().decode(bytes.subarray(0, 8192));
   if (/<(?:[A-Za-z_][\w.-]*:)?svg(?:\s|>)/i.test(start)) return 'image/svg+xml';
-  throw new Error('Only PNG, JPEG, WebP, SVG images, and MP4 videos are supported. Formats are identified by actual file contents.');
+  throw new Error('Only PNG, JPEG, WebP, SVG images, MP4 videos and HTML charts are supported. Formats are identified by actual file contents.');
 }
 
 // Read available raster dimensions before asking the browser to decode compressed pixels.
@@ -283,7 +285,9 @@ async function buildAsset(file, id = newId(), relativePath = file?.webkitRelativ
   if (relativePath) asset.relativePath = relativePath;
   const digest = await fingerprint(buffer);
   if (digest) asset.fingerprint = digest;
-  if (mime === 'video/mp4') {
+  if (mime === HTML_MIME) {
+    Object.assign(asset, await readHTMLMetadata(bytes, asset.name));
+  } else if (mime === 'video/mp4') {
     Object.assign(asset, await readVideoMetadata(bytes));
   } else if (mime === 'image/svg+xml') {
     const svg = safeSvg(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
@@ -324,8 +328,8 @@ async function associateHandle(asset, handle, linkToken = newId()) {
 }
 
 function isImageCandidate(file) {
-  return /\.(?:png|jpe?g|webp|svg|mp4)$/i.test(file?.name || '')
-    || /^(?:image\/(?:png|jpeg|webp|svg\+xml)|video\/mp4)$/i.test(file?.type || '');
+  return /\.(?:png|jpe?g|webp|svg|mp4|html?)$/i.test(file?.name || '')
+    || /^(?:image\/(?:png|jpeg|webp|svg\+xml)|video\/mp4|text\/html)$/i.test(file?.type || '');
 }
 
 // Records keep paths separate from File objects, whose webkitRelativePath is read-only.
@@ -490,6 +494,7 @@ export async function replaceAsset(asset, file, handle) {
   if (!asset?.id) throw new Error('No asset is selected.');
   const replacement = await buildAsset(file, asset.id, replacementPath(asset, file));
   if ((replacement.mime === 'video/mp4') !== (asset.mime === 'video/mp4')) throw new Error('Replace a video with another MP4, or an image with another image.');
+  if ((replacement.mime === HTML_MIME) !== (asset.mime === HTML_MIME)) throw new Error('Replace an HTML chart with another HTML chart.');
   if (handle) return associateHandle(replacement, handle);
   // Leave previous handles intact for undo. This new copy has no linkage fields.
   return replacement;
@@ -532,6 +537,7 @@ export async function refreshAsset(asset) {
     const file = await handle.getFile();
     const refreshed = await buildAsset(file, asset.id, replacementPath(asset, file));
     if ((refreshed.mime === 'video/mp4') !== (asset.mime === 'video/mp4')) throw new Error('The original file changed media type. Relink a file of the same type.');
+    if ((refreshed.mime === HTML_MIME) !== (asset.mime === HTML_MIME)) throw new Error('The original file changed media type. Relink another HTML chart.');
     return await associateHandle(refreshed, handle, asset.linkToken);
   } catch (error) { throw new Error(readableError(error)); }
 }

@@ -29,6 +29,7 @@
 !/pptx-import.js
 !/pptx_import.py
 !/video.js
+!/html-chart.js
 !/pdf.js
 !/pdf_text.py
 !/windows.js
@@ -52,11 +53,13 @@
 !/tests/pptx-import-browser.js
 !/tests/video.html
 !/tests/video-browser.js
+!/tests/html-chart-browser.mjs
 !/tests/fixtures/
 /tests/fixtures/*
 !/tests/fixtures/video.mp4
 !/tests/fixtures/video-poster.png
 !/tests/fixtures/README.md
+!/tests/fixtures/interactive-chart.html
 !/tests/pdf.html
 !/tests/pdf-browser.js
 !/tests/locate.html

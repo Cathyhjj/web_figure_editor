@@ -1,5 +1,6 @@
 /** Portable project model and exports. Geometry is measured in CSS pixels (96/in). */
 import { isMP4, isMediaItem, posterSource } from './video.js';
+import { HTML_MIME, looksLikeHTML, requireHTMLSnapshots, validateSnapshot } from './html-chart.js';
 import { validateCrop, imageCrop } from './crop.js';
 import { validateShadow, imageShadowSVG } from './shadow.js';
 const LIMITS = Object.freeze({ assets: 500, items: 2000, assetBytes: 40 * 1024 * 1024, totalBytes: 160 * 1024 * 1024 });
@@ -51,7 +52,7 @@ function color(value, label, fallback) {
 }
 
 function dataURL(value, mime, label, inertOriginal = false) {
-  if ((!inertOriginal && !RASTER_MIMES.has(mime) && mime !== 'video/mp4') || (inertOriginal && mime !== 'image/svg+xml')) fail(`${label} has an unsupported MIME type.`);
+  if ((!inertOriginal && !RASTER_MIMES.has(mime) && mime !== 'video/mp4' && mime !== HTML_MIME) || (inertOriginal && mime !== 'image/svg+xml')) fail(`${label} has an unsupported MIME type.`);
   const result = string(value, label, Math.ceil(LIMITS.assetBytes / 3) * 4 + 64);
   const prefix = `data:${mime};base64,`;
   if (!result.startsWith(prefix)) fail(`${label} must be an embedded base64 ${mime} image, not a file path or external URL.`);
@@ -61,8 +62,9 @@ function dataURL(value, mime, label, inertOriginal = false) {
   if (byteLength > LIMITS.assetBytes) fail(`${label} exceeds the 40 MB asset limit.`);
   // A MIME label alone must not turn an embedded script or SVG into a raster asset.
   if (!inertOriginal) {
-    const header = atob(payload.slice(0, 5504));
-    const valid = mime === 'image/png' ? PNG_SIGNATURE.every((v, i) => header.charCodeAt(i) === v)
+    const header = atob(payload.slice(0, 11000));
+    const valid = mime === HTML_MIME ? looksLikeHTML(Uint8Array.from(header, char => char.charCodeAt(0)))
+      : mime === 'image/png' ? PNG_SIGNATURE.every((v, i) => header.charCodeAt(i) === v)
       : mime === 'image/jpeg' ? header.charCodeAt(0) === 255 && header.charCodeAt(1) === 216 && header.charCodeAt(2) === 255
         : mime === 'video/mp4' ? isMP4(Uint8Array.from(header, char => char.charCodeAt(0)))
         : header.startsWith('RIFF') && header.slice(8, 12) === 'WEBP';
@@ -121,6 +123,16 @@ function validateProjectInternal(input, assetCache) {
       asset.posterHeight = number(a.posterHeight, 'asset.posterHeight', 1, 1080);
       asset.duration = number(a.duration, 'asset.duration', Number.MIN_VALUE, Number.MAX_SAFE_INTEGER);
     }
+    if (mime === HTML_MIME) {
+      const poster = dataURL(a.posterDataUrl, 'image/png', 'asset.posterDataUrl');
+      const metadata = validateSnapshot(poster.value);
+      asset.posterDataUrl = poster.value; totalBytes += poster.byteLength;
+      asset.posterWidth = number(a.posterWidth, 'asset.posterWidth', 1, 8192);
+      asset.posterHeight = number(a.posterHeight, 'asset.posterHeight', 1, 8192);
+      if (asset.posterWidth !== metadata.posterWidth || asset.posterHeight !== metadata.posterHeight) fail('HTML snapshot dimensions do not match its PNG.');
+      asset.hasSnapshot = boolean(a.hasSnapshot, 'asset.hasSnapshot');
+      if (asset.width > 4096 || asset.height > 4096 || asset.width * asset.height > 4_000_000) fail('HTML chart viewport is too large.');
+    }
     for (const key of ['relativePath', 'fingerprint']) if (a[key] !== undefined) asset[key] = string(a[key], `asset.${key}`, 2000);
     if (a.linkToken !== undefined) asset.linkToken = id(a.linkToken, 'asset.linkToken', 200);
     if (a.linkPersistence !== undefined) asset.linkPersistence = choice(a.linkPersistence, 'asset.linkPersistence', ['browser', 'session']);
@@ -143,7 +155,7 @@ function validateProjectInternal(input, assetCache) {
     const itemID = id(item.id, 'item.id');
     if (itemIDs.has(itemID)) fail(`duplicate item ID ${itemID}.`);
     itemIDs.add(itemID);
-    const type = choice(item.type, 'item.type', ['image', 'video', 'text', 'rect', 'line']);
+    const type = choice(item.type, 'item.type', ['image', 'video', 'html', 'text', 'rect', 'line']);
     const canonical = {
       id: itemID, type, name: string(item.name, 'item.name', 1000, type === 'text' ? 'Text' : type === 'image' ? 'Image' : type === 'video' ? 'Video' : 'Shape'),
       x: number(item.x, 'item.x', -100000, 100000), y: number(item.y, 'item.y', -100000, 100000),
@@ -156,7 +168,8 @@ function validateProjectInternal(input, assetCache) {
       if (!assetIDs.has(canonical.assetId)) fail(`image ${itemID} refers to a missing asset.`);
       const asset = project.assets.find(a => a.id === canonical.assetId);
       if ((type === 'video') !== (asset.mime === 'video/mp4')) fail(`item ${itemID} has an incompatible asset type.`);
-      if (type === 'video' && (item.crop !== undefined || item.shadow !== undefined)) fail('video crop and shadow are not supported.');
+      if ((type === 'html') !== (asset.mime === HTML_MIME)) fail(`item ${itemID} has an incompatible asset type.`);
+      if (['video', 'html'].includes(type) && (item.crop !== undefined || item.shadow !== undefined)) fail('video and HTML crop and shadow are not supported.');
       if (item.crop !== undefined) canonical.crop = validateCrop(item.crop);
       if (item.shadow !== undefined) canonical.shadow = validateShadow(item.shadow);
     } else if (type === 'text') {
@@ -196,6 +209,7 @@ function manifest(project) {
       png: 'All content is rasterized. DPI changes export pixel dimensions and the PNG resolution metadata, not the resolution of the original images.',
       crop: 'Image crops retain the complete embedded source and store a per-object visible rectangle. Restore original reveals the full source at its current scale.',
       video: 'MP4 originals are embedded in projects and PPTX exports. PNG, SVG, PDF, and HTML reports show the stored poster frame.',
+      html: 'HTML originals are embedded in projects and run in an isolated chart view. Static exports use the saved PNG snapshot. Interactive zoom and hover state are temporary.',
       localSources: 'Portable projects embed material copies. Local file handles are browser-local permissions, are not serialized, and may require permission or relinking after reopening.',
     },
     sources: project.assets.map(a => ({
@@ -215,6 +229,7 @@ function manifest(project) {
 export function sourceManifest(project) { return manifest(validateProject(project)); }
 
 function svgFromCanonical(project) {
+  requireHTMLSnapshots(project);
   const { width, height, background } = project.canvas;
   const assets = new Map(project.assets.map(a => [a.id, a]));
   const usedIDs = new Set(project.items.map(item => item.id));

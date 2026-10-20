@@ -1,4 +1,5 @@
 import { isMediaItem, posterProject, posterSource } from './video.js';
+import { requireHTMLSnapshots } from './html-chart.js';
 /** Script-free, self-contained presentation report. Original project data are never modified. */
 import { projectToSVG } from './core.js';
 import { validateDeck, slideProject } from './deck.js';
@@ -40,7 +41,7 @@ function slideSVG(deck, slide, index, assets) {
   const items = slide.items.filter(item => !item.hidden);
   const used = new Set(items.filter(item => isMediaItem(item)).map(item => item.assetId));
   const view = {
-    ...slideProject(deck, slide.id), name: slide.name || `Slide ${index + 1}`, items: items.map(item => item.type === 'video' ? { ...item, type: 'image' } : item),
+    ...slideProject(deck, slide.id), name: slide.name || `Slide ${index + 1}`, items: items.map(item => ['video', 'html'].includes(item.type) ? { ...item, type: 'image' } : item),
     // A report needs rendered copies, not private local paths, fingerprints, or browser binding tokens.
     assets: [...used].map(id => {
       const asset = posterProject({ items: [], assets: [assets.get(id)] }).assets[0];
@@ -58,6 +59,7 @@ function slideSVG(deck, slide, index, assets) {
 /** Generate a read-only offline HTML document containing every slide in project order. */
 export function generateHTMLReport(input) {
   const deck = validateDeck(input);
+  requireHTMLSnapshots(deck);
   const assets = new Map(deck.assets.map(asset => [asset.id, asset]));
   checkReportSize(deck, assets);
   const title = deck.name || 'Untitled figure';

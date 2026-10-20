@@ -1,6 +1,7 @@
 /** MP4 originals stay embedded; a PNG frame is used by static exports and thumbnails. */
-export const isMediaItem = item => item.type === 'image' || item.type === 'video';
-export const posterSource = asset => asset.mime === 'video/mp4' ? asset.posterDataUrl : asset.dataUrl;
+import { requireHTMLSnapshots } from './html-chart.js';
+export const isMediaItem = item => item.type === 'image' || item.type === 'video' || item.type === 'html';
+export const posterSource = asset => ['video/mp4', 'text/html'].includes(asset.mime) ? asset.posterDataUrl : asset.dataUrl;
 
 // Inspect the ISO base media file-type box, not the filename or supplied MIME label.
 export function isMP4(bytes) {
@@ -58,12 +59,13 @@ export function readVideoMetadata(bytes) {
 
 /** Static output uses poster pixels without copying MP4 bytes into the exported document. */
 export function posterProject(project) {
+  requireHTMLSnapshots(project);
   return {
     ...project,
-    items: project.items.map(item => item.type === 'video' ? { ...item, type: 'image' } : item),
+    items: project.items.map(item => ['video', 'html'].includes(item.type) ? { ...item, type: 'image' } : item),
     assets: project.assets.map(asset => {
-      if (asset.mime !== 'video/mp4') return asset;
-      const { posterDataUrl, posterWidth, posterHeight, duration, ...copy } = asset;
+      if (!['video/mp4', 'text/html'].includes(asset.mime)) return asset;
+      const { posterDataUrl, posterWidth, posterHeight, duration, hasSnapshot, ...copy } = asset;
       return { ...copy, mime: 'image/png', dataUrl: posterDataUrl, width: posterWidth, height: posterHeight, size: Math.floor((posterDataUrl.length - posterDataUrl.indexOf(',') - 1) * 3 / 4) };
     }),
   };

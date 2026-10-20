@@ -20,7 +20,7 @@ from pdf_text import MAX_PDF_TEXT_BODY, PdfTextError, PdfTextOutliner
 from pptx_import import MAX_PPTX_BODY, PptxImportError, import_pptx
 
 
-IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".tif", ".tiff", ".bmp", ".avif", ".heic", ".heif", ".ico", ".mp4"}
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".tif", ".tiff", ".bmp", ".avif", ".heic", ".heif", ".ico", ".mp4", ".html", ".htm"}
 MAX_BODY = 8192
 MAX_SOURCE_BYTES = 25 * 1024 * 1024  # Same per-image limit as the browser importer.
 
