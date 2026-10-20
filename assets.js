@@ -1,3 +1,4 @@
+import { isMP4, readVideoMetadata } from './video.js';
 /** Local image IO. The editable project embeds copies; filesystem handles never leave IndexedDB. */
 export const MAX_FILE_BYTES = 25 * 1024 * 1024;
 export const MAX_IMPORT_BYTES = 100 * 1024 * 1024;
@@ -13,9 +14,9 @@ let databasePromise;
 const pickerOptions = {
   multiple: true,
   excludeAcceptAllOption: true,
-  types: [{ description: 'Images (PNG, JPEG, WebP, SVG)', accept: {
+  types: [{ description: 'Images and MP4 videos', accept: {
     'image/png': ['.png'], 'image/jpeg': ['.jpg', '.jpeg'],
-    'image/webp': ['.webp'], 'image/svg+xml': ['.svg'],
+    'image/webp': ['.webp'], 'image/svg+xml': ['.svg'], 'video/mp4': ['.mp4'],
   } }],
 };
 
@@ -131,12 +132,13 @@ function checkDimensions(width, height) {
 }
 
 function detectMime(bytes) {
+  if (isMP4(bytes)) return 'video/mp4';
   if (bytes[0] === 0x89 && String.fromCharCode(...bytes.subarray(1, 4)) === 'PNG' && bytes[4] === 13 && bytes[5] === 10 && bytes[6] === 26 && bytes[7] === 10) return 'image/png';
   if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
   if (String.fromCharCode(...bytes.subarray(0, 4)) === 'RIFF' && String.fromCharCode(...bytes.subarray(8, 12)) === 'WEBP') return 'image/webp';
   const start = new TextDecoder().decode(bytes.subarray(0, 8192));
   if (/<(?:[A-Za-z_][\w.-]*:)?svg(?:\s|>)/i.test(start)) return 'image/svg+xml';
-  throw new Error('Only PNG, JPEG, WebP, and SVG images are supported. Formats are identified by actual file contents.');
+  throw new Error('Only PNG, JPEG, WebP, SVG images, and MP4 videos are supported. Formats are identified by actual file contents.');
 }
 
 // Read available raster dimensions before asking the browser to decode compressed pixels.
@@ -266,10 +268,10 @@ function safeSvg(source) {
 async function buildAsset(file, id = newId(), relativePath = file?.webkitRelativePath) {
   if (!file || typeof file.arrayBuffer !== 'function') throw new Error('Unable to read the file. Select a local image again.');
   if (file.size === 0) throw new Error('The file is empty.');
-  if (file.size > MAX_FILE_BYTES) throw new Error('Each image must be 25 MB or smaller.');
+  if (file.size > MAX_FILE_BYTES) throw new Error('Each image or video must be 25 MB or smaller.');
   const buffer = await file.arrayBuffer();
   const bytes = new Uint8Array(buffer);
-  if (bytes.length > MAX_FILE_BYTES) throw new Error('Each image must be 25 MB or smaller.');
+  if (bytes.length > MAX_FILE_BYTES) throw new Error('Each image or video must be 25 MB or smaller.');
   const mime = detectMime(bytes);
   if (mime !== 'image/svg+xml') checkRasterHeader(bytes, mime);
   const originalDataUrl = bytesToDataUrl(bytes, mime);
@@ -281,7 +283,9 @@ async function buildAsset(file, id = newId(), relativePath = file?.webkitRelativ
   if (relativePath) asset.relativePath = relativePath;
   const digest = await fingerprint(buffer);
   if (digest) asset.fingerprint = digest;
-  if (mime === 'image/svg+xml') {
+  if (mime === 'video/mp4') {
+    Object.assign(asset, await readVideoMetadata(bytes));
+  } else if (mime === 'image/svg+xml') {
     const svg = safeSvg(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
     const safeDataUrl = bytesToDataUrl(new TextEncoder().encode(svg.xml), 'image/svg+xml');
     const image = await imageFromUrl(safeDataUrl);
@@ -320,8 +324,8 @@ async function associateHandle(asset, handle, linkToken = newId()) {
 }
 
 function isImageCandidate(file) {
-  return /\.(?:png|jpe?g|webp|svg)$/i.test(file?.name || '')
-    || /^image\/(?:png|jpeg|webp|svg\+xml)$/i.test(file?.type || '');
+  return /\.(?:png|jpe?g|webp|svg|mp4)$/i.test(file?.name || '')
+    || /^(?:image\/(?:png|jpeg|webp|svg\+xml)|video\/mp4)$/i.test(file?.type || '');
 }
 
 // Records keep paths separate from File objects, whose webkitRelativePath is read-only.
@@ -340,9 +344,9 @@ async function importRecords(records) {
     const { file, handle, relativePath = file?.webkitRelativePath } = record;
     if (record.filter && !isImageCandidate(file)) { skipped++; continue; }
     try {
-      if (total + Number(file.size || 0) > MAX_IMPORT_BYTES) throw new Error('Each import is limited to 100 MB of images. Import smaller batches.');
+      if (total + Number(file.size || 0) > MAX_IMPORT_BYTES) throw new Error('Each import is limited to 100 MB of media. Import smaller batches.');
       const asset = await buildAsset(file, undefined, relativePath);
-      const sizeOfCopy = asset.dataUrl.length + (asset.originalDataUrl?.length || 0);
+      const sizeOfCopy = asset.dataUrl.length + (asset.originalDataUrl?.length || 0) + (asset.posterDataUrl?.length || 0);
       if (embeddedBytes + sizeOfCopy > MAX_IMPORT_BYTES * 4 / 3 || totalPixels + asset.width * asset.height > 64_000_000) {
         throw new Error('The decoded batch exceeds 64 million pixels or 100 MB of assets. Resize the images or import smaller batches.');
       }
@@ -485,6 +489,7 @@ export async function pickImages() {
 export async function replaceAsset(asset, file, handle) {
   if (!asset?.id) throw new Error('No asset is selected.');
   const replacement = await buildAsset(file, asset.id, replacementPath(asset, file));
+  if ((replacement.mime === 'video/mp4') !== (asset.mime === 'video/mp4')) throw new Error('Replace a video with another MP4, or an image with another image.');
   if (handle) return associateHandle(replacement, handle);
   // Leave previous handles intact for undo. This new copy has no linkage fields.
   return replacement;
@@ -526,6 +531,7 @@ export async function refreshAsset(asset) {
     }
     const file = await handle.getFile();
     const refreshed = await buildAsset(file, asset.id, replacementPath(asset, file));
+    if ((refreshed.mime === 'video/mp4') !== (asset.mime === 'video/mp4')) throw new Error('The original file changed media type. Relink a file of the same type.');
     return await associateHandle(refreshed, handle, asset.linkToken);
   } catch (error) { throw new Error(readableError(error)); }
 }

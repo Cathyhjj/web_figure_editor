@@ -1,3 +1,4 @@
+import { isMediaItem, posterSource } from './video.js';
 import { uid, projectToSVG, exportPNG, downloadBlob } from './core.js';
 import { createDeck, validateDeck, cloneDeck, currentSlide, slideProject, deckSourceManifest, addSlide } from './deck.js';
 import { pickProjectFile, readProjectFile, writeProjectFile } from './project-files.js';
@@ -63,12 +64,21 @@ function appendItemContent(g,item,context='stage'){
    if(a)g.innerHTML=imageShadowSVG(item,a,`shadow-${context}-${item.id}`);
   }
   if(item.type==='image'){const a=assetById(item.assetId);if(a){const c=imageCrop(item),parent=item.crop?svg('svg',{width:item.width,height:item.height,viewBox:`${c.x} ${c.y} ${c.width} ${c.height}`,preserveAspectRatio:'none',overflow:'hidden'}):g;parent.append(svg('image',{href:a.dataUrl,width:item.crop?1:item.width,height:item.crop?1:item.height,preserveAspectRatio:'none'}));if(parent!==g)g.append(parent);}}
+  else if(item.type==='video'){const a=assetById(item.assetId);if(a){g.append(svg('image',{href:a.posterDataUrl,width:item.width,height:item.height,preserveAspectRatio:'none'}));const r=Math.min(item.width,item.height)*.09;g.append(svg('circle',{cx:item.width/2,cy:item.height/2,r,fill:'#111827b3'}));g.append(svg('path',{d:`M ${item.width/2-r*.3} ${item.height/2-r*.5} L ${item.width/2+r*.55} ${item.height/2} L ${item.width/2-r*.3} ${item.height/2+r*.5} Z`,fill:'#fff'}));}}
   else if(item.type==='text'){
    const text=svg('text',{x:item.align==='center'?item.width/2:item.align==='right'?item.width:0,y:item.fontSize,fill:item.color,'font-family':item.fontFamily+', Arial, sans-serif','font-size':item.fontSize,'font-weight':item.fontWeight,'font-style':item.fontStyle,'text-anchor':item.align==='center'?'middle':item.align==='right'?'end':'start','xml:space':'preserve'});
    String(item.text).split('\n').forEach((line,j)=>text.append(svg('tspan',{x:item.align==='center'?item.width/2:item.align==='right'?item.width:0,dy:j?item.fontSize*1.2:0},line||' ')));g.append(text);
   }else if(item.type==='rect')g.append(svg('rect',{width:item.width,height:item.height,fill:item.fill,stroke:item.stroke,'stroke-width':item.strokeWidth}));
   else if(item.type==='line')g.append(svg('line',{x1:0,y1:0,x2:item.width,y2:item.height,stroke:item.stroke,'stroke-width':item.strokeWidth}));
 }
+function previewVideo(asset){
+ if(!asset||asset.mime!=='video/mp4')return;
+ const player=$('video-player');
+ $('video-title').textContent=asset.name;player.poster=asset.posterDataUrl;player.src=asset.dataUrl;
+ $('video-dialog').showModal();player.play().catch(()=>{});
+}
+$('video-close').onclick=()=>$('video-dialog').close();
+$('video-dialog').addEventListener('close',()=>{const player=$('video-player');player.pause();player.removeAttribute('src');player.removeAttribute('poster');player.load();});
 function renderSlides(){
  const validIds=new Set(project.slides.map(page=>page.id));
  selectedSlideIds=new Set([...selectedSlideIds].filter(id=>validIds.has(id)));
@@ -163,11 +173,11 @@ function renderStage(){
   if(selected.has(item.id)){
    g.append(svg('rect',{width:item.width,height:item.height,fill:'none',stroke:item.locked?'#777':'#9c357c','stroke-width':1.4/zoom,'stroke-dasharray':item.locked?`${4/zoom} ${3/zoom}`:'none','pointer-events':'none'}));
    if(selected.size===1&&!item.locked){
-    const handles=item.type==='image'?[
+    const handles=isMediaItem(item)?[
      ['w',0,item.height/2,'Stretch width',0],['e',item.width,item.height/2,'Stretch width',0],
      ['n',item.width/2,0,'Stretch height',90],['s',item.width/2,item.height,'Stretch height',90],
     ]:[];
-    handles.push(['se',item.width,item.height,item.type==='image'?'Scale proportionally (Shift: resize freely)':'Resize',45]);
+    handles.push(['se',item.width,item.height,isMediaItem(item)?'Scale proportionally (Shift: resize freely)':'Resize',45]);
     for(const [direction,x,y,label,angle] of handles){
      const cursor=['ew-resize','nwse-resize','ns-resize','nesw-resize'][((Math.round((item.rotation+angle)/45)%4)+4)%4];
      const handle=svg('rect',{x:x-5/zoom,y:y-5/zoom,width:10/zoom,height:10/zoom,fill:'#fff',stroke:'#9c357c','stroke-width':1.5/zoom,'data-resize':item.id,'data-resize-handle':direction,'aria-label':label,class:'resize-handle',style:`cursor:${cursor}`});
@@ -191,13 +201,14 @@ function renderAssets(){
   if(folder.open)collapsedAssetFolders.delete(folder.dataset.path);else collapsedAssetFolders.add(folder.dataset.path);
  }
  list.replaceChildren();
- if(!project.assets.length){const p=document.createElement('p');p.className='hint';p.textContent='Drop images or folders here to preview them. Folder structure is kept. Files are processed locally.';list.append(p);}
+ if(!project.assets.length){const p=document.createElement('p');p.className='hint';p.textContent='Drop images, MP4 videos, or folders here to preview them. Folder structure is kept. Files are processed locally.';list.append(p);}
  function assetCard(a){
   const card=document.createElement('div');card.className='asset-card';card.dataset.asset=a.id;card.draggable=false;
-  card.innerHTML=`<button class="asset-preview" data-action="place" title="Add to canvas" aria-label="Place ${escapeHTML(a.name)} on canvas"><img draggable="false" loading="lazy" decoding="async" class="asset-thumb" alt="${escapeHTML(a.name)}" src="${a.dataUrl}"></button><div class="asset-name" title="${escapeHTML(a.relativePath||a.name)}">${escapeHTML(a.name)}</div><div class="asset-meta">${a.width} × ${a.height} · ${a.sourceKind==='linked'?(a.linkPersistence==='session'?'Session link + copy':'Local link + copy'):'Portable copy'}${a.originalMime==='image/svg+xml'?' · Rasterized SVG':''}</div><div class="asset-actions"><button data-action="place">Place</button><button data-action="relink">Link</button>${a.sourceKind==='linked'?'<button data-action="refresh">Refresh</button>':''}</div>`;
+  card.innerHTML=`<button class="asset-preview" data-action="place" title="Add to canvas" aria-label="Place ${escapeHTML(a.name)} on canvas"><img draggable="false" loading="lazy" decoding="async" class="asset-thumb" alt="${escapeHTML(a.name)}" src="${posterSource(a)}"></button><div class="asset-name" title="${escapeHTML(a.relativePath||a.name)}">${escapeHTML(a.name)}</div><div class="asset-meta">${a.width} × ${a.height}${a.mime==='video/mp4'?` · MP4 · ${a.duration.toFixed(1)} s`:''} · ${a.sourceKind==='linked'?(a.linkPersistence==='session'?'Session link + copy':'Local link + copy'):'Portable copy'}${a.originalMime==='image/svg+xml'?' · Rasterized SVG':''}</div><div class="asset-actions"><button data-action="place">Place</button><button data-action="relink">Link</button>${a.sourceKind==='linked'?'<button data-action="refresh">Refresh</button>':''}</div>`;
   card.setAttribute('role','group');
   const selectionLabel=document.createElement('div');selectionLabel.className='asset-selection-label';selectionLabel.textContent='Selected on canvas';card.append(selectionLabel);
   const locateButton=document.createElement('button');locateButton.type='button';locateButton.dataset.action='locate';locateButton.textContent='Locate';locateButton.title='Show source image in Finder';locateButton.setAttribute('aria-label',`Show ${a.name} in Finder`);locateButton.disabled=locatingAsset;card.querySelector('.asset-actions').insertBefore(locateButton,card.querySelector('[data-action="refresh"]'));
+  if(a.mime==='video/mp4'){const preview=document.createElement('button');preview.dataset.action='preview';preview.textContent='Preview';card.querySelector('.asset-actions').append(preview);}
   let suppressClick=false;
   card.onpointerdown=e=>{
    if(e.button!==0||e.target.closest('.asset-actions'))return;
@@ -206,13 +217,13 @@ function renderAssets(){
    const end=ev=>{document.removeEventListener('pointermove',move);document.removeEventListener('pointerup',end);document.body.style.cursor='';if(!moved)return;suppressClick=true;const r=$('workspace').getBoundingClientRect();if(ev.clientX>=r.left&&ev.clientX<=r.right&&ev.clientY>=r.top&&ev.clientY<=r.bottom){const p=point(ev);placeAsset(a,{x:Math.max(0,p.x),y:Math.max(0,p.y)});}setTimeout(()=>suppressClick=false,0);};
    document.addEventListener('pointermove',move);document.addEventListener('pointerup',end,{once:true});
   };
-  card.onclick=async e=>{if(suppressClick)return;const action=e.target.closest('[data-action]')?.dataset.action;if(action==='place')placeAsset(a);if(action==='relink')await relink(a);if(action==='refresh')await refresh(a);if(action==='locate')await locate(a);};return card;
+  card.onclick=async e=>{if(suppressClick)return;const action=e.target.closest('[data-action]')?.dataset.action;if(action==='preview')previewVideo(a);if(action==='place')placeAsset(a);if(action==='relink')await relink(a);if(action==='refresh')await refresh(a);if(action==='locate')await locate(a);};return card;
  }
  function appendFolderContents(node,container){
   for(const folder of node.folders){
    const details=document.createElement('details');details.className='asset-folder';details.dataset.path=folder.path;details.open=!collapsedAssetFolders.has(folder.path);
    const summary=document.createElement('summary');summary.title=folder.path;
-   summary.innerHTML=`<span class="folder-chevron" aria-hidden="true">›</span><svg aria-hidden="true"><use href="#i-folder"/></svg><span class="folder-name">${escapeHTML(folder.name)}</span><span class="folder-count" aria-label="${folder.count} images">${folder.count}</span>`;
+   summary.innerHTML=`<span class="folder-chevron" aria-hidden="true">›</span><svg aria-hidden="true"><use href="#i-folder"/></svg><span class="folder-name">${escapeHTML(folder.name)}</span><span class="folder-count" aria-label="${folder.count} assets">${folder.count}</span>`;
    const contents=document.createElement('div');contents.className='asset-folder-content';appendFolderContents(folder,contents);
    details.append(summary,contents);container.append(details);
   }
@@ -223,7 +234,7 @@ function renderAssets(){
  syncAssetSelection();
 }
 function syncAssetSelection(revealAssetId){
- const nextIds=new Set(chosen().filter(i=>i.type==='image').map(i=>i.assetId));
+ const nextIds=new Set(chosen().filter(isMediaItem).map(i=>i.assetId));
  const revealId=revealAssetId??[...nextIds].find(id=>!selectedAssetIds.has(id));
  selectedAssetIds=nextIds;
  let target;
@@ -248,7 +259,7 @@ function renderLayers(){
  if(!slide().items.length){const p=document.createElement('p');p.className='hint';p.textContent='No objects on this slide yet.';list.append(p);}
  for(const i of [...slide().items].reverse()){
   const row=document.createElement('div');row.className=`layer-row ${selected.has(i.id)?'selected':''}`;row.dataset.layer=i.id;
-  row.innerHTML=`<button class="layer-select" title="Select object">${i.type==='image'?'▧':i.type==='text'?'T':i.type==='rect'?'□':'╱'} <span>${escapeHTML(i.name)}</span></button><button data-action="hide" title="${i.hidden?'Show':'Hide'}">${i.hidden?'○':'●'}</button><button data-action="lock" title="${i.locked?'Unlock':'Lock'}">${i.locked?'▣':'◇'}</button>`;
+  row.innerHTML=`<button class="layer-select" title="Select object">${i.type==='video'?'▶':i.type==='image'?'▧':i.type==='text'?'T':i.type==='rect'?'□':'╱'} <span>${escapeHTML(i.name)}</span></button><button data-action="hide" title="${i.hidden?'Show':'Hide'}">${i.hidden?'○':'●'}</button><button data-action="lock" title="${i.locked?'Unlock':'Lock'}">${i.locked?'▣':'◇'}</button>`;
   row.onclick=e=>{const action=e.target.closest('[data-action]')?.dataset.action;if(action)change(()=>{if(action==='hide')i.hidden=!i.hidden;else i.locked=!i.locked;});else{flushText();if(e.shiftKey){selected.has(i.id)?selected.delete(i.id):selected.add(i.id);}else selected=new Set([i.id]);render();}};list.append(row);
  }
 }
@@ -257,9 +268,10 @@ function renderInspector(){
  const items=chosen(), box=$('inspector');
  if(items.length!==1){box.innerHTML=`<div class="section-heading">${items.length?'Multiple objects':'Object properties'}</div><p class="hint">${items.length?'Drag any selected object to move them together. Shift + click or Shift + drag on blank space to adjust the selection.':'Drag on blank canvas space to select objects, or click an image, text, or shape. Double-click text to edit its content.'}</p>`;return;}
  const i=items[0];
- box.innerHTML=`<div class="section-heading">${i.type==='image'?'Image':i.type==='text'?'Text':'Shape'} properties${i.locked?' · Locked':''}</div>${field('Name','name',i.name,'text')}<div class="field-row">${field('X / px','x',round(i.x),'number','step="1"')}${field('Y / px','y',round(i.y),'number','step="1"')}</div><div class="field-row">${field('Width / px','width',round(i.width),'number','min="1" step="1"')}${field('Height / px','height',round(i.height),'number','min="1" step="1"')}</div><div class="field-row">${field('Rotation / °','rotation',round(i.rotation))}${field('Opacity','opacity',i.opacity,'number','min="0" max="1" step="0.1"')}</div>`;
+ box.innerHTML=`<div class="section-heading">${i.type==='video'?'Video':i.type==='image'?'Image':i.type==='text'?'Text':'Shape'} properties${i.locked?' · Locked':''}</div>${field('Name','name',i.name,'text')}<div class="field-row">${field('X / px','x',round(i.x),'number','step="1"')}${field('Y / px','y',round(i.y),'number','step="1"')}</div><div class="field-row">${field('Width / px','width',round(i.width),'number','min="1" step="1"')}${field('Height / px','height',round(i.height),'number','min="1" step="1"')}</div><div class="field-row">${field('Rotation / °','rotation',round(i.rotation))}${field('Opacity','opacity',i.opacity,'number','min="0" max="1" step="0.1"')}</div>`;
  if(i.type==='text')box.innerHTML+=`<label class="field"><span>Text content</span><textarea id="text-content" rows="4">${escapeHTML(i.text)}</textarea></label>${field('Font','fontFamily',i.fontFamily,'text','list="font-families" maxlength="200" autocomplete="off" spellcheck="false"')}<div class="field-row">${field('Size / px','fontSize',i.fontSize,'number','min="1" max="2000" step="any"')}${field('Color','color',i.color,'color')}</div><div class="field-row"><label class="field"><span>Weight</span><select data-property="fontWeight"><option value="400" ${String(i.fontWeight)==='400'?'selected':''}>Regular</option><option value="700" ${String(i.fontWeight)==='700'?'selected':''}>Bold</option></select></label><label class="field"><span>Style</span><select data-property="fontStyle"><option value="normal" ${i.fontStyle==='normal'?'selected':''}>Normal</option><option value="italic" ${i.fontStyle==='italic'?'selected':''}>Italic</option></select></label></div><label class="field"><span>Text alignment</span><select data-property="align">${[['left','Left'],['center','Center'],['right','Right']].map(([v,t])=>`<option value="${v}" ${i.align===v?'selected':''}>${t}</option>`).join('')}</select></label><p class="hint">Uses fonts installed on this computer. SVG does not embed fonts. Press Enter for a new line.</p>`;
  if(i.type==='image'){const a=assetById(i.assetId),c=imageCrop(i);const effectiveDPI=a?Math.round(Math.min(a.width*c.width/i.width,a.height*c.height/i.height)*96):0;box.innerHTML+=`<div class="image-crop-actions"><button id="crop-image" class="button" ${i.locked?'disabled':''}>${isCropped(i)?'Edit crop':'Crop'}</button><button id="restore-image" class="button" ${i.locked||!isCropped(i)?'disabled':''}>Restore original</button></div><p class="hint">Source: ${escapeHTML(a?.name)}<br>Original size: ${a?.width} × ${a?.height} px${isCropped(i)?`<br>Cropped area: ${Math.round(a.width*c.width)} × ${Math.round(a.height*c.height)} px`:''}<br>Effective resolution: ${effectiveDPI} DPI<br>Drag the bottom-right corner to keep proportions; hold Shift to resize freely. Drag side handles to stretch width or height. Width and height fields keep proportions.</p>`;}
+ if(i.type==='video'){const a=assetById(i.assetId);box.innerHTML+=`<div class="image-crop-actions"><button id="preview-video" class="button">▶ Preview video</button></div><p class="hint">MP4 · ${a.width} × ${a.height} px · ${a.duration.toFixed(1)} s<br>Embedded in PowerPoint; click the video during Slide Show to play. H.264 video with AAC audio is recommended.<br>PNG, SVG, PDF, and HTML reports use the poster frame.</p>`;}
  if(i.type==='image')box.innerHTML+=shadowEditorMarkup(i);
  if(i.type==='rect'||i.type==='line')box.innerHTML+=`<div class="field-row">${i.type==='rect'?field('Fill','fill',i.fill,'color'):''}${field('Stroke','stroke',i.stroke,'color')}</div>${field('Stroke width / px','strokeWidth',i.strokeWidth,'number','min="0" max="100" step="0.5"')}`;
  box.innerHTML+=`<label class="field inline"><input id="object-locked" type="checkbox" ${i.locked?'checked':''}> Lock object</label>`;
@@ -267,6 +279,7 @@ function renderInspector(){
   $('crop-image').onclick=()=>{flushText();cropEditor.show(i,assetById(i.assetId));};
   $('restore-image').onclick=()=>{if(i.locked||!isCropped(i))return;if(change(()=>{const restored=cropImage(i);delete i.crop;Object.assign(i,restored);}))status('Full image restored. Use Undo to return to the crop.');};
  }
+ if(i.type==='video')$('preview-video').onclick=()=>previewVideo(assetById(i.assetId));
  box.querySelectorAll('[data-property]').forEach(input=>{
   input.disabled=i.locked;
   const apply=()=>{
@@ -282,7 +295,7 @@ function renderInspector(){
    if(key==='name')val=val.slice(0,1000);
    if(i[key]===val)return;
    if(!pendingText)pendingText=snapshot();
-   if(i.type==='image'&&(key==='width'||key==='height')){const ratio=i.width/i.height;if(key==='width')i.height=val/ratio;else i.width=val*ratio;const other=box.querySelector(`[data-property="${key==='width'?'height':'width'}"]`);if(other)other.value=round(key==='width'?i.height:i.width);}
+   if(isMediaItem(i)&&(key==='width'||key==='height')){const ratio=i.width/i.height;if(key==='width')i.height=val/ratio;else i.width=val*ratio;const other=box.querySelector(`[data-property="${key==='width'?'height':'width'}"]`);if(other)other.value=round(key==='width'?i.height:i.width);}
    i[key]=val;changed();renderStage();
   };
   input.oninput=()=>{if(input.dataset.property!=='fontFamily')apply();};
@@ -314,7 +327,7 @@ function render(){
  $('project-name').value=project.name;$('canvas-width').value=slide().canvas.width;$('canvas-height').value=slide().canvas.height;$('canvas-background').value=slide().canvas.background;
 }
 function point(event){const p=new DOMPoint(event.clientX,event.clientY).matrixTransform($('stage').getScreenCTM().inverse());return{x:p.x,y:p.y};}
-function placeAsset(a,position){change(()=>{const maxW=slide().canvas.width*.43,maxH=slide().canvas.height*.65,scale=Math.min(1,maxW/a.width,maxH/a.height);const offset=slide().items.length%6*18;const i={...base('image',position?.x??60+offset,position?.y??60+offset,a.width*scale,a.height*scale),assetId:a.id,name:a.name};slide().items.push(i);selected=new Set([i.id]);});status(`Added ${a.name} to the canvas.`);}
+function placeAsset(a,position){change(()=>{const maxW=slide().canvas.width*.43,maxH=slide().canvas.height*.65,scale=Math.min(1,maxW/a.width,maxH/a.height);const offset=slide().items.length%6*18;const i={...base(a.mime==='video/mp4'?'video':'image',position?.x??60+offset,position?.y??60+offset,a.width*scale,a.height*scale),assetId:a.id,name:a.name};slide().items.push(i);selected=new Set([i.id]);});status(`Added ${a.name} to the canvas.`);}
 const importTarget=()=>({project,slideId:project.activeSlideId});
 async function importResult(result,position,target,{libraryOnly=false}={}){
  if(!result)return;
@@ -326,13 +339,13 @@ async function importResult(result,position,target,{libraryOnly=false}={}){
   const applied=change(()=>{for(const [j,a] of result.assets.entries()){
    project.assets.push(a);if(libraryOnly)continue;
    const scale=Math.min(1,page.canvas.width*.43/a.width,page.canvas.height*.65/a.height);
-   const i={...base('image',(position?.x??60)+j*22,(position?.y??60)+j*22,a.width*scale,a.height*scale),assetId:a.id,name:a.name};
+   const i={...base(a.mime==='video/mp4'?'video':'image',(position?.x??60)+j*22,(position?.y??60)+j*22,a.width*scale,a.height*scale),assetId:a.id,name:a.name};
    page.items.push(i);if(page.id===project.activeSlideId)selected=new Set([i.id]);
   }});
   if(!applied)return;
   status(`Imported ${result.assets.length} asset${result.assets.length===1?'':'s'} into ${libraryOnly?'Assets':page.name}.${libraryOnly?' Choose a preview or Place to add it to the canvas.':' Portable copies are included.'}${skipped}${errors?' '+errors:''}`,!!errors);
  }else if(errors)status(errors+skipped,true);
- else if('skipped' in result)status('No supported images found. Choose a folder containing PNG, JPG, WebP, or SVG images.'+skipped);
+ else if('skipped' in result)status('No supported media found. Choose a folder containing PNG, JPG, WebP, SVG, or MP4 files.'+skipped);
 }
 async function importToLibrary(pending,target){
  libraryImports++;renderLibraryImportNotice();
@@ -352,7 +365,7 @@ function renderLibraryImportNotice(){
  const notice=$('asset-import-status'),busy=libraryImports>0;
  $('assets-panel').setAttribute('aria-busy',String(busy));
  notice.hidden=!busy&&libraryImportNotice.hidden;
- notice.textContent=busy?'Reading images and subfolders…':libraryImportNotice.text;
+ notice.textContent=busy?'Reading images, videos, and subfolders…':libraryImportNotice.text;
  notice.classList.toggle('error',!busy&&libraryImportNotice.error);
 }
 async function relink(a){try{const updated=await linkAsset(a);if(updated)change(()=>{project.assets=project.assets.map(x=>x.id===a.id?updated:x);});else{relinkId=a.id;$('relink-input').click();}status(updated?'Local file linked and embedded copy updated.':'Select the local file to link.');}catch(e){if(e.name!=='AbortError')status(e.message,true);}}
@@ -413,7 +426,7 @@ $('workspace').onpointerdown=e=>{
   if(!e.shiftKey)selected.clear();render();$('stage').setPointerCapture(e.pointerId);e.preventDefault();return;
  }
  const i=byId(id);if(e.shiftKey&&!e.target.dataset.resize){selected.has(id)?selected.delete(id):selected.add(id);render();return;}
- if(!selected.has(id))selected=new Set([id]);renderInspector();renderLayers();renderToolbar();renderStage();syncAssetSelection(i.type==='image'?i.assetId:undefined);
+ if(!selected.has(id))selected=new Set([id]);renderInspector();renderLayers();renderToolbar();renderStage();syncAssetSelection(isMediaItem(i)?i.assetId:undefined);
  if(i.locked)return;
  const start=point(e),items=chosen().filter(i=>!i.locked),before=snapshot();const edit=i.type==='text'&&lastTap?.id===id&&e.timeStamp-lastTap.time<500&&Math.abs(start.x-lastTap.x)+Math.abs(start.y-lastTap.y)<5;lastTap={id,time:e.timeStamp,...start};gesture={mode:e.target.dataset.resize?'resize':'move',pointerId:e.pointerId,handle:e.target.dataset.resizeHandle||'se',id,start,items:items.map(i=>({...i})),before,moved:false,edit};
  $('stage').setPointerCapture(e.pointerId);e.preventDefault();
@@ -525,11 +538,12 @@ function exportInfo(){
  if(ppt){
   try{
    const layout=pptxLayout(project);
-   $('export-info').textContent=`PowerPoint (.pptx) · ${Number(layout.widthInches.toFixed(2))} × ${Number(layout.heightInches.toFixed(2))} in. All slides, with editable text, shapes, and separate images. ${layout.mixedSizes?'Different canvas sizes are fitted proportionally and centered on the first slide’s page size. ':''}${layout.scale!==1?'The first canvas is scaled to fit PowerPoint’s size limits. ':''}Fonts are not embedded.`;
+   $('export-info').textContent=`PowerPoint (.pptx) · ${Number(layout.widthInches.toFixed(2))} × ${Number(layout.heightInches.toFixed(2))} in. All slides, with editable text, shapes, separate images, and embedded MP4 videos (click to play in Slide Show). ${layout.mixedSizes?'Different canvas sizes are fitted proportionally and centered on the first slide’s page size. ':''}${layout.scale!==1?'The first canvas is scaled to fit PowerPoint’s size limits. ':''}Fonts are not embedded.`;
   }catch(e){$('export-info').textContent=e.message;$('export-submit').disabled=true;}
   return;
  }
  $('export-info').textContent=report?'One self-contained HTML file with all slides and a contents list. Open it offline in a browser or print it. Text and shapes remain vector; images are embedded. The report is read-only, and fonts are not embedded.':pdf?`Single-page PDF · ${Number((slide().canvas.width*25.4/96).toFixed(2))} × ${Number((slide().canvas.height*25.4/96).toFixed(2))} mm. Text and shapes remain vector; text becomes outlines and is not searchable. Images remain raster. ${dpi} DPI applies only to images with shadows. Text outlines require the local macOS server.`:png?`${Math.round(slide().canvas.width*dpi/96)} × ${Math.round(slide().canvas.height*dpi/96)} px · ${dpi} DPI. All content is rasterized with transparency preserved. Higher DPI does not add detail to source images.`:'SVG keeps editor text and shapes as vectors. Images, including imported SVGs, are embedded rasters. Fonts are not embedded; recipients need the same fonts installed.';
+ if(project.slides.some(page=>page.items.some(i=>i.type==='video'&&!i.hidden)))$('export-info').textContent+=' Videos appear as static poster frames in this format.';
 }
 $('export-open').onclick=()=>{flushText();exportInfo();$('export-dialog').showModal();};
 $('export-format').onchange=exportInfo;$('export-dpi').onchange=exportInfo;$('export-cancel').onclick=()=>$('export-dialog').close();
@@ -547,16 +561,16 @@ $('export-submit').onclick=async()=>{
    blob=new Blob([generateHTMLReport(project)],{type:'text/html;charset=utf-8'});exportName=filename()+'-report.html';
   }else{
    const p=slideProject(project);exportName=(project.slides.length>1?`${filename()}-slide-${project.slides.indexOf(slide())+1}`:filename())+'.'+format;
-   const usedAssets=new Set(p.items.filter(i=>i.type==='image').map(i=>i.assetId));p.assets=p.assets.filter(a=>usedAssets.has(a.id));
+   const usedAssets=new Set(p.items.filter(isMediaItem).map(i=>i.assetId));p.assets=p.assets.filter(a=>usedAssets.has(a.id));
    blob=format==='png'?await exportPNG(p,Number($('export-dpi').value)):format==='pdf'?await exportPDF(p,Number($('export-dpi').value)):new Blob([projectToSVG(p)],{type:'image/svg+xml'});
   }
   if(blob.size>240*1024*1024)throw new Error('Export exceeds 240 MB. Use fewer slides or smaller source images.');
   downloadBlob(blob,exportName);$('export-dialog').close();
-  status(format==='pptx'?`PowerPoint exported with all ${project.slides.length} slides. Text, shapes, and images can be edited in PowerPoint.`:format==='html'?`HTML report exported with all ${project.slides.length} slides. Open the file offline; save your project to keep editing.`:`Current slide exported as ${format.toUpperCase()}. Save project to keep all slides editable.`);
+  status(format==='pptx'?`PowerPoint exported with all ${project.slides.length} slides. Text, shapes, and images can be edited in PowerPoint. Embedded videos play when clicked in Slide Show.`:format==='html'?`HTML report exported with all ${project.slides.length} slides. Open the file offline; save your project to keep editing.`:`Current slide exported as ${format.toUpperCase()}. Save project to keep all slides editable.`);
  }catch(e){$('export-info').textContent='Export failed: '+e.message;status('Export failed: '+e.message,true);}finally{exporting=false;button.disabled=false;button.textContent='Export file';$('export-format').disabled=$('export-cancel').disabled=false;$('export-dpi').disabled=!['png','pdf'].includes($('export-format').value);}
 };
 const editingInput = target => /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName)||target?.isContentEditable;
-const nativeClipboard = e => e.defaultPrevented||editingInput(e.target)||$('export-dialog').open||cropEditor.open;
+const nativeClipboard = e => e.defaultPrevented||editingInput(e.target)||$('export-dialog').open||cropEditor.open||$('video-dialog').open;
 function slideClipboardTarget(target){
  const focused=target===document||target===document.body?document.activeElement:target;
  return !!focused?.closest?.('#slides-panel');
@@ -699,7 +713,7 @@ document.addEventListener('paste',async e=>{
 });
 document.addEventListener('keydown',e=>{
  if(e.defaultPrevented)return;
- if(cropEditor.open)return;
+ if(cropEditor.open||$('video-dialog').open)return;
  if(gesture?.mode==='select'){if(e.key==='Escape')finishMarquee(true);e.preventDefault();return;}
  const input=editingInput(e.target),mod=e.metaKey||e.ctrlKey;
  if(mod&&e.key.toLowerCase()==='s'){e.preventDefault();if(!e.repeat)$(e.shiftKey?'save-project-as':'save-project').click();return;}

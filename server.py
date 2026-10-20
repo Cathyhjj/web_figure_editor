@@ -19,7 +19,7 @@ from urllib.parse import unquote, urlsplit
 from pdf_text import MAX_PDF_TEXT_BODY, PdfTextError, PdfTextOutliner
 
 
-IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".tif", ".tiff", ".bmp", ".avif", ".heic", ".heif", ".ico"}
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".tif", ".tiff", ".bmp", ".avif", ".heic", ".heif", ".ico", ".mp4"}
 MAX_BODY = 8192
 MAX_SOURCE_BYTES = 25 * 1024 * 1024  # Same per-image limit as the browser importer.
 

@@ -1,3 +1,4 @@
+import { isMediaItem } from './video.js';
 /** Render only copied objects as a transparent image for other applications. */
 import { exportPNG, validateProject } from './core.js';
 import { shadowBounds } from './shadow.js';
@@ -9,7 +10,7 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 
 function localBounds(item, measured) {
   if (measured?.has(item.id)) return measured.get(item.id);
-  if (item.type === 'image') return shadowBounds(item);
+  if (isMediaItem(item)) return shadowBounds(item);
   const pad = (item.type === 'rect' || item.type === 'line') && item.stroke !== 'none' ? item.strokeWidth / 2 : 0;
   return { x: -pad, y: -pad, width: item.width + 2 * pad, height: item.height + 2 * pad };
 }
@@ -37,7 +38,7 @@ function imageProject(selection, measured) {
   if (bounds.width > MAX_SIDE + 1e-7 || bounds.height > MAX_SIDE + 1e-7) {
     throw new Error('The selected objects span more than 16,000 canvas pixels. Move them closer together or copy fewer objects.');
   }
-  const assetIds = new Set(items.filter(item => item.type === 'image').map(item => item.assetId));
+  const assetIds = new Set(items.filter(item => isMediaItem(item)).map(item => item.assetId));
   return validateProject({
     ...source,
     canvas: { width: Math.min(MAX_SIDE, bounds.width), height: Math.min(MAX_SIDE, bounds.height), background: 'transparent' },
@@ -110,9 +111,9 @@ export async function selectionToPNG(selection) {
   const assets = new Map(project.assets.map(asset => [asset.id, asset]));
   let scale = 1 / 96;
   for (const item of project.items) {
-    if (item.type !== 'image') { scale = Math.max(scale, 300 / 96); continue; }
+    if (!isMediaItem(item)) { scale = Math.max(scale, 300 / 96); continue; }
     const asset = assets.get(item.assetId);
-    scale = Math.max(scale, asset.width * (item.crop?.width ?? 1) / item.width, asset.height * (item.crop?.height ?? 1) / item.height);
+    scale = Math.max(scale, (asset.posterWidth ?? asset.width) * (item.crop?.width ?? 1) / item.width, (asset.posterHeight ?? asset.height) * (item.crop?.height ?? 1) / item.height);
   }
   const { width, height } = project.canvas;
   scale = Math.min(scale, 25, MAX_SIDE / width, MAX_SIDE / height, Math.sqrt(MAX_PIXELS / (width * height)));

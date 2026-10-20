@@ -1,3 +1,4 @@
+import { isMediaItem } from './video.js';
 /** Multi-slide projects. The asset registry is shared; each slide owns its canvas and items. */
 import { createProject, uid, validateProject, validateProjectBatch, sourceManifest } from './core.js';
 
@@ -125,7 +126,7 @@ export function deckSourceManifest(input) {
   const deck = validateDeck(input);
   const base = sourceManifest(slideProject(deck));
   const usage = new Map(deck.assets.map(asset => [asset.id, []]));
-  for (const slide of deck.slides) for (const item of slide.items) if (item.type === 'image') {
+  for (const slide of deck.slides) for (const item of slide.items) if (isMediaItem(item)) {
     usage.get(item.assetId).push({ slideId: slide.id, slideName: slide.name, itemId: item.id, hidden: item.hidden });
   }
   return {

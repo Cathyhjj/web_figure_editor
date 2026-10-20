@@ -1,3 +1,4 @@
+import { isMediaItem } from './video.js';
 /** Portable editable selections and whole slides for the browser clipboard. */
 import { uid, validateProject } from './core.js';
 import { cloneDeck, currentSlide, validateDeck } from './deck.js';
@@ -14,7 +15,7 @@ const MAX_TEXT_LENGTH = 240 * 1024 * 1024;
 export function createSelection(view, selected) {
   const items = view.items.filter(item => selected.has(item.id));
   if (!items.length) return null;
-  const assetIds = new Set(items.filter(item => item.type === 'image').map(item => item.assetId));
+  const assetIds = new Set(items.filter(item => isMediaItem(item)).map(item => item.assetId));
   return validateProject({ ...view, items, assets: view.assets.filter(asset => assetIds.has(asset.id)) });
 }
 
@@ -38,7 +39,7 @@ export function decodeSelection(text) {
 export function createSlideClipboard(deck, slideId = deck.activeSlideId) {
   const slide = deck.slides.find(value => value.id === slideId);
   if (!slide) throw new Error('The slide to copy does not exist.');
-  const assetIds = new Set(slide.items.filter(item => item.type === 'image').map(item => item.assetId));
+  const assetIds = new Set(slide.items.filter(item => isMediaItem(item)).map(item => item.assetId));
   return validateProject({
     format: 'figure-editor', version: 1, id: slide.id, name: slide.name,
     canvas: slide.canvas, items: slide.items, assets: deck.assets.filter(asset => assetIds.has(asset.id)),
@@ -67,7 +68,7 @@ export function createSlidesClipboard(deck, selectedSlideIds = new Set([deck.act
   if (!ids.size) throw new Error('Select at least one slide to copy.');
   const slides = deck.slides.filter(slide => ids.has(slide.id));
   if (slides.length !== ids.size) throw new Error('A slide selected for copying does not exist.');
-  const assetIds = new Set(slides.flatMap(slide => slide.items.filter(item => item.type === 'image').map(item => item.assetId)));
+  const assetIds = new Set(slides.flatMap(slide => slide.items.filter(item => isMediaItem(item)).map(item => item.assetId)));
   return validateDeck({
     ...deck, slides, assets: deck.assets.filter(asset => assetIds.has(asset.id)),
     activeSlideId: ids.has(deck.activeSlideId) ? deck.activeSlideId : slides.at(-1).id,
@@ -104,7 +105,7 @@ export function decodeSlides(text) {
 }
 
 function sameImage(left, right) {
-  return ['mime', 'dataUrl', 'width', 'height', 'originalMime', 'originalDataUrl'].every(key => left[key] === right[key]);
+  return ['mime', 'dataUrl', 'width', 'height', 'originalMime', 'originalDataUrl', 'posterDataUrl', 'posterWidth', 'posterHeight', 'duration'].every(key => left[key] === right[key]);
 }
 
 function reusablePortableAsset(existing, source) {
@@ -123,7 +124,7 @@ function freshId(used) {
 /** Reuse exact originals or compatible portable copies; never transfer local link authority. */
 function importAssets(candidate, source) {
   const assetIds = new Set(candidate.assets.map(asset => asset.id));
-  const usedAssets = new Set(source.items.filter(item => item.type === 'image').map(item => item.assetId));
+  const usedAssets = new Set(source.items.filter(item => isMediaItem(item)).map(item => item.assetId));
   const assetMap = new Map();
   for (const asset of source.assets) {
     if (!usedAssets.has(asset.id)) continue;
@@ -155,7 +156,7 @@ export function pasteSelection(deck, selection, offset = 20) {
   const copies = source.items.map(item => ({
     ...item, id: freshId(itemIds), x: item.x + offset, y: item.y + offset,
     locked: false, hidden: false,
-    ...(item.type === 'image' ? { assetId: assetMap.get(item.assetId) } : {}),
+    ...(isMediaItem(item) ? { assetId: assetMap.get(item.assetId) } : {}),
   }));
   target.items.push(...copies);
   const validated = validateDeck(candidate);
@@ -188,7 +189,7 @@ export function pasteSlides(deck, slidesPayload) {
     id: freshId(slideIds), name: slide.name, canvas: slide.canvas,
     items: slide.items.map(item => ({
       ...item, id: freshId(itemIds),
-      ...(item.type === 'image' ? { assetId: assetMap.get(item.assetId) } : {}),
+      ...(isMediaItem(item) ? { assetId: assetMap.get(item.assetId) } : {}),
     })),
   }));
   candidate.slides.splice(insertionIndex, 0, ...slides);

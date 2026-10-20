@@ -1,5 +1,6 @@
 /** Offline, editable PowerPoint export. CSS pixels are 96/in; OOXML uses 914400 EMU/in. */
 import { validateDeck } from './deck.js';
+import { isMediaItem } from './video.js';
 
 const EMU_PER_PX = 9525;
 const EMU_PER_PT = 12700;
@@ -45,13 +46,14 @@ function preflightSize(deck) {
         let paragraphs = 1;
         for (let i = 0; i < item.text.length; i++) if (item.text.charCodeAt(i) === 10) paragraphs++;
         xmlBytes += item.text.length * 6 + paragraphs * (2000 + item.fontFamily.length * 54);
-      } else if (item.type === 'image') {
+      } else if (isMediaItem(item)) {
         const asset = assets.get(item.assetId);
         xmlBytes += asset.name.length * 6;
         if (!used.has(asset.id)) {
           used.add(asset.id);
           // Estimate WebP with source bytes; check its converted PNG size below.
           mediaBytes += (asset.dataUrl.length - asset.dataUrl.indexOf(',') - 1) * 3 / 4;
+          if (asset.posterDataUrl) mediaBytes += (asset.posterDataUrl.length - asset.posterDataUrl.indexOf(',') - 1) * 3 / 4;
         }
       }
       checkBudget(xmlBytes + mediaBytes);
@@ -161,6 +163,19 @@ function imageShape(item, asset, id, relationship, layout) {
   return `<p:pic><p:nvPicPr><p:cNvPr id="${id}" name="${escapeXML(item.name)}" descr="${escapeXML(asset.name)}"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="${relationship}">${alpha === 100000 ? '' : `<a:alphaModFix amt="${alpha}"/>`}</a:blip>${crop}<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>${transform(item, layout)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:ln><a:noFill/></a:ln>${imageShadow(item, layout)}</p:spPr></p:pic>`;
 }
 
+function videoShape(item, asset, id, links, layout) {
+  // A standard picture supplies geometry/poster, while both media relationships
+  // resolve inside the package. The media action and timing node enable click play.
+  const picture = imageShape(item, asset, id, links.poster, layout);
+  const nonVisual = `<p:nvPicPr><p:cNvPr id="${id}" name="${escapeXML(item.name)}" descr="${escapeXML(asset.name)}"><a:hlinkClick r:id="" action="ppaction://media"/></p:cNvPr><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr><p:nvPr><a:videoFile r:link="${links.video}"/><p:extLst><p:ext uri="{DAA4B4D4-6D71-4841-9C94-3DE7FCFB9230}"><p14:media xmlns:p14="http://schemas.microsoft.com/office/powerpoint/2010/main" r:embed="${links.media}"/></p:ext></p:extLst></p:nvPr></p:nvPicPr>`;
+  return picture.replace(/<p:nvPicPr>[\s\S]*?<\/p:nvPicPr>/, () => nonVisual);
+}
+
+function videoTiming(ids) {
+  if (!ids.length) return '';
+  return `<p:timing><p:tnLst><p:par><p:cTn id="1" dur="indefinite" restart="never" nodeType="tmRoot"><p:childTnLst>${ids.map((id, index) => `<p:video><p:cMediaNode vol="100000"><p:cTn id="${index + 2}" fill="hold" display="0"><p:stCondLst><p:cond delay="indefinite"/></p:stCondLst></p:cTn><p:tgtEl><p:spTgt spid="${id}"/></p:tgtEl></p:cMediaNode></p:video>`).join('')}</p:childTnLst></p:cTn></p:par></p:tnLst></p:timing>`;
+}
+
 const emptyTree = '<p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr>';
 const namespaces = `xmlns:a="${NS.a}" xmlns:r="${NS.r}" xmlns:p="${NS.p}"`;
 function relationships(entries) {
@@ -169,13 +184,25 @@ function relationships(entries) {
 function slideXML(slide, layout, assets, media) {
   const relationshipsList = [{ id: 'rId1', type: 'slideLayout', target: '../slideLayouts/slideLayout1.xml' }];
   const imageRelationships = new Map();
+  const videoRelationships = new Map(), videoIds = [];
   // A real shape preserves each original canvas background when fitted into a common slide.
   const background = { type: 'rect', name: 'Slide background', x: 0, y: 0, width: slide.canvas.width, height: slide.canvas.height, rotation: 0, opacity: 1, fill: slide.canvas.background, stroke: 'none', strokeWidth: 0 };
   const shapes = [shape(background, 2, layout)];
   for (const item of slide.items) {
     if (item.hidden) continue;
     const id = shapes.length + 2;
-    if (item.type === 'image') {
+    if (item.type === 'video') {
+      if (!videoRelationships.has(item.assetId)) {
+        const file = media.get(item.assetId), links = {};
+        for (const [key, type, filename] of [['video', 'video', file.filename], ['media', 'http://schemas.microsoft.com/office/2007/relationships/media', file.filename], ['poster', 'image', file.poster.filename]]) {
+          links[key] = `rId${relationshipsList.length + 1}`;
+          relationshipsList.push({ id: links[key], type, target: `../media/${filename}` });
+        }
+        videoRelationships.set(item.assetId, links);
+      }
+      shapes.push(videoShape(item, assets.get(item.assetId), id, videoRelationships.get(item.assetId), layout));
+      videoIds.push(id);
+    } else if (item.type === 'image') {
       if (!imageRelationships.has(item.assetId)) {
         const relationship = `rId${relationshipsList.length + 1}`;
         imageRelationships.set(item.assetId, relationship);
@@ -203,7 +230,7 @@ function slideXML(slide, layout, assets, media) {
     shapes.length + 2, { x: 0, y: 0, scale: 1 },
   ));
   return {
-    xml: `${XML}<p:sld ${namespaces}><p:cSld name="${escapeXML(slide.name)}"><p:bg><p:bgPr>${fill('white')}<a:effectLst/></p:bgPr></p:bg><p:spTree>${emptyTree}${shapes.join('')}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>`,
+    xml: `${XML}<p:sld ${namespaces}><p:cSld name="${escapeXML(slide.name)}"><p:bg><p:bgPr>${fill('white')}<a:effectLst/></p:bgPr></p:bg><p:spTree>${emptyTree}${shapes.join('')}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>${videoTiming(videoIds)}</p:sld>`,
     rels: relationships(relationshipsList),
   };
 }
@@ -257,11 +284,11 @@ function contentTypes(deck, media) {
     ['docProps/app.xml', 'extended-properties'],
     ...deck.slides.map((_, i) => [`ppt/slides/slide${i + 1}.xml`, 'presentationml.slide']),
   ];
-  return `${XML}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>${[...new Set([...media.values()].map(value => value.extension))].map(extension => `<Default Extension="${extension}" ContentType="image/${extension}"/>`).join('')}<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>${types.map(([path, type]) => `<Override PartName="/${path}" ContentType="application/vnd.openxmlformats-officedocument.${type}+xml"/>`).join('')}</Types>`;
+  return `${XML}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>${[...new Set([...media.values()].flatMap(value => value.poster ? [value.extension, value.poster.extension] : [value.extension]))].map(extension => `<Default Extension="${extension}" ContentType="${extension === 'mp4' ? 'video' : 'image'}/${extension}"/>`).join('')}<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>${types.map(([path, type]) => `<Override PartName="/${path}" ContentType="application/vnd.openxmlformats-officedocument.${type}+xml"/>`).join('')}</Types>`;
 }
 function coreProperties(deck) {
   const now = new Date().toISOString();
-  return `${XML}<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>${escapeXML(deck.name)}</dc:title><dc:creator>Figure Editor</dc:creator><dc:description>Editable Figure Editor slides. Text and shapes remain native; imported images remain separate raster images. Fonts are referenced, not embedded.</dc:description><cp:lastModifiedBy>Figure Editor</cp:lastModifiedBy><cp:revision>1</cp:revision><dcterms:created xsi:type="dcterms:W3CDTF">${now}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">${now}</dcterms:modified></cp:coreProperties>`;
+  return `${XML}<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>${escapeXML(deck.name)}</dc:title><dc:creator>Figure Editor</dc:creator><dc:description>Editable Figure Editor slides. Text and shapes remain native; imported images remain separate raster images; MP4 videos are embedded for click playback. Fonts are referenced, not embedded.</dc:description><cp:lastModifiedBy>Figure Editor</cp:lastModifiedBy><cp:revision>1</cp:revision><dcterms:created xsi:type="dcterms:W3CDTF">${now}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">${now}</dcterms:modified></cp:coreProperties>`;
 }
 function appProperties(deck) {
   return `${XML}<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>Figure Editor</Application><PresentationFormat>Custom</PresentationFormat><Slides>${deck.slides.length}</Slides><Notes>0</Notes><HiddenSlides>0</HiddenSlides><HeadingPairs><vt:vector size="2" baseType="variant"><vt:variant><vt:lpstr>Slide Titles</vt:lpstr></vt:variant><vt:variant><vt:i4>${deck.slides.length}</vt:i4></vt:variant></vt:vector></HeadingPairs><TitlesOfParts><vt:vector size="${deck.slides.length}" baseType="lpstr">${deck.slides.map(slide => `<vt:lpstr>${escapeXML(slide.name)}</vt:lpstr>`).join('')}</vt:vector></TitlesOfParts><AppVersion>1.0</AppVersion></Properties>`;
@@ -337,11 +364,14 @@ export async function exportPPTX(input) {
   const media = new Map();
   let mediaSize = 0;
   for (const slide of deck.slides) for (const item of slide.items) {
-    if (item.type !== 'image' || item.hidden || media.has(item.assetId)) continue;
-    const encoded = await imageBytes(assets.get(item.assetId));
-    mediaSize += encoded.bytes.length;
+    if (!isMediaItem(item) || item.hidden || media.has(item.assetId)) continue;
+    const asset = assets.get(item.assetId);
+    const encoded = asset.mime === 'video/mp4'
+      ? { bytes: Uint8Array.from(atob(asset.dataUrl.slice(asset.dataUrl.indexOf(',') + 1)), c => c.charCodeAt(0)), extension: 'mp4', poster: { ...await imageBytes({ mime: 'image/png', dataUrl: asset.posterDataUrl }), filename: `poster${media.size + 1}.png` } }
+      : await imageBytes(asset);
+    mediaSize += encoded.bytes.length + (encoded.poster?.bytes.length || 0);
     checkBudget(xmlBudget + mediaSize);
-    media.set(item.assetId, { ...encoded, filename: `image${media.size + 1}.${encoded.extension}` });
+    media.set(item.assetId, { ...encoded, filename: `${item.type === 'video' ? 'video' : 'image'}${media.size + 1}.${encoded.extension}` });
   }
   const presentation = `${XML}<p:presentation ${namespaces} autoCompressPictures="0"><p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst><p:sldIdLst>${deck.slides.map((_, i) => `<p:sldId id="${256 + i}" r:id="rId${i + 2}"/>`).join('')}</p:sldIdLst><p:sldSz cx="${emu(layout.width)}" cy="${emu(layout.height)}" type="custom"/><p:notesSz cx="6858000" cy="9144000"/></p:presentation>`;
   const entries = [
@@ -370,6 +400,9 @@ export async function exportPPTX(input) {
     const content = slideXML(slide, layout.slides[index], assets, media);
     entries.push([`ppt/slides/slide${index + 1}.xml`, content.xml], [`ppt/slides/_rels/slide${index + 1}.xml.rels`, content.rels]);
   }
-  for (const entry of media.values()) entries.push([`ppt/media/${entry.filename}`, entry.bytes]);
+  for (const entry of media.values()) {
+    entries.push([`ppt/media/${entry.filename}`, entry.bytes]);
+    if (entry.poster) entries.push([`ppt/media/${entry.poster.filename}`, entry.poster.bytes]);
+  }
   return zip(entries);
 }

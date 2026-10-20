@@ -26,6 +26,7 @@
 !/demo.js
 !/report.js
 !/pptx.js
+!/video.js
 !/pdf.js
 !/pdf_text.py
 !/windows.js
@@ -43,6 +44,13 @@
 !/tests/folders.js
 !/tests/pptx.html
 !/tests/pptx-browser.js
+!/tests/video.html
+!/tests/video-browser.js
+!/tests/fixtures/
+/tests/fixtures/*
+!/tests/fixtures/video.mp4
+!/tests/fixtures/video-poster.png
+!/tests/fixtures/README.md
 !/tests/pdf.html
 !/tests/pdf-browser.js
 !/tests/locate.html

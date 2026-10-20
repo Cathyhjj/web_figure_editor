@@ -1,4 +1,5 @@
 /** Portable project model and exports. Geometry is measured in CSS pixels (96/in). */
+import { isMP4, isMediaItem, posterSource } from './video.js';
 import { validateCrop, imageCrop } from './crop.js';
 import { validateShadow, imageShadowSVG } from './shadow.js';
 const LIMITS = Object.freeze({ assets: 500, items: 2000, assetBytes: 40 * 1024 * 1024, totalBytes: 160 * 1024 * 1024 });
@@ -50,7 +51,7 @@ function color(value, label, fallback) {
 }
 
 function dataURL(value, mime, label, inertOriginal = false) {
-  if ((!inertOriginal && !RASTER_MIMES.has(mime)) || (inertOriginal && mime !== 'image/svg+xml')) fail(`${label} has an unsupported MIME type.`);
+  if ((!inertOriginal && !RASTER_MIMES.has(mime) && mime !== 'video/mp4') || (inertOriginal && mime !== 'image/svg+xml')) fail(`${label} has an unsupported MIME type.`);
   const result = string(value, label, Math.ceil(LIMITS.assetBytes / 3) * 4 + 64);
   const prefix = `data:${mime};base64,`;
   if (!result.startsWith(prefix)) fail(`${label} must be an embedded base64 ${mime} image, not a file path or external URL.`);
@@ -60,9 +61,10 @@ function dataURL(value, mime, label, inertOriginal = false) {
   if (byteLength > LIMITS.assetBytes) fail(`${label} exceeds the 40 MB asset limit.`);
   // A MIME label alone must not turn an embedded script or SVG into a raster asset.
   if (!inertOriginal) {
-    const header = atob(payload.slice(0, 32));
+    const header = atob(payload.slice(0, 5504));
     const valid = mime === 'image/png' ? PNG_SIGNATURE.every((v, i) => header.charCodeAt(i) === v)
       : mime === 'image/jpeg' ? header.charCodeAt(0) === 255 && header.charCodeAt(1) === 216 && header.charCodeAt(2) === 255
+        : mime === 'video/mp4' ? isMP4(Uint8Array.from(header, char => char.charCodeAt(0)))
         : header.startsWith('RIFF') && header.slice(8, 12) === 'WEBP';
     if (!valid) fail(`${label} bytes do not match its MIME type.`);
   }
@@ -112,6 +114,13 @@ function validateProjectInternal(input, assetCache) {
       lastModified: number(a.lastModified, 'asset.lastModified', 0, Number.MAX_SAFE_INTEGER, 0),
       sourceKind: choice(a.sourceKind, 'asset.sourceKind', ['copy', 'linked'], 'copy'),
     };
+    if (mime === 'video/mp4') {
+      const poster = dataURL(a.posterDataUrl, 'image/png', 'asset.posterDataUrl');
+      asset.posterDataUrl = poster.value; totalBytes += poster.byteLength;
+      asset.posterWidth = number(a.posterWidth, 'asset.posterWidth', 1, 1920);
+      asset.posterHeight = number(a.posterHeight, 'asset.posterHeight', 1, 1080);
+      asset.duration = number(a.duration, 'asset.duration', Number.MIN_VALUE, Number.MAX_SAFE_INTEGER);
+    }
     for (const key of ['relativePath', 'fingerprint']) if (a[key] !== undefined) asset[key] = string(a[key], `asset.${key}`, 2000);
     if (a.linkToken !== undefined) asset.linkToken = id(a.linkToken, 'asset.linkToken', 200);
     if (a.linkPersistence !== undefined) asset.linkPersistence = choice(a.linkPersistence, 'asset.linkPersistence', ['browser', 'session']);
@@ -134,17 +143,20 @@ function validateProjectInternal(input, assetCache) {
     const itemID = id(item.id, 'item.id');
     if (itemIDs.has(itemID)) fail(`duplicate item ID ${itemID}.`);
     itemIDs.add(itemID);
-    const type = choice(item.type, 'item.type', ['image', 'text', 'rect', 'line']);
+    const type = choice(item.type, 'item.type', ['image', 'video', 'text', 'rect', 'line']);
     const canonical = {
-      id: itemID, type, name: string(item.name, 'item.name', 1000, type === 'text' ? 'Text' : type === 'image' ? 'Image' : 'Shape'),
+      id: itemID, type, name: string(item.name, 'item.name', 1000, type === 'text' ? 'Text' : type === 'image' ? 'Image' : type === 'video' ? 'Video' : 'Shape'),
       x: number(item.x, 'item.x', -100000, 100000), y: number(item.y, 'item.y', -100000, 100000),
       width: number(item.width, 'item.width', type === 'line' ? 0 : 0.01, 100000), height: number(item.height, 'item.height', type === 'line' ? 0 : 0.01, 100000),
       rotation: number(item.rotation, 'item.rotation', -36000, 36000, 0), opacity: number(item.opacity, 'item.opacity', 0, 1, 1),
       locked: boolean(item.locked, 'item.locked'), hidden: boolean(item.hidden, 'item.hidden'),
     };
-    if (type === 'image') {
+    if (isMediaItem(canonical)) {
       canonical.assetId = id(item.assetId, 'item.assetId');
       if (!assetIDs.has(canonical.assetId)) fail(`image ${itemID} refers to a missing asset.`);
+      const asset = project.assets.find(a => a.id === canonical.assetId);
+      if ((type === 'video') !== (asset.mime === 'video/mp4')) fail(`item ${itemID} has an incompatible asset type.`);
+      if (type === 'video' && (item.crop !== undefined || item.shadow !== undefined)) fail('video crop and shadow are not supported.');
       if (item.crop !== undefined) canonical.crop = validateCrop(item.crop);
       if (item.shadow !== undefined) canonical.shadow = validateShadow(item.shadow);
     } else if (type === 'text') {
@@ -183,6 +195,7 @@ function manifest(project) {
       svg: 'Text and editor shapes are vector. Imported PNG, JPEG, WebP, and flattened SVG images are embedded rasters. Fonts are referenced by family and are not embedded.',
       png: 'All content is rasterized. DPI changes export pixel dimensions and the PNG resolution metadata, not the resolution of the original images.',
       crop: 'Image crops retain the complete embedded source and store a per-object visible rectangle. Restore original reveals the full source at its current scale.',
+      video: 'MP4 originals are embedded in projects and PPTX exports. PNG, SVG, PDF, and HTML reports show the stored poster frame.',
       localSources: 'Portable projects embed material copies. Local file handles are browser-local permissions, are not serialized, and may require permission or relinking after reopening.',
     },
     sources: project.assets.map(a => ({
@@ -194,7 +207,7 @@ function manifest(project) {
       ...(a.rasterized !== undefined ? { rasterized: a.rasterized } : {}),
       ...(a.rasterizationScale !== undefined ? { rasterizationScale: a.rasterizationScale } : {}),
       ...(a.originalMime ? { originalMime: a.originalMime, originalEmbedded: true, renderedAs: 'raster' } : {}),
-      usedBy: project.items.filter(i => i.type === 'image' && i.assetId === a.id).map(i => i.id),
+      usedBy: project.items.filter(i => isMediaItem(i) && i.assetId === a.id).map(i => i.id),
     })),
   };
 }
@@ -218,7 +231,7 @@ function svgFromCanonical(project) {
     if (item.hidden) continue;
     const { width: w, height: h } = item;
     lines.push(`<g id="${xml(item.id)}" transform="translate(${n(item.x)} ${n(item.y)}) rotate(${n(item.rotation)} ${n(w / 2)} ${n(h / 2)})" opacity="${n(item.opacity)}">`);
-    if (item.type === 'image') {
+    if (isMediaItem(item)) {
       let filterID;
       do { filterID = `figure-shadow-${project.id}-${item.id}-${shadowIndex++}`; } while (usedIDs.has(filterID));
       usedIDs.add(filterID);
@@ -226,7 +239,7 @@ function svgFromCanonical(project) {
       if (shadowSVG) lines.push(shadowSVG);
       const c = imageCrop(item);
       if (item.crop) lines.push(`<svg width="${n(w)}" height="${n(h)}" viewBox="${c.x} ${c.y} ${c.width} ${c.height}" preserveAspectRatio="none" overflow="hidden">`);
-      lines.push(`<image x="0" y="0" width="${item.crop ? '1' : n(w)}" height="${item.crop ? '1' : n(h)}" preserveAspectRatio="none" href="${xml(assets.get(item.assetId).dataUrl)}"/>`);
+      lines.push(`<image x="0" y="0" width="${item.crop ? '1' : n(w)}" height="${item.crop ? '1' : n(h)}" preserveAspectRatio="none" href="${xml(posterSource(assets.get(item.assetId)))}"/>`);
       if (item.crop) lines.push('</svg>');
     } else if (item.type === 'text') {
       const textX = item.align === 'center' ? w / 2 : item.align === 'right' ? w : 0;

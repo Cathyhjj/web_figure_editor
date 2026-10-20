@@ -1,3 +1,4 @@
+import { isMediaItem, posterProject, posterSource } from './video.js';
 /** Script-free, self-contained presentation report. Original project data are never modified. */
 import { projectToSVG } from './core.js';
 import { validateDeck, slideProject } from './deck.js';
@@ -19,10 +20,10 @@ function checkReportSize(deck, assets) {
     for (const item of slide.items) {
       if (item.hidden) continue;
       estimate += 2048;
-      if (item.type === 'image') {
+      if (isMediaItem(item)) {
         const shadow = item.shadow;
         const copies = shadow?.enabled && shadow.transparency < 100 && shadow.size > 0 ? 2 : 1;
-        estimate += assets.get(item.assetId).dataUrl.length * copies;
+        estimate += posterSource(assets.get(item.assetId)).length * copies;
       }
       else if (item.type === 'text') {
         let lines = 1;
@@ -37,12 +38,12 @@ function checkReportSize(deck, assets) {
 
 function slideSVG(deck, slide, index, assets) {
   const items = slide.items.filter(item => !item.hidden);
-  const used = new Set(items.filter(item => item.type === 'image').map(item => item.assetId));
+  const used = new Set(items.filter(item => isMediaItem(item)).map(item => item.assetId));
   const view = {
-    ...slideProject(deck, slide.id), name: slide.name || `Slide ${index + 1}`, items,
+    ...slideProject(deck, slide.id), name: slide.name || `Slide ${index + 1}`, items: items.map(item => item.type === 'video' ? { ...item, type: 'image' } : item),
     // A report needs rendered copies, not private local paths, fingerprints, or browser binding tokens.
     assets: [...used].map(id => {
-      const asset = assets.get(id);
+      const asset = posterProject({ items: [], assets: [assets.get(id)] }).assets[0];
       return { id: asset.id, name: 'Embedded image', mime: asset.mime, dataUrl: asset.dataUrl, width: asset.width, height: asset.height, size: asset.size, lastModified: 0, sourceKind: 'copy' };
     }),
   };
@@ -89,7 +90,7 @@ export function generateHTMLReport(input) {
 <main class="main" id="report-main">
 <header class="report-header"><p class="eyebrow">Figure report · ${slideCount}</p><h1>${html(title)}</h1><span class="badge">Read-only report</span><p class="intro">All slides from this project, in order. This file is for viewing and sharing; keep the .figure.json project to continue editing.</p></header>
 ${slides}
-<footer class="report-notes"><p><strong>About this report.</strong> Text and editor shapes remain vector SVG objects. Imported images, including SVG files flattened during import, remain embedded rasters at their stored resolution. Fonts are not embedded; appearance depends on fonts installed on the viewing computer.</p><p>Report layout scales slides to fit the screen or printed page. Use the dedicated SVG or PNG exports when you need publication dimensions or a specific raster DPI. A browser may rasterize some content when printing.</p><p>This file contains no scripts, external images, or font downloads. Original source files and local file permissions remain in the editable project and browser. Repeated images are embedded in each slide for independent rendering.</p></footer>
+<footer class="report-notes"><p><strong>About this report.</strong> Text and editor shapes remain vector SVG objects. Imported images, including SVG files flattened during import, remain embedded rasters at their stored resolution. Videos are shown as static poster frames. Fonts are not embedded; appearance depends on fonts installed on the viewing computer.</p><p>Report layout scales slides to fit the screen or printed page. Use the dedicated SVG or PNG exports when you need publication dimensions or a specific raster DPI. A browser may rasterize some content when printing.</p><p>This file contains no scripts, external images, or font downloads. Original source files and local file permissions remain in the editable project and browser. Repeated images are embedded in each slide for independent rendering.</p></footer>
 </main>
 </div>
 </body>

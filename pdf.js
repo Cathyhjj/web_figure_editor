@@ -1,3 +1,4 @@
+import { posterProject } from './video.js';
 /** Single-page vector PDF. Geometry is CSS px (96/in), PDF pages use points (72/in). */
 import { validateProject, withRasterCanvas } from './core.js';
 import { imageCrop } from './crop.js';
@@ -206,7 +207,7 @@ function textShape(pdf, item, lines) {
 
 /** Vectors stay vectors; only an image with an active shadow is rasterized as a local patch. */
 export async function exportPDF(input, dpi = 300) {
-  const project = validateProject(input);
+  const project = posterProject(validateProject(input));
   if (typeof dpi !== 'number' || !Number.isFinite(dpi) || dpi < 1 || dpi > 2400) fail('export DPI must be a finite number between 1 and 2400.');
   const visible = project.items.filter(item => !item.hidden && item.opacity > 0);
   const outlines = await textOutlines(visible.filter(item => item.type === 'text' && item.text.trim() && color(item.color).alpha > 0));

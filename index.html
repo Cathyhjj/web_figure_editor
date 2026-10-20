@@ -106,10 +106,10 @@
 
     <section class="canvas-area" aria-label="Canvas workspace">
       <div class="workspace-heading"><label class="slide-name-field" for="slide-name"><span>Slide name</span><input id="slide-name" value="Slide 1" spellcheck="false" aria-label="Slide name"></label><span class="workspace-hint" title="Drag on blank space to fully enclose objects. Hold Shift to add to the selection.">Drag to select · Shift to add</span></div>
-      <div id="workspace" tabindex="0" aria-label="Canvas. Drop images here. Drag on blank space to select objects; hold Shift to add. Drag a selected object to move the selection. Use arrow keys to nudge selected objects.">
+      <div id="workspace" tabindex="0" aria-label="Canvas. Drop images or MP4 videos here. Drag on blank space to select objects; hold Shift to add. Drag a selected object to move the selection. Use arrow keys to nudge selected objects.">
         <div id="stage-wrap">
           <svg id="stage" xmlns="http://www.w3.org/2000/svg" width="960" height="640" viewBox="0 0 960 640" role="img" aria-label="Paper figure canvas"></svg>
-          <div id="empty-state" class="canvas-empty"><div class="canvas-empty-icon"><svg><use href="#i-image"/></svg><span>+</span></div><h2>Bring your figure together.</h2><p>Drop images here to start building your paper figure.</p><span class="empty-detail">Originals preserved · Editable text · Saved locally</span></div>
+          <div id="empty-state" class="canvas-empty"><div class="canvas-empty-icon"><svg><use href="#i-image"/></svg><span>+</span></div><h2>Bring your figure together.</h2><p>Drop images or MP4 videos here to start building your paper figure.</p><span class="empty-detail">Originals preserved · Editable text · Saved locally</span></div>
         </div>
       </div>
       <div class="canvas-footer"><span id="selection-count">No selection</span><div class="zoom-controls"><button id="zoom-out" class="icon-button" title="Zoom out" aria-label="Zoom out">−</button><output id="zoom-value" aria-label="Zoom level">100%</output><button id="zoom-in" class="icon-button" title="Zoom in" aria-label="Zoom in">+</button><span class="zoom-divider"></span><button id="zoom-fit" class="icon-button" title="Fit to window" aria-label="Fit to window"><svg><use href="#i-fit"/></svg></button></div></div>
@@ -118,9 +118,9 @@
     <aside class="panel library-panel" aria-labelledby="assets-heading" data-window="assets" data-window-title="Assets">
       <div class="panel-heading" data-window-handle><h2 id="assets-heading"><svg><use href="#i-image"/></svg>Assets</h2><span class="panel-heading-note">PROJECT</span></div>
       <section id="assets-panel" class="library-content" aria-labelledby="assets-heading">
-        <button id="add-images" class="button upload-button"><svg><use href="#i-plus"/></svg>Add local images</button>
+        <button id="add-images" class="button upload-button"><svg><use href="#i-plus"/></svg>Add images / MP4</button>
         <button id="add-folders" class="button upload-button folder-upload-button"><svg><use href="#i-folder"/></svg>Add folders</button>
-        <p class="library-caption">PNG · JPG · WEBP · SVG</p>
+        <p class="library-caption">PNG · JPG · WEBP · SVG · MP4</p>
         <p class="hint folder-import-hint">Includes subfolders. Click a preview or drag it onto the canvas.</p>
         <p id="asset-import-status" class="hint asset-import-status" role="status" aria-live="polite" hidden></p>
         <div id="asset-list" class="asset-list"><div class="library-empty"><span class="empty-symbol"><svg><use href="#i-image"/></svg></span><p>Start with an image</p><span>Drop an image on the canvas,<br>or choose a local file.</span></div></div>
@@ -152,14 +152,18 @@
 
   <footer class="status-bar"><span class="status-light" aria-hidden="true"></span><span id="status" role="status" aria-live="polite">Ready</span><span class="status-meta">FIGURE EDITOR <span>·</span> LOCAL WORKSPACE</span></footer>
 
-  <input id="file-input" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" multiple hidden>
-  <input id="folder-input" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" webkitdirectory multiple hidden>
+  <dialog id="video-dialog" aria-labelledby="video-title">
+    <div class="dialog-heading"><h2 id="video-title">Video preview</h2><button id="video-close" class="button" aria-label="Close video preview">Close</button></div>
+    <video id="video-player" controls playsinline preload="metadata"></video>
+  </dialog>
+  <input id="file-input" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml,video/mp4,.mp4" multiple hidden>
+  <input id="folder-input" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml,video/mp4,.mp4" webkitdirectory multiple hidden>
   <input id="project-input" type="file" accept=".json,.figure.json" hidden>
-  <input id="relink-input" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden>
+  <input id="relink-input" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml,video/mp4,.mp4" hidden>
 
   <dialog id="export-dialog" aria-labelledby="export-title">
     <div class="dialog-header"><span class="eyebrow">READY FOR YOUR PAPER</span><h2 id="export-title">Export current slide</h2><p id="export-slide-name">Current slide: Slide 1</p></div>
-    <div class="dialog-body"><div class="field-row"><label class="field"><span>File format</span><select id="export-format"><option value="png">PNG · High-resolution image</option><option value="svg">SVG · Vector + raster</option><option value="pdf">PDF · Vector text + shapes</option><option value="pptx">PPT · Editable PowerPoint · All slides</option><option value="html">HTML report · All slides</option></select></label><label class="field"><span id="export-dpi-label">PNG resolution</span><select id="export-dpi"><option value="150">150 DPI</option><option value="300" selected>300 DPI</option><option value="600">600 DPI</option></select></label></div><div id="export-info" class="export-info" aria-live="polite"></div><div class="format-note"><p><strong>PNG</strong>: All content is rasterized.</p><p><strong>SVG</strong>: Editor text, rectangles, and lines remain vector. Images and imported SVGs are rasterized. Fonts are not embedded.</p><p><strong>PDF</strong>: One page at the canvas size. Text becomes vector outlines (not searchable); rectangles and lines remain vector. Images retain their source pixels, except images with shadows, which are rendered at the selected DPI. Transparency is preserved. Text outlines require the local macOS server; recipients do not need the fonts installed.</p><p><strong>PPT (.pptx)</strong>: All slides with editable text, rectangles, lines, and separate images. Different canvas sizes are fitted to the first slide. Fonts are not embedded; text may render differently if a font is missing.</p><p><strong>HTML report</strong>: One offline file containing all slides. Text and shapes remain vector, images are embedded, and fonts are not embedded. The report is read-only.</p><p>Save an editable project too if you plan to make changes later.</p></div></div>
+    <div class="dialog-body"><div class="field-row"><label class="field"><span>File format</span><select id="export-format"><option value="png">PNG · High-resolution image</option><option value="svg">SVG · Vector + raster</option><option value="pdf">PDF · Vector text + shapes</option><option value="pptx">PPT · Editable PowerPoint · All slides</option><option value="html">HTML report · All slides</option></select></label><label class="field"><span id="export-dpi-label">PNG resolution</span><select id="export-dpi"><option value="150">150 DPI</option><option value="300" selected>300 DPI</option><option value="600">600 DPI</option></select></label></div><div id="export-info" class="export-info" aria-live="polite"></div><div class="format-note"><p><strong>PNG</strong>: All content is rasterized.</p><p><strong>SVG</strong>: Editor text, rectangles, and lines remain vector. Images and imported SVGs are rasterized. Fonts are not embedded.</p><p><strong>PDF</strong>: One page at the canvas size. Text becomes vector outlines (not searchable); rectangles and lines remain vector. Images retain their source pixels, except images with shadows, which are rendered at the selected DPI. Transparency is preserved. Text outlines require the local macOS server; recipients do not need the fonts installed.</p><p><strong>PPT (.pptx)</strong>: All slides with editable text, rectangles, lines, and separate images, plus embedded MP4 videos that play on click in Slide Show. Different canvas sizes are fitted to the first slide. Fonts are not embedded; text may render differently if a font is missing.</p><p><strong>HTML report</strong>: One offline file containing all slides. Text and shapes remain vector, images are embedded, and fonts are not embedded. The report is read-only.</p><p>Videos use static poster frames in PNG, SVG, PDF, and HTML reports. MP4 originals are retained in projects and embedded in PPTX; H.264 video with AAC audio is recommended.</p><p>Save an editable project too if you plan to make changes later.</p></div></div>
     <div class="dialog-actions"><button id="export-cancel" class="button">Cancel</button><button id="export-submit" class="button primary"><svg><use href="#i-export"/></svg>Export file</button></div>
   </dialog>
   <script type="module" src="./app.js?v=slides-multi-1"></script>
