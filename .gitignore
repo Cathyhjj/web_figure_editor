@@ -17,6 +17,8 @@
 !/core.js
 !/shadow.js
 !/shadow-editor.js
+!/shapes.js
+!/shape-editor.js
 !/crop.js
 !/crop-editor.js
 !/resize.js
@@ -68,6 +70,8 @@
 !/tests/clipboard-browser.js
 !/tests/shadow.html
 !/tests/shadow-browser.js
+!/tests/shapes.html
+!/tests/shapes-browser.js
 !/tests/crop.html
 !/tests/crop-browser.js
 !/tests/resize.html

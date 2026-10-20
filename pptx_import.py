@@ -436,22 +436,36 @@ class Converter:
             line = first(find(sp,'a:ln'),*(find(el,'p:spPr/a:ln') for el in chain),self.theme_style(shape,chain,'ln'))
             stroke = 'none' if line is None or find(line,'a:noFill') is not None else self.color(find(line,'a:solidFill'))
             width = num(line,'w',12700)/EMU*g['_scaleY'] if line is not None else 0
+            dash_node = find(line,'a:prstDash')
+            dash_value = dash_node.get('val','solid') if dash_node is not None else 'solid'
+            stroke_dash = {'dash':'dash','sysDash':'dash','lgDash':'dash','dot':'dot','sysDot':'dot'}.get(dash_value,'solid')
             prst = find(sp,'a:prstGeom'); preset = prst.get('prst','rect') if prst is not None else 'rect'
             gradient = fill_node if fill_node is not None and tag(fill_node)=='gradFill' else None
             if fill_node is not None and tag(fill_node) in ('blipFill','pattFill'):
                 self.warn('Picture or pattern shape fill is not retained.',name)
             if typ == 'cxnSp' or preset == 'line':
                 item = self.base(name,g,'line')
-                item.update(fill='none',stroke=stroke,strokeWidth=width)
+                item.update(fill='none',stroke=stroke,strokeWidth=width,strokeDash=stroke_dash)
                 # Convert flipped endpoints to a positive-length rotated line.
                 w,h=g['width'],g['height']; dx=(-w if g['_flipX'] else w); dy=(-h if g['_flipY'] else h)
                 item.update(width=math.hypot(dx,dy),height=0,rotation=g['rotation']+math.degrees(math.atan2(dy,dx)),x=g['x']+w/2-math.hypot(dx,dy)/2,y=g['y']+h/2)
+                head,tail=find(line,'a:headEnd'),find(line,'a:tailEnd')
+                start=head.get('type','none') if head is not None else 'none'
+                end=tail.get('type','none') if tail is not None else 'none'
+                if start == 'arrow' or end == 'arrow':
+                    item['type']='doubleArrow' if start == end == 'arrow' else 'arrow'
+                    if start == 'arrow' and end != 'arrow': item['rotation'] += 180
+                if any(value not in ('none','arrow') for value in (start,end)):
+                    self.warn('Unsupported line arrowhead style is not retained.',name)
                 self.items.append(item)
-                if find(line,'a:headEnd') is not None or find(line,'a:tailEnd') is not None:
-                    self.warn('Line arrowheads are not retained.',name)
             elif fill != 'none' or stroke != 'none' or gradient is not None:
-                if preset == 'rect' and gradient is None and find(sp,'a:custGeom') is None:
-                    item=self.base(name,g,'rect'); item.update(fill=fill,stroke=stroke,strokeWidth=width); self.items.append(item)
+                if preset in ('rect','ellipse','roundRect') and gradient is None and find(sp,'a:custGeom') is None:
+                    item=self.base(name,g,preset); item.update(fill=fill,stroke=stroke,strokeWidth=width,strokeDash=stroke_dash)
+                    if preset == 'roundRect':
+                        adjustment=next((node.get('fmla','') for node in children(prst,'a:avLst/a:gd') if node.get('name') == 'adj'),'val 16667')
+                        match=re.fullmatch(r'val\s+(-?\d+)',adjustment)
+                        item['cornerRadius']=max(0,min(.5,int(match.group(1))/100000)) if match else 1/6
+                    self.items.append(item)
                 elif preset in ('rect','ellipse','roundRect') and find(sp,'a:custGeom') is None:
                     w,h=g['width'],g['height']; defs=''
                     if gradient is not None:

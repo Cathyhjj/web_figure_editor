@@ -1,4 +1,5 @@
 import { isMediaItem } from './video.js';
+import { isShapeItem, isLineShape } from './shapes.js';
 /** Resize in the object's local axes while keeping the opposite edge/corner fixed. */
 export function resizeItem(item, handle, dx, dy, { free = false } = {}) {
   const angle = (item.rotation || 0) * Math.PI / 180;
@@ -6,10 +7,10 @@ export function resizeItem(item, handle, dx, dy, { free = false } = {}) {
   const localX = dx * cos + dy * sin, localY = -dx * sin + dy * cos;
   const horizontal = handle === 'w' ? -1 : handle === 'e' || handle === 'se' ? 1 : 0;
   const vertical = handle === 'n' ? -1 : handle === 's' || handle === 'se' ? 1 : 0;
-  const clamp = value => Math.max(4, Math.min(20000, value));
+  const clamp = value => Math.max(isLineShape(item) ? 0 : 4, Math.min(20000, value));
   let width = horizontal ? clamp(item.width + horizontal * localX) : item.width;
   let height = vertical ? clamp(item.height + vertical * localY) : item.height;
-  if (handle === 'se' && isMediaItem(item) && !free) {
+  if (handle === 'se' && ((isMediaItem(item) && !free) || (isShapeItem(item) && !isLineShape(item) && free))) {
     const minScale = Math.max(4 / item.width, 4 / item.height);
     const maxScale = Math.min(20000 / item.width, 20000 / item.height);
     // Very narrow crops may not fit both limits; preserve the ratio and upper bound.

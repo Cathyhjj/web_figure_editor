@@ -3,6 +3,7 @@ import { posterProject } from './video.js';
 import { validateProject, withRasterCanvas } from './core.js';
 import { imageCrop } from './crop.js';
 import { shadowBounds } from './shadow.js';
+import { isLineShape, shapePath, arrowHeads, shapeBounds, strokeDashArray } from './shapes.js';
 
 const encoder = new TextEncoder();
 const ascii = value => encoder.encode(value);
@@ -180,14 +181,25 @@ function transform(item) {
 }
 
 function shape(pdf, item) {
-  const fill = color(item.type === 'line' ? 'none' : item.fill), stroke = color(item.stroke);
+  const fill = color(isLineShape(item) ? 'none' : item.fill), stroke = color(item.stroke);
+  fill.alpha *= item.fillOpacity ?? 1;
+  stroke.alpha *= item.strokeOpacity ?? 1;
   const filled = fill.alpha > 0, stroked = stroke.alpha > 0 && item.strokeWidth > 0;
   if (!filled && !stroked) return null;
-  const pad = stroked ? item.strokeWidth / 2 : 0;
-  return {
-    bounds: [-pad, -pad, item.width + pad, item.height + pad],
-    content: `${pdf.alpha(fill.alpha, stroke.alpha)}\n${fill.rgb} rg\n${stroke.rgb} RG\n${n(item.strokeWidth)} w\n0 J 0 j 4 M\n${item.type === 'line' ? `0 0 m ${n(item.width)} ${n(item.height)} l` : `0 0 ${n(item.width)} ${n(item.height)} re`}\n${filled ? (stroked ? 'B' : 'f') : 'S'}\n`,
-  };
+  const box = shapeBounds(item), bounds = [box.x, box.y, box.x + box.width, box.y + box.height];
+  const path = commands => commands.map(([op, ...values]) => [...values.map(n), { M: 'm', L: 'l', C: 'c', Z: 'h' }[op]].join(' ')).join('\n');
+  const geometry = item.type === 'rect' ? `0 0 ${n(item.width)} ${n(item.height)} re` : path(shapePath(item));
+  const heads = stroked ? arrowHeads(item) : [];
+  const dash = `[${strokeDashArray(item).map(n).join(' ')}] 0 d`;
+  let content = `${pdf.alpha(fill.alpha, heads.length ? 1 : stroke.alpha)}\n${fill.rgb} rg\n${stroke.rgb} RG\n${n(item.strokeWidth)} w\n0 J ${isLineShape(item) ? 1 : 0} j 4 M\n${dash}\n${geometry}\n${filled ? (stroked ? 'B' : 'f') : 'S'}\n`;
+  if (heads.length) {
+    content += `[] 0 d\n${heads.map(points => path(points.map(([x, y], i) => [i ? 'L' : 'M', x, y]))).join('\n')}\nS\n`;
+    // Composite opaque shaft and heads first, so intersections do not darken.
+    const form = pdf.add(pdf.stream(content, `/Type /XObject /Subtype /Form /BBox [${bounds.map(n).join(' ')}] /Group << /S /Transparency /I true /CS /DeviceRGB >> /Resources ${pdf.resourceDictionary()}`));
+    const name = pdf.resource('XObject', form);
+    content = `${pdf.alpha(stroke.alpha)} /${name} Do\n`;
+  }
+  return { bounds, content };
 }
 
 function textShape(pdf, item, lines) {

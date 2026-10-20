@@ -3,6 +3,7 @@ import { isMediaItem } from './video.js';
 import { exportPNG, validateProject } from './core.js';
 import { shadowBounds } from './shadow.js';
 import { isCropped } from './crop.js';
+import { isShapeItem, shapeBounds } from './shapes.js';
 
 const MAX_SIDE = 16000;
 const MAX_PIXELS = 32_000_000;
@@ -11,8 +12,8 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 function localBounds(item, measured) {
   if (measured?.has(item.id)) return measured.get(item.id);
   if (isMediaItem(item)) return shadowBounds(item);
-  const pad = (item.type === 'rect' || item.type === 'line') && item.stroke !== 'none' ? item.strokeWidth / 2 : 0;
-  return { x: -pad, y: -pad, width: item.width + 2 * pad, height: item.height + 2 * pad };
+  if (isShapeItem(item)) return shapeBounds(item);
+  return { x: 0, y: 0, width: item.width, height: item.height };
 }
 
 function boundsOf(items, measured) {

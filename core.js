@@ -3,6 +3,7 @@ import { isMP4, isMediaItem, posterSource } from './video.js';
 import { HTML_MIME, looksLikeHTML, requireHTMLSnapshots, validateSnapshot } from './html-chart.js';
 import { validateCrop, imageCrop } from './crop.js';
 import { validateShadow, imageShadowSVG } from './shadow.js';
+import { SHAPE_TYPES, isLineShape, shapeSVG } from './shapes.js';
 const LIMITS = Object.freeze({ assets: 500, items: 2000, assetBytes: 40 * 1024 * 1024, totalBytes: 160 * 1024 * 1024 });
 const RASTER_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 const PNG_SIGNATURE = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -155,11 +156,11 @@ function validateProjectInternal(input, assetCache) {
     const itemID = id(item.id, 'item.id');
     if (itemIDs.has(itemID)) fail(`duplicate item ID ${itemID}.`);
     itemIDs.add(itemID);
-    const type = choice(item.type, 'item.type', ['image', 'video', 'html', 'text', 'rect', 'line']);
+    const type = choice(item.type, 'item.type', ['image', 'video', 'html', 'text', ...SHAPE_TYPES]);
     const canonical = {
       id: itemID, type, name: string(item.name, 'item.name', 1000, type === 'text' ? 'Text' : type === 'image' ? 'Image' : type === 'video' ? 'Video' : 'Shape'),
       x: number(item.x, 'item.x', -100000, 100000), y: number(item.y, 'item.y', -100000, 100000),
-      width: number(item.width, 'item.width', type === 'line' ? 0 : 0.01, 100000), height: number(item.height, 'item.height', type === 'line' ? 0 : 0.01, 100000),
+      width: number(item.width, 'item.width', isLineShape(item) ? 0 : 0.01, 100000), height: number(item.height, 'item.height', isLineShape(item) ? 0 : 0.01, 100000),
       rotation: number(item.rotation, 'item.rotation', -36000, 36000, 0), opacity: number(item.opacity, 'item.opacity', 0, 1, 1),
       locked: boolean(item.locked, 'item.locked'), hidden: boolean(item.hidden, 'item.hidden'),
     };
@@ -181,9 +182,13 @@ function validateProjectInternal(input, assetCache) {
       canonical.color = color(item.color, 'item.color', '#111827');
       canonical.align = choice(item.align, 'item.align', ['left', 'center', 'right'], 'left');
     } else {
-      canonical.fill = color(item.fill, 'item.fill', type === 'line' ? 'none' : '#ffffff');
+      canonical.fill = color(item.fill, 'item.fill', isLineShape(item) ? 'none' : '#ffffff');
       canonical.stroke = color(item.stroke, 'item.stroke', '#111827');
       canonical.strokeWidth = number(item.strokeWidth, 'item.strokeWidth', 0, 1000, 2);
+      canonical.fillOpacity = number(item.fillOpacity, 'item.fillOpacity', 0, 1, 1);
+      canonical.strokeOpacity = number(item.strokeOpacity, 'item.strokeOpacity', 0, 1, 1);
+      canonical.strokeDash = choice(item.strokeDash, 'item.strokeDash', ['solid', 'dash', 'dot'], 'solid');
+      if (type === 'roundRect') canonical.cornerRadius = number(item.cornerRadius, 'item.cornerRadius', 0, 0.5, 1 / 6);
     }
     project.items.push(canonical);
   }
@@ -262,10 +267,8 @@ function svgFromCanonical(project) {
       lines.push(`<text xml:space="preserve" font-family="${xml(item.fontFamily + ', Arial, sans-serif')}" font-size="${n(item.fontSize)}" font-weight="${xml(item.fontWeight)}" font-style="${xml(item.fontStyle)}" fill="${xml(item.color)}" text-anchor="${anchor}">`);
       item.text.split('\n').forEach((line, index) => lines.push(`<tspan x="${n(textX)}" y="${n(item.fontSize * (1 + index * 1.2))}">${xml(line)}</tspan>`));
       lines.push('</text>');
-    } else if (item.type === 'rect') {
-      lines.push(`<rect x="0" y="0" width="${n(w)}" height="${n(h)}" fill="${xml(item.fill)}" stroke="${xml(item.stroke)}" stroke-width="${n(item.strokeWidth)}"/>`);
     } else {
-      lines.push(`<line x1="0" y1="0" x2="${n(w)}" y2="${n(h)}" stroke="${xml(item.stroke)}" stroke-width="${n(item.strokeWidth)}"/>`);
+      lines.push(shapeSVG(item));
     }
     lines.push('</g>');
   }

@@ -2,6 +2,7 @@
 import { validateDeck } from './deck.js';
 import { isMediaItem } from './video.js';
 import { htmlPosterDeck } from './html-chart.js';
+import { isLineShape } from './shapes.js';
 
 const EMU_PER_PX = 9525;
 const EMU_PER_PT = 12700;
@@ -104,7 +105,10 @@ function line(item, scale) {
   const width = emu(item.strokeWidth * scale);
   if (width > 20116800) error(`the outline of “${item.name}” exceeds PowerPoint’s supported line width after scaling. Reduce the outline width.`);
   if (!width || item.stroke === 'none') return '<a:ln><a:noFill/></a:ln>';
-  return `<a:ln w="${width}" cap="flat" cmpd="sng" algn="ctr">${fill(item.stroke, item.opacity)}<a:prstDash val="solid"/><a:miter lim="800000"/></a:ln>`;
+  const ends = item.type === 'arrow' || item.type === 'doubleArrow'
+    ? `<a:headEnd type="${item.type === 'doubleArrow' ? 'arrow' : 'none'}" w="med" len="med"/><a:tailEnd type="arrow" w="med" len="med"/>` : '';
+  const dash = { solid: 'solid', dash: 'dash', dot: 'sysDot' }[item.strokeDash ?? 'solid'];
+  return `<a:ln w="${width}" cap="flat" cmpd="sng" algn="ctr">${fill(item.stroke, item.opacity * (item.strokeOpacity ?? 1))}<a:prstDash val="${dash}"/>${isLineShape(item) ? '<a:round/>' : '<a:miter lim="800000"/>'}${ends}</a:ln>`;
 }
 function transform(item, layout) {
   const rotation = Math.round(((item.rotation % 360 + 360) % 360) * 60000) % 21600000;
@@ -114,8 +118,11 @@ function nonVisual(id, name, textBox = false) {
   return `<p:nvSpPr><p:cNvPr id="${id}" name="${escapeXML(name)}"/><p:cNvSpPr${textBox ? ' txBox="1"' : ''}/><p:nvPr/></p:nvSpPr>`;
 }
 function shape(item, id, layout) {
-  const geometry = item.type === 'line' ? 'line' : 'rect';
-  return `<p:sp>${nonVisual(id, item.name)}<p:spPr>${transform(item, layout)}<a:prstGeom prst="${geometry}"><a:avLst/></a:prstGeom>${item.type === 'line' ? '<a:noFill/>' : fill(item.fill, item.opacity)}${line(item, layout.scale)}</p:spPr></p:sp>`;
+  const adjustments = item.type === 'roundRect' ? `<a:avLst><a:gd name="adj" fmla="val ${Math.round((item.cornerRadius ?? 1 / 6) * 100000)}"/></a:avLst>` : '<a:avLst/>';
+  const geometry = `<a:prstGeom prst="${isLineShape(item) ? 'line' : item.type}">${adjustments}</a:prstGeom>`;
+  const fillOpacity = item.opacity * (item.fillOpacity ?? 1);
+  const paint = isLineShape(item) ? '<a:noFill/>' : fill(item.fill, fillOpacity);
+  return `<p:sp>${nonVisual(id, item.name)}<p:spPr>${transform(item, layout)}${geometry}${paint}${line(item, layout.scale)}</p:spPr></p:sp>`;
 }
 function fontFamily(value) {
   const family = value.split(',')[0].trim().replace(/^(['"])(.*)\1$/, '$2');

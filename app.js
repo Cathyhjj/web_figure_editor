@@ -13,6 +13,8 @@ import { exportPDF } from './pdf.js';
 import { initWindows } from './windows.js';
 import { imageShadowSVG } from './shadow.js';
 import { shadowEditorMarkup, bindShadowEditor } from './shadow-editor.js';
+import { SHAPE_NAMES, isShapeItem, isLineShape, shapeSVG, shapeBounds } from './shapes.js';
+import { opacityEditorMarkup, shapeEditorMarkup, bindShapeEditor } from './shape-editor.js';
 import { imageCrop, isCropped, cropImage } from './crop.js';
 import { createCropEditor } from './crop-editor.js';
 import { resizeItem } from './resize.js';
@@ -127,8 +129,7 @@ function appendItemContent(g,item,context='stage'){
   else if(item.type==='text'){
    const text=svg('text',{x:item.align==='center'?item.width/2:item.align==='right'?item.width:0,y:item.fontSize,fill:item.color,'font-family':item.fontFamily+', Arial, sans-serif','font-size':item.fontSize,'font-weight':item.fontWeight,'font-style':item.fontStyle,'text-anchor':item.align==='center'?'middle':item.align==='right'?'end':'start','xml:space':'preserve'});
    String(item.text).split('\n').forEach((line,j)=>text.append(svg('tspan',{x:item.align==='center'?item.width/2:item.align==='right'?item.width:0,dy:j?item.fontSize*1.2:0},line||' ')));g.append(text);
-  }else if(item.type==='rect')g.append(svg('rect',{width:item.width,height:item.height,fill:item.fill,stroke:item.stroke,'stroke-width':item.strokeWidth}));
-  else if(item.type==='line')g.append(svg('line',{x1:0,y1:0,x2:item.width,y2:item.height,stroke:item.stroke,'stroke-width':item.strokeWidth}));
+  }else if(isShapeItem(item))g.innerHTML=shapeSVG(item);
 }
 function previewVideo(asset){
  if(!asset||asset.mime!=='video/mp4')return;
@@ -229,11 +230,12 @@ function renderStage(){
   const g=svg('g',{'data-item':item.id,transform:`translate(${item.x} ${item.y}) rotate(${item.rotation} ${item.width/2} ${item.height/2})`,opacity:item.opacity, class:`figure-item ${selected.has(item.id)?'selected':''}`});
   appendItemContent(g,item);
   // Transparent geometry makes whitespace in a text box and thin lines selectable.
-  g.append(svg('rect',{width:item.width,height:item.height,fill:'transparent','pointer-events':'all',class:'item-hit'}));
+  const hit=isLineShape(item)?shapeBounds({...item,strokeWidth:Math.max(item.strokeWidth,8/zoom)}):{x:0,y:0,width:item.width,height:item.height};
+  g.append(svg('rect',{...hit,fill:'transparent','pointer-events':'all',class:'item-hit'}));
   if(selected.has(item.id)){
    g.append(svg('rect',{width:item.width,height:item.height,fill:'none',stroke:item.locked?'#777':'#9c357c','stroke-width':1.4/zoom,'stroke-dasharray':item.locked?`${4/zoom} ${3/zoom}`:'none','pointer-events':'none'}));
    if(selected.size===1&&!item.locked){
-    const handles=isMediaItem(item)?[
+    const handles=isMediaItem(item)||isShapeItem(item)?[
      ['w',0,item.height/2,'Stretch width',0],['e',item.width,item.height/2,'Stretch width',0],
      ['n',item.width/2,0,'Stretch height',90],['s',item.width/2,item.height,'Stretch height',90],
     ]:[];
@@ -319,7 +321,7 @@ function renderLayers(){
  if(!slide().items.length){const p=document.createElement('p');p.className='hint';p.textContent='No objects on this slide yet.';list.append(p);}
  for(const i of [...slide().items].reverse()){
   const row=document.createElement('div');row.className=`layer-row ${selected.has(i.id)?'selected':''}`;row.dataset.layer=i.id;
-  row.innerHTML=`<button class="layer-select" title="Select object">${i.type==='html'?'◇':i.type==='video'?'▶':i.type==='image'?'▧':i.type==='text'?'T':i.type==='rect'?'□':'╱'} <span>${escapeHTML(i.name)}</span></button><button data-action="hide" title="${i.hidden?'Show':'Hide'}">${i.hidden?'○':'●'}</button><button data-action="lock" title="${i.locked?'Unlock':'Lock'}">${i.locked?'▣':'◇'}</button>`;
+  row.innerHTML=`<button class="layer-select" title="Select object">${i.type==='html'?'◇':i.type==='video'?'▶':i.type==='image'?'▧':i.type==='text'?'T':i.type==='ellipse'?'○':i.type==='arrow'?'→':i.type==='doubleArrow'?'↔':i.type==='line'?'╱':'□'} <span>${escapeHTML(i.name)}</span></button><button data-action="hide" title="${i.hidden?'Show':'Hide'}">${i.hidden?'○':'●'}</button><button data-action="lock" title="${i.locked?'Unlock':'Lock'}">${i.locked?'▣':'◇'}</button>`;
   row.onclick=e=>{const action=e.target.closest('[data-action]')?.dataset.action;if(action)change(()=>{if(action==='hide')i.hidden=!i.hidden;else i.locked=!i.locked;});else{flushText();if(e.shiftKey){selected.has(i.id)?selected.delete(i.id):selected.add(i.id);}else selected=new Set([i.id]);render();}};list.append(row);
  }
 }
@@ -328,12 +330,12 @@ function renderInspector(){
  const items=chosen(), box=$('inspector');
  if(items.length!==1){box.innerHTML=`<div class="section-heading">${items.length?'Multiple objects':'Object properties'}</div><p class="hint">${items.length?'Drag any selected object to move them together. Shift + click or Shift + drag on blank space to adjust the selection.':'Drag on blank canvas space to select objects, or click an image, text, or shape. Double-click text to edit its content.'}</p>`;return;}
  const i=items[0];
- box.innerHTML=`<div class="section-heading">${i.type==='html'?'HTML chart':i.type==='video'?'Video':i.type==='image'?'Image':i.type==='text'?'Text':'Shape'} properties${i.locked?' · Locked':''}</div>${field('Name','name',i.name,'text')}<div class="field-row">${field('X / px','x',round(i.x),'number','step="1"')}${field('Y / px','y',round(i.y),'number','step="1"')}</div><div class="field-row">${field('Width / px','width',round(i.width),'number','min="1" step="1"')}${field('Height / px','height',round(i.height),'number','min="1" step="1"')}</div><div class="field-row">${field('Rotation / °','rotation',round(i.rotation))}${field('Opacity','opacity',i.opacity,'number','min="0" max="1" step="0.1"')}</div>`;
+ box.innerHTML=`<div class="section-heading">${i.type==='html'?'HTML chart':i.type==='video'?'Video':i.type==='image'?'Image':i.type==='text'?'Text':'Shape'} properties${i.locked?' · Locked':''}</div>${field('Name','name',i.name,'text')}<div class="field-row">${field('X / px','x',round(i.x),'number','step="1"')}${field('Y / px','y',round(i.y),'number','step="1"')}</div><div class="field-row">${field('Width / px','width',round(i.width),'number',`min="${isLineShape(i)?0:1}" step="1"`)}${field('Height / px','height',round(i.height),'number',`min="${isLineShape(i)?0:1}" step="1"`)}</div>${field('Rotation / °','rotation',round(i.rotation))}${opacityEditorMarkup(i)}`;
  if(i.type==='text')box.innerHTML+=`<label class="field"><span>Text content</span><textarea id="text-content" rows="4">${escapeHTML(i.text)}</textarea></label>${field('Font','fontFamily',i.fontFamily,'text','list="font-families" maxlength="200" autocomplete="off" spellcheck="false"')}<div class="field-row">${field('Size / px','fontSize',i.fontSize,'number','min="1" max="2000" step="any"')}${field('Color','color',i.color,'color')}</div><div class="field-row"><label class="field"><span>Weight</span><select data-property="fontWeight"><option value="400" ${String(i.fontWeight)==='400'?'selected':''}>Regular</option><option value="700" ${String(i.fontWeight)==='700'?'selected':''}>Bold</option></select></label><label class="field"><span>Style</span><select data-property="fontStyle"><option value="normal" ${i.fontStyle==='normal'?'selected':''}>Normal</option><option value="italic" ${i.fontStyle==='italic'?'selected':''}>Italic</option></select></label></div><label class="field"><span>Text alignment</span><select data-property="align">${[['left','Left'],['center','Center'],['right','Right']].map(([v,t])=>`<option value="${v}" ${i.align===v?'selected':''}>${t}</option>`).join('')}</select></label><p class="hint">Uses fonts installed on this computer. SVG does not embed fonts. Press Enter for a new line.</p>`;
  if(i.type==='image'){const a=assetById(i.assetId),c=imageCrop(i);const effectiveDPI=a?Math.round(Math.min(a.width*c.width/i.width,a.height*c.height/i.height)*96):0;box.innerHTML+=`<div class="image-crop-actions"><button id="crop-image" class="button" ${i.locked?'disabled':''}>${isCropped(i)?'Edit crop':'Crop'}</button><button id="restore-image" class="button" ${i.locked||!isCropped(i)?'disabled':''}>Restore original</button></div><p class="hint">Source: ${escapeHTML(a?.name)}<br>Original size: ${a?.width} × ${a?.height} px${isCropped(i)?`<br>Cropped area: ${Math.round(a.width*c.width)} × ${Math.round(a.height*c.height)} px`:''}<br>Effective resolution: ${effectiveDPI} DPI<br>Drag the bottom-right corner to keep proportions; hold Shift to resize freely. Drag side handles to stretch width or height. Width and height fields keep proportions.</p>`;}
  if(i.type==='video'){const a=assetById(i.assetId);box.innerHTML+=`<div class="image-crop-actions"><button id="preview-video" class="button">▶ Preview video</button></div><p class="hint">MP4 · ${a.width} × ${a.height} px · ${a.duration.toFixed(1)} s<br>Embedded in PowerPoint; click the video during Slide Show to play. H.264 video with AAC audio is recommended.<br>PNG, SVG, PDF, and HTML reports use the poster frame.</p>`;}
  if(i.type==='image')box.innerHTML+=shadowEditorMarkup(i);
- if(i.type==='rect'||i.type==='line')box.innerHTML+=`<div class="field-row">${i.type==='rect'?field('Fill','fill',i.fill,'color'):''}${field('Stroke','stroke',i.stroke,'color')}</div>${field('Stroke width / px','strokeWidth',i.strokeWidth,'number','min="0" max="100" step="0.5"')}`;
+ box.innerHTML+=shapeEditorMarkup(i);
  box.innerHTML+=`<label class="field inline"><input id="object-locked" type="checkbox" ${i.locked?'checked':''}> Lock object</label>`;
  if(i.type==='image'){
   $('crop-image').onclick=()=>{flushText();cropEditor.show(i,assetById(i.assetId));};
@@ -352,11 +354,11 @@ function renderInspector(){
    if(input.type==='number'&&input.value==='')return;
    let val=input.type==='number'?Number(input.value):input.value;
    if(typeof val==='number'&&!Number.isFinite(val))return;
-   if(['width','height'].includes(key))val=Math.max(1,Math.min(20000,val));
+   if(['width','height'].includes(key))val=Math.max(isLineShape(i)?0:1,Math.min(20000,val));
    if(['x','y'].includes(key))val=Math.max(-100000,Math.min(100000,val));
    if(key==='rotation')val=Math.max(-36000,Math.min(36000,val));
    if(key==='fontSize'||key==='fontFamily'){val=fontValue(key,val);if(val===null)return;}
-   if(key==='opacity')val=Math.max(0,Math.min(1,val));if(key==='strokeWidth')val=Math.max(0,Math.min(100,val));
+   if(key==='opacity')val=Math.max(0,Math.min(1,val));if(key==='strokeWidth')val=Math.max(0,Math.min(1000,val));
    if(key==='name')val=val.slice(0,1000);
    if(i[key]===val)return;
    if(!pendingText)pendingText=snapshot();
@@ -367,12 +369,14 @@ function renderInspector(){
   input.onchange=()=>{apply();input.value=i[input.dataset.property];flushText();renderLayers();renderToolbar();};
   input.onblur=()=>{flushText();renderLayers();renderToolbar();};
  });
- bindShadowEditor(i,box,{
+ const styleBindings={
   begin:()=>{if(!pendingText)pendingText=snapshot();},
   preview:()=>{changed();renderStage();},
-  commit:()=>{flushText();renderToolbar();},
+  commit:()=>{flushText();renderLayers();renderToolbar();},
   change,
- });
+ };
+ bindShadowEditor(i,box,styleBindings);
+ bindShapeEditor(i,box,styleBindings);
  $('object-locked').onchange=e=>change(()=>i.locked=e.target.checked);
  const text=$('text-content');if(text){text.disabled=i.locked;text.oninput=()=>{if(!pendingText)pendingText=snapshot();i.text=text.value.slice(0,20000);i.height=Math.max(i.fontSize*1.2*i.text.split('\n').length,i.height);changed();renderStage();};text.onblur=()=>{flushText();renderLayers();renderToolbar();};}
 }
@@ -532,8 +536,20 @@ $('stage').onlostpointercapture=e=>{if(gesture?.mode==='select'&&e.pointerId===g
 window.addEventListener('blur',()=>{if(gesture?.mode==='select')finishMarquee(true);});
 $('stage').ondblclick=e=>{const i=byId(e.target.closest('[data-item]')?.dataset.item||lastPointerItem);if(i?.type==='html'){openHTMLChart(i);return;}if(i?.type==='text'&&!i.locked){selected=new Set([i.id]);render();$('text-content')?.focus();$('text-content')?.select();}};
 $('add-text').onclick=()=>{change(()=>{const i={...base('text',60,50,260,44),name:'Text',text:'Double-click to edit',fontFamily:'Arial',fontSize:28,fontWeight:400,fontStyle:'normal',color:'#20212b',align:'left'};slide().items.push(i);selected=new Set([i.id]);});$('text-content').focus();$('text-content').select();};
-$('add-rect').onclick=()=>change(()=>{const i={...base('rect',80,80,160,100),fill:'#ffffff',stroke:'#252735',strokeWidth:2};slide().items.push(i);selected=new Set([i.id]);});
-$('add-line').onclick=()=>change(()=>{const i={...base('line',80,80,160,1),stroke:'#252735',strokeWidth:2};slide().items.push(i);selected=new Set([i.id]);});
+document.querySelectorAll('[data-add-shape]').forEach(button=>button.onclick=()=>{
+ const type=button.dataset.addShape, line=isLineShape({type}), circle=button.dataset.circle==='true';
+ if(change(()=>{const i={...base(type,80,80,circle?120:160,line?0:circle?120:100),name:circle?'Circle':SHAPE_NAMES[type],fill:line?'none':'#ffffff',stroke:'#252735',strokeWidth:2,fillOpacity:1,strokeOpacity:1,strokeDash:'solid'};slide().items.push(i);selected=new Set([i.id]);})){
+  $('shapes-menu').hidePopover();$('workspace').focus({preventScroll:true});
+ }
+});
+function positionShapesMenu(){
+ const button=$('shapes-toggle').getBoundingClientRect(), menu=$('shapes-menu');
+ menu.style.left=`${Math.max(8,Math.min(button.left,innerWidth-menu.offsetWidth-8))}px`;
+ menu.style.top=`${Math.max(8,Math.min(button.bottom+6,innerHeight-menu.offsetHeight-8))}px`;
+}
+$('shapes-menu').addEventListener('toggle',event=>{if(event.newState==='open')positionShapesMenu();});
+$('shapes-menu').addEventListener('keydown',event=>event.stopPropagation());
+window.addEventListener('resize',()=>{if($('shapes-menu').matches(':popover-open'))positionShapesMenu();});
 $('undo').onclick=()=>{const keepSlideFocus=slideClipboardTarget(document.activeElement);flushText();if(!undoStack.length)return;redoStack.push(snapshot());project=undoStack.pop();restoreSlideSelection(project);selected.clear();changed();render();fit();if(keepSlideFocus)focusCurrentSlide();status('Undone');};
 $('redo').onclick=()=>{const keepSlideFocus=slideClipboardTarget(document.activeElement);flushText();if(!redoStack.length)return;undoStack.push(snapshot());project=redoStack.pop();restoreSlideSelection(project);selected.clear();changed();render();fit();if(keepSlideFocus)focusCurrentSlide();status('Redone');};
 $('duplicate').onclick=()=>{if(!selected.size)return;change(()=>{const copies=chosen().filter(i=>!i.locked).map(i=>({...i,...(i.crop?{crop:{...i.crop}}:{}),id:uid(),name:i.name+' copy',x:i.x+20,y:i.y+20}));slide().items.push(...copies);selected=new Set(copies.map(i=>i.id));});};
