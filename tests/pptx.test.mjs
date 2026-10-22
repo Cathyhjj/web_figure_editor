@@ -580,3 +580,22 @@ test('image crops are editable srcRect metadata and keep complete original media
   assert.equal(media.length, 1);
   assert.deepEqual(media[0][1], Buffer.from(PNG, 'base64'));
 });
+
+test('SVG export embeds vector bytes, PNG fallback and Office SVG relationship', async () => {
+  const { validateSVGDocument, svgDataURL } = await import('../svg-vector.js');
+  const svgDocument=validateSVGDocument({tag:'svg',attrs:{width:'20',height:'10'},children:[{tag:'rect',attrs:{width:'20',height:'10',fill:'red'},children:[]}]});
+  const deck=createDeck();deck.assets=[{id:'svg',name:'vector.svg',mime:'image/svg+xml',width:20,height:10,svgDocument,dataUrl:svgDataURL(svgDocument)}];
+  deck.slides[0].items=[item('vector','image',{assetId:'svg'})];
+  const priorDocument=globalThis.document,priorImage=globalThis.Image;
+  globalThis.Image=class {naturalWidth=20;naturalHeight=10;set src(v){queueMicrotask(()=>this.onload());}};
+  globalThis.document={createElement(){return {width:0,height:0,getContext(){return {drawImage(){}};},toBlob(callback){callback(new Blob([Buffer.from(PNG,'base64')],{type:'image/png'}));}};}};
+  try {
+    const parts=await unzip(await exportPPTX(deck));
+    assert.match(xml(parts,'[Content_Types].xml'),/Extension="svg" ContentType="image\/svg\+xml"/);
+    assert.match(xml(parts,'ppt/slides/slide1.xml'),/<asvg:svgBlip[^>]*r:embed="rId3"/);
+    assert.match(xml(parts,'ppt/slides/_rels/slide1.xml.rels'),/Target="\.\.\/media\/fallback1.png"/);
+    assert.match(xml(parts,'ppt/slides/_rels/slide1.xml.rels'),/Target="\.\.\/media\/image1.svg"/);
+    assert.equal(parts.get('ppt/media/image1.svg').toString(),Buffer.from(deck.assets[0].dataUrl.split(',')[1],'base64').toString());
+    assert.deepEqual(parts.get('ppt/media/fallback1.png'),Buffer.from(PNG,'base64'));
+  }finally{globalThis.document=priorDocument;globalThis.Image=priorImage;}
+});

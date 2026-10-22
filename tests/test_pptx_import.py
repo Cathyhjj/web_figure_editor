@@ -51,6 +51,20 @@ def fixture(slides=None, extra=None):
 
 
 class PptxImportTests(unittest.TestCase):
+    def test_svg_extension_prefers_vector_and_retains_png_fallback(self):
+        svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10" fill="red"/></svg>'
+        extension = '<a:extLst><a:ext uri="{96DAC541-7B7A-43D3-8B79-37D633B846F1}"><asvg:svgBlip xmlns:asvg="http://schemas.microsoft.com/office/drawing/2016/SVG/main" r:embed="vector"/></a:ext></a:extLst>'
+        content = picture().replace('<a:blip r:embed="img"/>', '<a:blip r:embed="img">'+extension+'</a:blip>')
+        extra = {'ppt/media/vector.svg':svg, 'ppt/slides/_rels/slide1.xml.rels':relations([('img','image','../media/panel.png',''),('vector','image','../media/vector.svg','')])}
+        result = import_pptx({**fixture([slide(content)], extra), 'slide':1})
+        media = {m['id']:m for m in result['media']}
+        vector = media[result['items'][0]['assetId']]
+        self.assertEqual(vector['mime'], 'image/svg+xml')
+        self.assertEqual(media[vector['fallbackId']]['mime'], 'image/png')
+        missing = import_pptx({**fixture([slide(content)]), 'slide':1})
+        self.assertEqual(missing['media'][0]['mime'], 'image/png')
+        self.assertTrue(any('SVG source is missing' in w for w in missing['warnings']))
+
     def test_gradient_arrows_are_independent_vectors_with_editable_text(self):
         gradient='<a:gradFill><a:gsLst><a:gs pos="0"><a:srgbClr val="FF0000"><a:alpha val="50000"/></a:srgbClr></a:gs><a:gs pos="100000"><a:srgbClr val="0000FF"/></a:gs></a:gsLst><a:lin ang="5400000"/></a:gradFill>'
         content=text_shape(geometry=xfrm()+f'<a:prstGeom prst="curvedDownArrow"><a:avLst/></a:prstGeom>{gradient}')

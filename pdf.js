@@ -265,7 +265,7 @@ export async function exportPDF(input, dpi = 300) {
     else if (item.type !== 'image') drawing = shape(pdf, item);
     else {
       const asset = assets.get(item.assetId), shadow = item.shadow;
-      if (shadow?.enabled && shadow.transparency < 100 && shadow.size > 0) {
+      if (asset.mime === 'image/svg+xml' || (shadow?.enabled && shadow.transparency < 100 && shadow.size > 0)) {
         const bounds = shadowBounds(item);
         checkPixels(Math.max(1, Math.round(bounds.width * dpi / 96)), Math.max(1, Math.round(bounds.height * dpi / 96)));
         const local = { ...project, canvas: { width: bounds.width, height: bounds.height, background: 'transparent' }, assets: [asset], items: [{ ...item, x: -bounds.x, y: -bounds.y, rotation: 0, opacity: 1 }] };

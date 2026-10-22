@@ -44,7 +44,7 @@ document.querySelector('#run').onclick = async () => {
     await checkGeneratedPNG();
     const safe = '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"><rect width="100" height="50" fill="navy"/><text x="10" y="30" fill="white">Demo</text></svg>';
     const vector = await importFiles([new File([safe], 'safe.svg', { type: 'image/svg+xml' })]);
-    assert('Safe SVG rasterizes at 3× and retains original SVG', vector.assets[0]?.width === 300 && vector.assets[0]?.height === 150 && vector.assets[0]?.originalMime === 'image/svg+xml');
+    assert('Safe SVG stays vector at its original dimensions', vector.assets[0]?.width === 100 && vector.assets[0]?.height === 50 && vector.assets[0]?.mime === 'image/svg+xml' && !!vector.assets[0]?.svgDocument);
     for (const [name, markup] of [
       ['script', '<script>alert(1)</script>'],
       ['external image', '<image href="https://example.com/never-fetch.png"/>'],
@@ -62,7 +62,7 @@ document.querySelector('#run').onclick = async () => {
     assert('Actual PNG rendering creates 313×156 export', bitmap.width === 313 && bitmap.height === 156);
     bitmap.close();
     const svg = projectToSVG(project);
-    assert('SVG export embeds raster preview without active original SVG', svg.includes('data:image/png;base64,') && !svg.includes('data:image/svg+xml;base64,'));
+    assert('SVG export retains sanitized vector SVG', svg.includes('data:image/svg+xml;base64,') && !svg.includes('data:image/png;base64,'));
   } catch (error) {
     assert(error.stack || error.message, false);
   }

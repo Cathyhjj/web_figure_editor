@@ -1,0 +1,81 @@
+import { importFiles } from '../assets.js';
+import { createDeck, validateDeck } from '../deck.js';
+import { projectToSVG, exportPNG } from '../core.js';
+import { exportPPTX } from '../pptx.js';
+import { exportPDF } from '../pdf.js';
+import { svgNodes, serializeSVG, parseSVG, svgDataURL, mirrorSVG } from '../svg-vector.js';
+import { openSVGEditor } from '../svg-editor.js';
+import { preparePPTXSlide } from '../pptx-import.js';
+const source=`<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160" viewBox="0 0 240 160"><style>.paint { fill: url(#linear) !important; }</style><defs><linearGradient id="linear"><stop offset="0" stop-color="#ee3344"/><stop offset="1" stop-color="#2244ee"/></linearGradient><radialGradient id="radial"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#00aa88"/></radialGradient><filter id="shadow" x="-40%" y="-40%" width="180%" height="180%"><feDropShadow dx="7" dy="9" stdDeviation="4" flood-color="#111111" flood-opacity=".7"/></filter></defs><g transform="translate(10 5)"><path id="panel" class="paint" d="M20 20H130V100H20Z" filter="url(#shadow)"/><circle id="circle" cx="175" cy="60" r="34" fill="url(#radial)"/><text x="20" y="130" font-size="18">Editable <tspan fill="#3355cc">SVG</tspan></text></g></svg>`;
+const check=(name,ok)=>{const li=document.createElement('li');li.dataset.pass=!!ok;li.textContent=`${ok?'PASS':'FAIL'} — ${name}`;document.querySelector('#results').append(li);if(!ok)throw Error(name);};
+const wait=async fn=>{const end=Date.now()+20000;while(!fn()){if(Date.now()>end)throw Error('Timed out waiting for UI');await new Promise(r=>setTimeout(r,40));}};
+const pixels=async url=>{const img=new Image();img.src=url;await img.decode();const c=document.createElement('canvas');c.width=240;c.height=160;c.getContext('2d').drawImage(img,0,0,240,160);return c.getContext('2d').getImageData(0,0,240,160).data;};
+const same=(a,b)=>a.length===b.length&&a.every((v,i)=>v===b[i]);
+const b64=async blob=>{let s='';const b=new Uint8Array(await blob.arrayBuffer());for(let i=0;i<b.length;i+=32768)s+=String.fromCharCode(...b.subarray(i,i+32768));return btoa(s);};
+
+document.querySelector('#run').onclick=async()=>{
+ const button=document.querySelector('#run');button.disabled=true;document.querySelector('#results').replaceChildren();document.querySelector('iframe')?.remove();
+ try {
+  if(location.port!=='18768')throw Error('Use test port 18768');
+  const {assets,errors}=await importFiles([new File([source],'gradient-shadow.svg',{type:'image/svg+xml'})]);
+  check('Import keeps a vector document at original dimensions',!errors.length&&assets[0].mime==='image/svg+xml'&&assets[0].width===240);
+  const originalPixels=await pixels('data:image/svg+xml;base64,'+btoa(source));
+  check('Original and imported SVG render identically, including both gradients and shadow',same(originalPixels,await pixels(assets[0].dataUrl)));
+  const cssSVG=parseSVG('<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160"><style>svg > rect {fill:red} g {display:none}</style><rect x="10" y="20" width="40" height="40"/></svg>').document;
+  const mirrorPixels=await pixels(svgDataURL(mirrorSVG(cssSVG,true,false)));
+  check('Reflection preserves CSS child selectors and does not introduce styled groups',mirrorPixels[(30*240+210)*4]===255&&mirrorPixels[(30*240+210)*4+3]===255&&mirrorPixels[(30*240+20)*4+3]===0);
+  let cancelledCommit=false,releaseDecode;const priorImage=window.Image;
+  window.Image=class {set src(v){} decode(){return new Promise(r=>releaseDecode=r);}};
+  const pending=openSVGEditor(assets[0],()=>{cancelledCommit=true;});pending.querySelector('#svg-apply').click();pending.querySelector('#svg-cancel').click();releaseDecode();await Promise.resolve();window.Image=priorImage;
+  check('Cancel during Apply decoding prevents a later commit',!cancelledCommit);
+  let blocked=false;try{openSVGEditor({mime:'image/png',originalMime:'image/svg+xml',originalDataUrl:'data:image/svg+xml;base64,'+btoa('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>')},()=>{});}catch{blocked=true;}
+  check('Legacy SVG originals are revalidated before becoming editable',blocked);
+  const deck=createDeck();deck.canvas=undefined;deck.assets=assets;deck.slides[0].canvas={width:540,height:200,background:'#ffffff'};
+  deck.slides[0].items=[{id:'first',type:'image',assetId:assets[0].id,name:'First SVG',x:10,y:10,width:240,height:160},{id:'second',type:'image',assetId:assets[0].id,name:'Second SVG',x:280,y:10,width:240,height:160}];
+  const frame=document.createElement('iframe');frame.src='../index.html';frame.title='SVG editing test';document.body.append(frame);await new Promise(r=>frame.onload=r);
+  const win=frame.contentWindow,doc=frame.contentDocument;await wait(()=>doc.querySelector('#open-project')&&!doc.querySelector('#open-project').disabled);win.confirm=()=>true;
+  const open=async data=>{win.showOpenFilePicker=async()=>[{name:'synthetic.figure.json',getFile:async()=>new File([JSON.stringify(data)],'synthetic.figure.json',{type:'application/json'})}];doc.querySelector('#open-project').click();await wait(()=>!doc.querySelector('#open-project').disabled&&doc.querySelectorAll('.layer-select').length===2);};
+  await open(deck);
+  const choose=()=>[...doc.querySelectorAll('.layer-select')].find(el=>el.textContent.includes('First SVG')).click();choose();
+  check('SVG inspector exposes internal element editing',!!doc.querySelector('#edit-svg'));
+  doc.querySelector('#edit-svg').click();
+  const select=tag=>{const list=doc.querySelector('#svg-elements');list.value=[...list.options].find(o=>o.dataset.svgTag===tag).value;list.dispatchEvent(new win.Event('change'));};
+  const set=(key,value)=>{const input=doc.querySelector(`[data-svg-field="${key}"]`);input.value=value;input.dispatchEvent(new win.Event('input',{bubbles:true}));};
+  select('path #panel');set('fill','#00ff00');
+  check('Editing fill overrides source CSS visibly',(await pixels(doc.querySelector('.svg-editor-preview').src))[(50*240+50)*4+1]>240);
+  doc.querySelector('#svg-cancel').click();
+  check('Cancel leaves source pixels unchanged',same(originalPixels,await pixels(doc.querySelector('#stage [data-item="first"] image').getAttribute('href'))));
+  doc.querySelector('#edit-svg').click();select('stop');set('stop-color','#ffaa00');
+  select('feDropShadow');set('stdDeviation','1');set('dx','12');
+  select('path #panel');set('d','M20 20H145V100H20Z');
+  select('text');set('Text','Changed ');
+  const editedPixels=await pixels(doc.querySelector('.svg-editor-preview').src);check('Geometry, gradient, shadow and text edits visibly change preview',!same(originalPixels,editedPixels));
+  doc.querySelector('#svg-apply').click();await wait(()=>!doc.querySelector('#svg-editor'));
+  const firstURL=doc.querySelector('#stage [data-item="first"] image').getAttribute('href');
+  check('Applying changes only selected copy, keeping the other SVG unchanged',firstURL!==doc.querySelector('#stage [data-item="second"] image').getAttribute('href'));
+  doc.querySelector('#undo').click();check('Undo restores original vector exactly',doc.querySelector('#stage [data-item="first"] image').getAttribute('href')===assets[0].dataUrl);
+  doc.querySelector('#redo').click();check('Redo restores edited vector exactly',doc.querySelector('#stage [data-item="first"] image').getAttribute('href')===firstURL);
+  let saved;win.showSaveFilePicker=async()=>({name:'svg.figure.json',createWritable:async()=>({write:async blob=>{saved=JSON.parse(await blob.text());},close:async()=>{}})});
+  doc.querySelector('#save-project-as').click();await wait(()=>saved);
+  check('Saved project keeps original and edited vector documents',saved.assets.every(a=>a.mime==='image/svg+xml'&&a.svgDocument));
+  await open(saved);check('Reopen retains edited geometry, gradients and filters',doc.querySelector('#stage [data-item="first"] image').getAttribute('href')===firstURL);
+  const p={format:'figure-editor',version:1,id:saved.id,name:saved.name,...saved.slides[0],assets:saved.assets};
+  const exported=projectToSVG(p);check('SVG export embeds real SVG vector sources',exported.includes('data:image/svg+xml;base64,'));
+  const png=await exportPNG(p,96);check('PNG export renders vector artwork',png.size>1000);
+  const pdf=await exportPDF(p,144);check('PDF export renders SVG at selected DPI',pdf.size>1000);
+  const pptx=await exportPPTX(saved),local=await (await fetch('/api/local')).json();
+  const response=await fetch('/api/pptx-import',{method:'POST',headers:{'Content-Type':'application/json','X-Figure-Token':local.token},body:JSON.stringify({name:'roundtrip.pptx',data:await b64(pptx),slide:1})});
+  const converted=await response.json();if(!response.ok)throw Error(converted.error);
+  check('PPTX reimport prefers embedded SVG over PNG fallback',converted.items.filter(i=>i.type==='image').length===2&&converted.items.filter(i=>i.type==='image').every(i=>converted.media.find(m=>m.id===i.assetId)?.mime==='image/svg+xml'));
+  const roundtrip=await preparePPTXSlide(converted);check('PPTX roundtrip keeps vectors and edited shadow',roundtrip.deck.assets.every(a=>a.svgDocument)&&roundtrip.deck.assets.some(a=>serializeSVG(a.svgDocument).includes('stdDeviation="1"')));
+  converted.items.find(i=>i.type==='image')._flipX=true;const flipped=await preparePPTXSlide(converted);check('Reflected SVG stays vector without losing gradients',flipped.deck.assets.every(a=>a.mime==='image/svg+xml')&&flipped.deck.assets.some(a=>serializeSVG(a.svgDocument).includes('scale(-1 1)')));
+  const unsafeConverted=structuredClone(converted);unsafeConverted.items.forEach(i=>{delete i._flipX;delete i._flipY;});unsafeConverted.media.find(m=>m.mime==='image/svg+xml').dataUrl='data:image/svg+xml;base64,'+btoa('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+  const fallback=await preparePPTXSlide(unsafeConverted);check('Unsupported PPT SVG preserves its PNG preview with a warning',fallback.deck.assets.some(a=>a.mime==='image/png')&&fallback.warnings.some(w=>w.includes('preview image is used')));
+  const old={...assets[0],mime:'image/png',dataUrl:await b64(png).then(b=>'data:image/png;base64,'+b),originalMime:'image/svg+xml',originalDataUrl:assets[0].originalDataUrl};delete old.svgDocument;
+  const legacy={...deck,assets:[old]};await open(legacy);choose();check('Legacy rasterized SVG offers restoration from original',doc.querySelector('#edit-svg').textContent==='Restore editable SVG');doc.querySelector('#edit-svg').click();doc.querySelector('#svg-apply').click();await wait(()=>!doc.querySelector('#svg-editor'));check('Legacy restoration produces an editable vector',doc.querySelector('#stage [data-item="first"] image').getAttribute('href').startsWith('data:image/svg+xml'));
+  choose();doc.querySelector('#edit-svg').click();select('feDropShadow');
+  document.title='PASS — SVG editing';
+ }catch(error){checkError(error);document.title='FAIL — SVG editing';}
+ finally{button.disabled=false;}
+};
+function checkError(error){const li=document.createElement('li');li.dataset.pass=false;li.textContent=error.stack||error.message;document.querySelector('#results').append(li);}

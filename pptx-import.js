@@ -1,3 +1,4 @@
+import { mirrorSVG, svgDataURL } from './svg-vector.js';
 /** Local PPTX conversion and explicit, previewed single-slide insertion. */
 import { uid, validateProject, projectToSVG } from './core.js';
 import { validateDeck } from './deck.js';
@@ -105,7 +106,11 @@ function imageFile(media) {
 }
 
 async function mirroredAsset(asset, flipX, flipY) {
-  // An SVG wrapper retains the full embedded source; the standard safe SVG importer rasterizes it.
+  if (asset.mime === 'image/svg+xml') {
+    const svgDocument = mirrorSVG(asset.svgDocument, flipX, flipY);
+    return { ...asset, id: uid(), svgDocument, dataUrl: svgDataURL(svgDocument), relativePath: asset.relativePath + ' (mirrored)' };
+  }
+  // Raster sources remain embedded images inside the reflected SVG wrapper.
   const xml = `<svg xmlns="http://www.w3.org/2000/svg" width="${asset.width}" height="${asset.height}" viewBox="0 0 ${asset.width} ${asset.height}"><image width="${asset.width}" height="${asset.height}" transform="translate(${flipX?asset.width:0} ${flipY?asset.height:0}) scale(${flipX?-1:1} ${flipY?-1:1})" href="${asset.dataUrl}"/></svg>`;
   const result = await importFiles([new File([xml], 'mirrored-'+asset.name+'.svg', { type: 'image/svg+xml' })]);
   if (!result.assets.length) throw new Error(result.errors[0]?.message || 'Could not preserve image reflection.');
@@ -120,11 +125,21 @@ export async function preparePPTXSlide(converted, signal) {
     embeddedBytes += (asset.dataUrl.length + (asset.originalDataUrl?.length || 0))*3/4;
     if (pixels > 64_000_000 || embeddedBytes > 100*1024*1024) throw new Error('The converted slide exceeds 64 million decoded image pixels or 100 MB of embedded images.');
   }
+  const mediaById = new Map(converted.media.map(media => [media.id, media]));
+  const fallbackIDs = new Set(converted.media.map(media => media.fallbackId).filter(Boolean));
+  const directIDs = new Set(converted.items.filter(item => item.type === 'image').map(item => item.assetId));
   for (const media of converted.media) {
+    if (fallbackIDs.has(media.id) && !directIDs.has(media.id)) continue;
     signal?.throwIfAborted();
     const file = imageFile(media); bytes += file.size;
     if (bytes > 100*1024*1024) throw new Error('The selected slide contains more than 100 MB of images.');
-    const result = await importFiles([file]);
+    let result = await importFiles([file]);
+    if (result.errors.length && media.fallbackId && mediaById.has(media.fallbackId)) {
+      const fallbackFile = imageFile(mediaById.get(media.fallbackId)); bytes += fallbackFile.size;
+      if (bytes > 100*1024*1024) throw new Error('The selected slide contains more than 100 MB of images.');
+      warnings.push(`${media.name}: SVG could not be imported; its preview image is used. ${result.errors[0].message}`);
+      result = await importFiles([fallbackFile]);
+    }
     signal?.throwIfAborted();
     if (result.errors.length || !result.assets.length) {
       warnings.push(`${media.name}: Image omitted. ${result.errors[0]?.message || 'Unsupported image.'}`); continue;

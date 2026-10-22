@@ -156,3 +156,9 @@
 !/tests/gradient-stroke.html
 !/tests/gradient-stroke-browser.js
 !/tests/test_gradient_stroke.py
+
+# Editable vector SVG import and verification.
+!/svg-vector.js
+!/svg-editor.js
+!/tests/svg-editor.html
+!/tests/svg-editor-browser.js

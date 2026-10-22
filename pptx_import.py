@@ -440,8 +440,13 @@ class Converter:
             if find(shape,'.//a:videoFile') is not None or find(shape,'.//a:audioFile') is not None:
                 self.warn('Embedded media is imported as its static preview image.',name)
             blip = find(shape, 'p:blipFill/a:blip')
-            ref = blip.get(RID+'embed') if blip is not None else None
-            target = self.pkg.relationships(path).get(ref, (None,''))[0]
+            svg_blip = find(blip, './/{http://schemas.microsoft.com/office/drawing/2016/SVG/main}svgBlip')
+            fallback_ref = blip.get(RID+'embed') if blip is not None else None
+            fallback_target = self.pkg.relationships(path).get(fallback_ref, (None,''))[0]
+            svg_target = self.pkg.relationships(path).get(svg_blip.get(RID+'embed'), (None,''))[0] if svg_blip is not None else None
+            target = svg_target or fallback_target
+            if svg_blip is not None and not svg_target:
+                self.warn('SVG source is missing; its preview image is used.', name)
             if not target:
                 self.warn('Linked or missing image was omitted; embed it in PowerPoint first.', name)
                 return
@@ -449,6 +454,10 @@ class Converter:
             if mid is None:
                 self.warn('Unsupported image format (' + posixpath.splitext(target)[1] + ') was omitted. Use PNG, JPEG, WebP or SVG.',name)
                 return
+            if svg_target and fallback_target and fallback_target != svg_target:
+                fallback_mid = self.add_media(fallback_target)
+                if fallback_mid:
+                    self.media[target]['fallbackId'] = fallback_mid
             item = self.base(name,g,'image'); item['assetId'] = mid
             crop = find(shape,'p:blipFill/a:srcRect')
             l,t,r,b = [num(crop,k)/100000 for k in ('l','t','r','b')]

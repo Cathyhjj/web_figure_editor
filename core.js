@@ -1,3 +1,4 @@
+import { validateSVGDocument, svgDataURL, svgDimensions } from './svg-vector.js';
 /** Portable project model and exports. Geometry is measured in CSS pixels (96/in). */
 import { isMP4, isMediaItem, posterSource } from './video.js';
 import { HTML_MIME, looksLikeHTML, requireHTMLSnapshots, validateSnapshot } from './html-chart.js';
@@ -54,7 +55,7 @@ function color(value, label, fallback) {
 }
 
 function dataURL(value, mime, label, inertOriginal = false) {
-  if ((!inertOriginal && !RASTER_MIMES.has(mime) && mime !== 'video/mp4' && mime !== HTML_MIME) || (inertOriginal && mime !== 'image/svg+xml')) fail(`${label} has an unsupported MIME type.`);
+  if ((!inertOriginal && !RASTER_MIMES.has(mime) && mime !== 'video/mp4' && mime !== HTML_MIME && mime !== 'image/svg+xml') || (inertOriginal && mime !== 'image/svg+xml')) fail(`${label} has an unsupported MIME type.`);
   const result = string(value, label, Math.ceil(LIMITS.assetBytes / 3) * 4 + 64);
   const prefix = `data:${mime};base64,`;
   if (!result.startsWith(prefix)) fail(`${label} must be an embedded base64 ${mime} image, not a file path or external URL.`);
@@ -65,7 +66,7 @@ function dataURL(value, mime, label, inertOriginal = false) {
   // A MIME label alone must not turn an embedded script or SVG into a raster asset.
   if (!inertOriginal) {
     const header = atob(payload.slice(0, 11000));
-    const valid = mime === HTML_MIME ? looksLikeHTML(Uint8Array.from(header, char => char.charCodeAt(0)))
+    const valid = mime === 'image/svg+xml' ? true : mime === HTML_MIME ? looksLikeHTML(Uint8Array.from(header, char => char.charCodeAt(0)))
       : mime === 'image/png' ? PNG_SIGNATURE.every((v, i) => header.charCodeAt(i) === v)
       : mime === 'image/jpeg' ? header.charCodeAt(0) === 255 && header.charCodeAt(1) === 216 && header.charCodeAt(2) === 255
         : mime === 'video/mp4' ? isMP4(Uint8Array.from(header, char => char.charCodeAt(0)))
@@ -109,6 +110,8 @@ function validateProjectInternal(input, assetCache) {
     if (assetIDs.has(assetID)) fail(`duplicate asset ID ${assetID}.`);
     assetIDs.add(assetID);
     const mime = string(a.mime, 'asset.mime', 100);
+    const svgDocument = mime === 'image/svg+xml' ? validateSVGDocument(a.svgDocument) : null;
+    if (svgDocument && svgDataURL(svgDocument) !== a.dataUrl) fail('SVG bytes do not match the validated vector document.');
     const embedded = dataURL(a.dataUrl, mime, 'asset.dataUrl');
     totalBytes += embedded.byteLength;
     const asset = {
@@ -118,6 +121,11 @@ function validateProjectInternal(input, assetCache) {
       lastModified: number(a.lastModified, 'asset.lastModified', 0, Number.MAX_SAFE_INTEGER, 0),
       sourceKind: choice(a.sourceKind, 'asset.sourceKind', ['copy', 'linked'], 'copy'),
     };
+    if (svgDocument) {
+      asset.svgDocument = svgDocument;
+      const dimensions = svgDimensions(svgDocument);
+      if (dimensions.width !== asset.width || dimensions.height !== asset.height) fail('SVG dimensions do not match its document.');
+    }
     if (mime === 'video/mp4') {
       const poster = dataURL(a.posterDataUrl, 'image/png', 'asset.posterDataUrl');
       asset.posterDataUrl = poster.value; totalBytes += poster.byteLength;
@@ -224,7 +232,7 @@ function manifest(project) {
     project: { id: project.id, name: project.name },
     canvas: { ...project.canvas, unit: 'CSS px', pixelsPerInch: 96, widthMM: project.canvas.width / 96 * 25.4, heightMM: project.canvas.height / 96 * 25.4 },
     exportNotes: {
-      svg: 'Text and editor shapes are vector. Imported PNG, JPEG, WebP, and flattened SVG images are embedded rasters. Fonts are referenced by family and are not embedded.',
+      svg: 'Text, editor shapes and SVG assets remain vector. PNG, JPEG, WebP and legacy flattened SVG assets remain raster. Fonts are referenced by family and are not embedded.',
       png: 'All content is rasterized. DPI changes export pixel dimensions and the PNG resolution metadata, not the resolution of the original images.',
       crop: 'Image crops retain the complete embedded source and store a per-object visible rectangle. Restore original reveals the full source at its current scale.',
       video: 'MP4 originals are embedded in projects and PPTX exports. PNG, SVG, PDF, and HTML reports show the stored poster frame.',
@@ -240,7 +248,7 @@ function manifest(project) {
       ...(a.linkPersistence !== undefined ? { linkPersistence: a.linkPersistence } : {}),
       ...(a.rasterized !== undefined ? { rasterized: a.rasterized } : {}),
       ...(a.rasterizationScale !== undefined ? { rasterizationScale: a.rasterizationScale } : {}),
-      ...(a.originalMime ? { originalMime: a.originalMime, originalEmbedded: true, renderedAs: 'raster' } : {}),
+      ...(a.originalMime ? { originalMime: a.originalMime, originalEmbedded: true, renderedAs: a.mime === 'image/svg+xml' ? 'vector' : 'raster' } : {}),
       usedBy: project.items.filter(i => isMediaItem(i) && i.assetId === a.id).map(i => i.id),
     })),
   };
@@ -258,7 +266,7 @@ function svgFromCanonical(project) {
     '<?xml version="1.0" encoding="UTF-8"?>',
     `<svg xmlns="http://www.w3.org/2000/svg" width="${n(width / 96 * 25.4)}mm" height="${n(height / 96 * 25.4)}mm" viewBox="0 0 ${n(width)} ${n(height)}">`,
     `<title>${xml(project.name)}</title>`,
-    '<desc>Figure Editor export. Text and shapes are vector; imported images remain raster. Fonts are not embedded.</desc>',
+    '<desc>Figure Editor export. Text, shapes and SVG assets are vector; bitmap images remain raster. Fonts are not embedded.</desc>',
     `<metadata>${xml(JSON.stringify(manifest(project)))}</metadata>`,
     `<rect width="${n(width)}" height="${n(height)}" fill="${xml(background)}"/>`,
   ];

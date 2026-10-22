@@ -200,12 +200,13 @@ function imageShadow(item, layout) {
   const alpha = Math.round((1 - shadow.transparency / 100) * 100000);
   return `<a:effectLst><a:outerShdw blurRad="${blur}" dist="${distance}" dir="${direction}" sx="${size}" sy="${size}" algn="ctr" rotWithShape="1"><a:srgbClr val="${hex}"><a:alpha val="${alpha}"/></a:srgbClr></a:outerShdw></a:effectLst>`;
 }
-function imageShape(item, asset, id, relationship, layout) {
+function imageShape(item, asset, id, relationship, layout, svgRelationship) {
+  const svgExtension = svgRelationship ? `<a:extLst><a:ext uri="{96DAC541-7B7A-43D3-8B79-37D633B846F1}"><asvg:svgBlip xmlns:asvg="http://schemas.microsoft.com/office/drawing/2016/SVG/main" r:embed="${svgRelationship}"/></a:ext></a:extLst>` : '';
   const alpha = Math.round(item.opacity * 100000);
   const c = item.crop, percent = value => Math.max(0, Math.round(value * 100000));
   const left = c ? Math.min(99999, percent(c.x)) : 0, top = c ? Math.min(99999, percent(c.y)) : 0;
   const crop = c ? `<a:srcRect l="${left}" t="${top}" r="${Math.min(99999 - left, percent(1 - c.x - c.width))}" b="${Math.min(99999 - top, percent(1 - c.y - c.height))}"/>` : '';
-  return `<p:pic><p:nvPicPr><p:cNvPr id="${id}" name="${escapeXML(item.name)}" descr="${escapeXML(asset.name)}"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="${relationship}">${alpha === 100000 ? '' : `<a:alphaModFix amt="${alpha}"/>`}</a:blip>${crop}<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>${transform(item, layout)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:ln><a:noFill/></a:ln>${imageShadow(item, layout)}</p:spPr></p:pic>`;
+  return `<p:pic><p:nvPicPr><p:cNvPr id="${id}" name="${escapeXML(item.name)}" descr="${escapeXML(asset.name)}"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="${relationship}">${alpha === 100000 ? '' : `<a:alphaModFix amt="${alpha}"/>`}${svgExtension}</a:blip>${crop}<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>${transform(item, layout)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:ln><a:noFill/></a:ln>${imageShadow(item, layout)}</p:spPr></p:pic>`;
 }
 
 function videoShape(item, asset, id, links, layout) {
@@ -250,10 +251,17 @@ function slideXML(slide, layout, assets, media) {
     } else if (item.type === 'image') {
       if (!imageRelationships.has(item.assetId)) {
         const relationship = `rId${relationshipsList.length + 1}`;
-        imageRelationships.set(item.assetId, relationship);
-        relationshipsList.push({ id: relationship, type: 'image', target: `../media/${media.get(item.assetId).filename}` });
+        const file = media.get(item.assetId);
+        relationshipsList.push({ id: relationship, type: 'image', target: `../media/${file.fallback?.filename || file.filename}` });
+        let svgRelationship;
+        if (file.fallback) {
+          svgRelationship = `rId${relationshipsList.length + 1}`;
+          relationshipsList.push({ id: svgRelationship, type: 'image', target: `../media/${file.filename}` });
+        }
+        imageRelationships.set(item.assetId, { relationship, svgRelationship });
       }
-      shapes.push(imageShape(item, assets.get(item.assetId), id, imageRelationships.get(item.assetId), layout));
+      const refs = imageRelationships.get(item.assetId);
+      shapes.push(imageShape(item, assets.get(item.assetId), id, refs.relationship, layout, refs.svgRelationship));
     } else shapes.push(item.type === 'text' ? textShape(item, id, layout) : shape(item, id, layout));
   }
   // PowerPoint has one common page boundary. Cover fitted-canvas margins so objects
@@ -281,31 +289,40 @@ function slideXML(slide, layout, assets, media) {
 }
 
 async function imageBytes(asset) {
+  if (asset.mime === 'image/svg+xml') {
+    const bytes = Uint8Array.from(atob(asset.dataUrl.split(',')[1]), c => c.charCodeAt(0));
+    return { bytes, extension: 'svg', fallback: await rasterImageBytes(asset) };
+  }
   if (asset.mime !== 'image/webp') {
     const binary = atob(asset.dataUrl.slice(asset.dataUrl.indexOf(',') + 1));
     return { bytes: Uint8Array.from(binary, char => char.charCodeAt(0)), extension: asset.mime === 'image/png' ? 'png' : 'jpeg' };
   }
-  if (typeof document === 'undefined' || typeof Image === 'undefined') error(`converting WebP image “${asset.name}” requires a browser.`);
+  return rasterImageBytes(asset);
+}
+
+async function rasterImageBytes(asset) {
+  if (typeof document === 'undefined' || typeof Image === 'undefined') error(`converting image “${asset.name}” requires a browser.`);
   const checkDimensions = (width, height) => {
-    if (!width || !height || width > 32767 || height > 32767 || width * height > 100000000) error(`WebP image “${asset.name}” exceeds the 100 megapixel or 32767 pixel conversion limit. Use a smaller PNG or JPEG.`);
+    if (!width || !height || width > 32767 || height > 32767 || width * height > 100000000) error(`image “${asset.name}” exceeds the 100 megapixel or 32767 pixel conversion limit. Use a smaller PNG or JPEG.`);
   };
   checkDimensions(asset.width, asset.height);
   const image = await new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => { img.onload = null; img.onerror = null; resolve(img); };
-    img.onerror = () => reject(new Error(`PowerPoint export: could not decode WebP image “${asset.name}”. Reimport it or convert it to PNG.`));
+    img.onerror = () => reject(new Error(`PowerPoint export: could not decode image “${asset.name}”. Reimport it or convert it to PNG.`));
     img.src = asset.dataUrl;
   });
   checkDimensions(image.naturalWidth, image.naturalHeight);
   const canvas = document.createElement('canvas');
   try {
-    canvas.width = image.naturalWidth;
-    canvas.height = image.naturalHeight;
+    const scale = asset.mime === 'image/svg+xml' ? Math.min(3,8192/image.naturalWidth,8192/image.naturalHeight,Math.sqrt(24000000/image.naturalWidth/image.naturalHeight)) : 1;
+    canvas.width = Math.max(1,Math.round(image.naturalWidth*scale));
+    canvas.height = Math.max(1,Math.round(image.naturalHeight*scale));
     const context = canvas.getContext('2d');
-    if (!context) error(`could not allocate a canvas for WebP image “${asset.name}”. Use a smaller PNG or JPEG.`);
-    context.drawImage(image, 0, 0);
+    if (!context) error(`could not allocate a canvas for image “${asset.name}”. Use a smaller PNG or JPEG.`);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
     const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-    if (!blob) error(`could not convert WebP image “${asset.name}” to PNG.`);
+    if (!blob) error(`could not convert ${asset.mime === 'image/webp' ? 'WebP' : 'SVG'} image “${asset.name}” to PNG.`);
     checkBudget(blob.size);
     return { bytes: new Uint8Array(await blob.arrayBuffer()), extension: 'png' };
   } finally { canvas.width = 0; canvas.height = 0; }
@@ -329,11 +346,11 @@ function contentTypes(deck, media) {
     ['docProps/app.xml', 'extended-properties'],
     ...deck.slides.map((_, i) => [`ppt/slides/slide${i + 1}.xml`, 'presentationml.slide']),
   ];
-  return `${XML}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>${[...new Set([...media.values()].flatMap(value => value.poster ? [value.extension, value.poster.extension] : [value.extension]))].map(extension => `<Default Extension="${extension}" ContentType="${extension === 'mp4' ? 'video' : 'image'}/${extension}"/>`).join('')}<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>${types.map(([path, type]) => `<Override PartName="/${path}" ContentType="application/vnd.openxmlformats-officedocument.${type}+xml"/>`).join('')}</Types>`;
+  return `${XML}<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>${[...new Set([...media.values()].flatMap(value => value.poster ? [value.extension, value.poster.extension] : value.fallback ? [value.extension, value.fallback.extension] : [value.extension]))].map(extension => `<Default Extension="${extension}" ContentType="${extension === 'svg' ? 'image/svg+xml' : (extension === 'mp4' ? 'video' : 'image') + '/' + extension}"/>`).join('')}<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>${types.map(([path, type]) => `<Override PartName="/${path}" ContentType="application/vnd.openxmlformats-officedocument.${type}+xml"/>`).join('')}</Types>`;
 }
 function coreProperties(deck) {
   const now = new Date().toISOString();
-  return `${XML}<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>${escapeXML(deck.name)}</dc:title><dc:creator>Figure Editor</dc:creator><dc:description>Editable Figure Editor slides. Text and shapes remain native; imported images remain separate raster images; MP4 videos are embedded for click playback. Fonts are referenced, not embedded.</dc:description><cp:lastModifiedBy>Figure Editor</cp:lastModifiedBy><cp:revision>1</cp:revision><dcterms:created xsi:type="dcterms:W3CDTF">${now}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">${now}</dcterms:modified></cp:coreProperties>`;
+  return `${XML}<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>${escapeXML(deck.name)}</dc:title><dc:creator>Figure Editor</dc:creator><dc:description>Editable Figure Editor slides. Text and shapes remain native; SVG assets retain their vector source with PNG compatibility previews; bitmap images remain separate; MP4 videos are embedded for click playback. Fonts are referenced, not embedded.</dc:description><cp:lastModifiedBy>Figure Editor</cp:lastModifiedBy><cp:revision>1</cp:revision><dcterms:created xsi:type="dcterms:W3CDTF">${now}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">${now}</dcterms:modified></cp:coreProperties>`;
 }
 function appProperties(deck) {
   return `${XML}<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>Figure Editor</Application><PresentationFormat>Custom</PresentationFormat><Slides>${deck.slides.length}</Slides><Notes>0</Notes><HiddenSlides>0</HiddenSlides><HeadingPairs><vt:vector size="2" baseType="variant"><vt:variant><vt:lpstr>Slide Titles</vt:lpstr></vt:variant><vt:variant><vt:i4>${deck.slides.length}</vt:i4></vt:variant></vt:vector></HeadingPairs><TitlesOfParts><vt:vector size="${deck.slides.length}" baseType="lpstr">${deck.slides.map(slide => `<vt:lpstr>${escapeXML(slide.name)}</vt:lpstr>`).join('')}</vt:vector></TitlesOfParts><AppVersion>1.0</AppVersion></Properties>`;
@@ -414,7 +431,8 @@ export async function exportPPTX(input) {
     const encoded = asset.mime === 'video/mp4'
       ? { bytes: Uint8Array.from(atob(asset.dataUrl.slice(asset.dataUrl.indexOf(',') + 1)), c => c.charCodeAt(0)), extension: 'mp4', poster: { ...await imageBytes({ mime: 'image/png', dataUrl: asset.posterDataUrl }), filename: `poster${media.size + 1}.png` } }
       : await imageBytes(asset);
-    mediaSize += encoded.bytes.length + (encoded.poster?.bytes.length || 0);
+    mediaSize += encoded.bytes.length + (encoded.poster?.bytes.length || 0) + (encoded.fallback?.bytes.length || 0);
+    if (encoded.fallback) encoded.fallback.filename = `fallback${media.size + 1}.png`;
     checkBudget(xmlBudget + mediaSize);
     media.set(item.assetId, { ...encoded, filename: `${item.type === 'video' ? 'video' : 'image'}${media.size + 1}.${encoded.extension}` });
   }
@@ -447,6 +465,7 @@ export async function exportPPTX(input) {
   }
   for (const entry of media.values()) {
     entries.push([`ppt/media/${entry.filename}`, entry.bytes]);
+    if (entry.fallback) entries.push([`ppt/media/${entry.fallback.filename}`, entry.fallback.bytes]);
     if (entry.poster) entries.push([`ppt/media/${entry.poster.filename}`, entry.poster.bytes]);
   }
   return zip(entries);

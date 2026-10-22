@@ -335,6 +335,18 @@ dialog{border:1px solid var(--drx-border);border-radius:15px;padding:0;width:min
 .recent-action-spacer{flex:1}
 #recent-projects-dialog .dialog-actions{gap:8px;flex-wrap:wrap}
 
+/* The SVG editor renders source only through an inert image document. */
+.svg-editor { width:min(1200px,96vw); max-width:96vw; }
+.svg-editor > .hint { padding:0 20px; }
+.svg-editor-body { display:grid; grid-template-columns:210px minmax(250px,1fr) 270px; gap:16px; padding:16px 20px; height:min(65vh,660px); }
+.svg-element-list { width:100%; height:100%; font:12px ui-monospace,monospace; }
+.svg-preview-pane { min-width:0; display:flex; flex-direction:column; }
+.svg-editor-preview { width:100%; min-height:0; flex:1; object-fit:contain; background:repeating-conic-gradient(#f1f1f1 0% 25%,white 0% 50%) 0 / 20px 20px; border:1px solid #ddd; }
+.svg-element-properties { overflow:auto; padding:0 4px; }
+.svg-element-properties input,.svg-element-properties textarea { width:100%; }
+.svg-element-properties textarea { min-height:90px; font:12px ui-monospace,monospace; }
+@media(max-width:850px) { .svg-editor-body { grid-template-columns:150px minmax(150px,1fr); height:70vh; } .svg-element-properties { grid-column:1/-1; max-height:28vh; } }
+
 /* Keep the added project action visible at intermediate window widths. */
 .file-actions{flex-wrap:wrap;min-width:0}
 @media(min-width:951px){.app-header{min-height:76px;padding-block:10px}}

@@ -1,3 +1,4 @@
+import { parseSVG, svgDataURL } from './svg-vector.js';
 import { isMP4, readVideoMetadata } from './video.js';
 import { HTML_MIME, looksLikeHTML, readHTMLMetadata } from './html-chart.js';
 /** Local image IO. The editable project embeds copies; filesystem handles never leave IndexedDB. */
@@ -5,8 +6,6 @@ export const MAX_FILE_BYTES = 25 * 1024 * 1024;
 export const MAX_IMPORT_BYTES = 100 * 1024 * 1024;
 const MAX_IMAGE_PIXELS = 40_000_000;
 const MAX_IMAGE_SIDE = 16_384;
-const SVG_MAX_PIXELS = 24_000_000;
-const SVG_MAX_SIDE = 8_192;
 const DB_NAME = 'figure-editor-local-assets-v1';
 const STORE_NAME = 'handles';
 const memoryHandles = new Map();
@@ -181,95 +180,6 @@ function checkRasterHeader(bytes, mime) {
   }
 }
 
-const SVG_TAGS = new Set([
-  'svg', 'g', 'defs', 'symbol', 'use', 'path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon',
-  'text', 'tspan', 'textPath', 'title', 'desc', 'style', 'image', 'switch',
-  'clipPath', 'mask', 'pattern', 'marker', 'linearGradient', 'radialGradient', 'stop', 'filter',
-  'feBlend', 'feColorMatrix', 'feComponentTransfer', 'feComposite', 'feConvolveMatrix', 'feDiffuseLighting',
-  'feDisplacementMap', 'feDistantLight', 'feDropShadow', 'feFlood', 'feFuncA', 'feFuncB', 'feFuncG',
-  'feFuncR', 'feGaussianBlur', 'feImage', 'feMerge', 'feMergeNode', 'feMorphology', 'feOffset',
-  'fePointLight', 'feSpecularLighting', 'feSpotLight', 'feTile', 'feTurbulence',
-]);
-const SVG_NS = 'http://www.w3.org/2000/svg';
-
-function checkCss(css) {
-  const value = css.replace(/\/\*[\s\S]*?\*\//g, '');
-  // No CSS escapes, imports, font downloads, or dynamic image functions.
-  if (/[\\@]/.test(value) || /(?:expression|image-set|cross-fade|paint|image|src)\s*\(/i.test(value)) {
-    throw new Error('The SVG contains unsupported dynamic styles or external resources. Export it as a self-contained static image.');
-  }
-  const withoutLocalUrls = value.replace(/url\(\s*(['"]?)#[\w:.-]+\1\s*\)/gi, '');
-  if (/url\s*\(/i.test(withoutLocalUrls)) throw new Error('The SVG references external resources. Embed its images and fonts, or export a PNG.');
-}
-
-function svgLength(value) {
-  const match = String(value || '').trim().match(/^([+]?(?:\d+(?:\.\d*)?|\.\d+))(px|pt|pc|in|cm|mm|q)?$/i);
-  if (!match) return null;
-  const factor = { px: 1, pt: 96 / 72, pc: 16, in: 96, cm: 96 / 2.54, mm: 96 / 25.4, q: 96 / 101.6 };
-  return Number(match[1]) * (factor[(match[2] || 'px').toLowerCase()]);
-}
-
-/** Validate before anything is assigned to an image URL. Never inject source SVG into the document. */
-function safeSvg(source) {
-  if (/<!ENTITY\b|<!DOCTYPE[^>]*\[|<\?xml-stylesheet\b/i.test(source)) {
-    throw new Error('The SVG contains entities, external stylesheets, or complex document declarations and cannot be imported safely.');
-  }
-  // Common plotting applications emit an SVG 1.1 public doctype; it is not needed for rendering.
-  const xml = source.replace(/<!DOCTYPE[^>]*>/gi, '');
-  const doc = new DOMParser().parseFromString(xml, 'image/svg+xml');
-  if (doc.getElementsByTagName('parsererror').length) throw new Error('The SVG contains invalid XML.');
-  const root = doc.documentElement;
-  if (root.localName !== 'svg' || (root.namespaceURI && root.namespaceURI !== SVG_NS)) throw new Error('The file is not a valid SVG.');
-  // Authoring metadata does not affect rendering and may use unrelated XML namespaces.
-  for (const element of [...doc.getElementsByTagName('*')]) {
-    if (element.localName === 'metadata' || (element.namespaceURI && element.namespaceURI !== SVG_NS)) {
-      element.remove();
-    }
-  }
-  let count = 0;
-  for (const element of [...doc.getElementsByTagName('*')]) {
-    if (++count > 100_000) throw new Error('The SVG contains too many elements. Simplify it or export a PNG.');
-    if (!SVG_TAGS.has(element.localName)) throw new Error(`The SVG contains an unsupported ${element.localName} element. Only static images are supported.`);
-    for (const attribute of [...element.attributes]) {
-      const name = attribute.localName.toLowerCase();
-      const value = attribute.value.trim();
-      if (/^on/i.test(name) || name === 'src' || (attribute.prefix === 'xml' && name === 'base')) {
-        throw new Error('The SVG contains event scripts or external resource settings and cannot be imported.');
-      }
-      if (name === 'href') {
-        const localReference = /^#[\w:.-]+$/.test(value);
-        const embeddedImage = ['image', 'feImage'].includes(element.localName)
-          && /^data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/=\s]+$/i.test(value);
-        if (!localReference && !embeddedImage) throw new Error('The SVG contains external links. Embed external images in the SVG first.');
-      }
-      // Presentation attributes are CSS too. Checking all values prevents escaped url() bypasses.
-      checkCss(value);
-    }
-    if (element.localName === 'style') checkCss(element.textContent || '');
-  }
-  const viewBox = (root.getAttribute('viewBox') || '').trim().split(/[\s,]+/).map(Number);
-  const validViewBox = viewBox.length === 4 && viewBox.every(Number.isFinite) && viewBox[2] > 0 && viewBox[3] > 0;
-  let width = svgLength(root.getAttribute('width'));
-  let height = svgLength(root.getAttribute('height'));
-  if (validViewBox) {
-    if (!width && !height) [width, height] = viewBox.slice(2);
-    else if (!width) width = height * viewBox[2] / viewBox[3];
-    else if (!height) height = width * viewBox[3] / viewBox[2];
-  }
-  width ||= 300;
-  height ||= 150;
-  if (!(Number.isFinite(width + height) && width > 0 && height > 0)) throw new Error('The SVG has no valid dimensions.');
-  const scale = Math.min(3, SVG_MAX_SIDE / width, SVG_MAX_SIDE / height, Math.sqrt(SVG_MAX_PIXELS / width / height));
-  const rasterWidth = Math.max(1, Math.round(width * scale));
-  const rasterHeight = Math.max(1, Math.round(height * scale));
-  // Preserve physical coordinate system when replacing CSS/print units with raster dimensions.
-  if (!validViewBox) root.setAttribute('viewBox', `0 0 ${width} ${height}`);
-  root.setAttribute('xmlns', SVG_NS);
-  root.setAttribute('width', String(rasterWidth));
-  root.setAttribute('height', String(rasterHeight));
-  return { xml: new XMLSerializer().serializeToString(root), width: rasterWidth, height: rasterHeight, scale };
-}
-
 async function buildAsset(file, id = newId(), relativePath = file?.webkitRelativePath) {
   if (!file || typeof file.arrayBuffer !== 'function') throw new Error('Unable to read the file. Select a local image again.');
   if (file.size === 0) throw new Error('The file is empty.');
@@ -293,26 +203,13 @@ async function buildAsset(file, id = newId(), relativePath = file?.webkitRelativ
   } else if (mime === 'video/mp4') {
     Object.assign(asset, await readVideoMetadata(bytes));
   } else if (mime === 'image/svg+xml') {
-    const svg = safeSvg(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
-    const safeDataUrl = bytesToDataUrl(new TextEncoder().encode(svg.xml), 'image/svg+xml');
-    const image = await imageFromUrl(safeDataUrl);
-    const canvas = document.createElement('canvas');
-    canvas.width = svg.width;
-    canvas.height = svg.height;
-    const context = canvas.getContext('2d');
-    if (!context) throw new Error('The browser could not create an image canvas.');
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    asset.dataUrl = canvas.toDataURL('image/png');
-    if (!asset.dataUrl.startsWith('data:image/png;')) throw new Error('SVG conversion failed. Try a smaller image.');
-    if (asset.dataUrl.length > 40 * 1024 * 1024 * 4 / 3 + 64) throw new Error('The rasterized SVG exceeds 40 MB as a PNG. Resize or simplify the original image.');
-    asset.mime = 'image/png';
+    const svg = parseSVG(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    asset.svgDocument = svg.document;
+    asset.dataUrl = svgDataURL(svg.document);
     asset.originalDataUrl = originalDataUrl;
     asset.originalMime = mime;
-    asset.rasterized = true;
-    asset.rasterizationScale = svg.scale;
     asset.width = svg.width;
     asset.height = svg.height;
-    canvas.width = canvas.height = 0;
   } else {
     const image = await imageFromUrl(originalDataUrl);
     checkDimensions(image.naturalWidth, image.naturalHeight);
