@@ -64,6 +64,8 @@ python3 server.py
 
 阴影随项目、自动草稿、复制和副本保存；PNG、SVG、PDF、HTML 报告和复制为图片均保留效果，PPT 导出保留为可继续调整的原生阴影。不同渲染器的模糊边缘和半透明图片叠加效果可能略有差异。与其他内容一样，整页导出会裁掉画布外的部分。
 
+PPTX 导入现在保留图片、原生形状、连接线和文字的外阴影，包括颜色、透明度、模糊、距离、大小、对齐和固定方向。形状也可在 **Format Shape → Effects → Shadow** 调整。带整组阴影的组合以可编辑 SVG 保存子图形与内部效果，外层阴影保持原生可调；不会把组阴影重复加到每个孩子。图片自身的实色或渐变描边可在 **Format Picture → Picture → Picture Border** 编辑，并随 PNG/SVG/PDF/PPTX 导出保留。非均匀缩放、倾斜阴影及其他未支持效果会提示近似或省略；缺失的原始图片无法恢复其轮廓和阴影。
+
 ## 多页组图与面板
 
 每个项目可包含 **1–100 个 slides**。在左侧 **Slides** 点击缩略图切换页面，用画布上方的 **Slide name** 重命名。
@@ -278,5 +280,7 @@ Slide 拖动回归：`node --test tests/slide-order.test.mjs`；独立测试地�
 渐变描边检查：在隔离端口运行 `python3 server.py --port 18768`，打开 `http://127.0.0.1:18768/tests/gradient-stroke.html`，点击 **Run gradient stroke checks**。合成样例覆盖 PPTX 导入、零宽/零高线段的实际像素、半透明箭头、边框编辑/复制/撤销、保存重开及 PNG/PDF/PPTX 导出。
 
 SVG 编辑检查：在隔离测试端口运行 `python3 server.py --port 18768`，打开 `http://127.0.0.1:18768/tests/svg-editor.html`，点击 **Run SVG editing checks**。测试只使用合成数据，验证原貌像素比较、内部编辑、撤销、保存重开、旧 SVG 恢复及 PPTX 矢量往返。
+
+原生阴影检查：在隔离测试服务打开 `tests/native-shadow.html`，点击 **Run shadow checks**。覆盖旋转对象的固定方向阴影、超框文字、图片渐变边框、PPTX 往返、PDF 和包含嵌套 SVG 的组合阴影。页面提供合成 PDF 样张供独立渲染核对。
 
 PowerPoint 粘贴验证：在隔离测试服务中打开 `tests/pptx-paste.html`，验证 Office 数据导入、独立对象编辑、保存重开、撤销重做、取消，以及普通 PNG 回退。测试使用合成 PPTX，不读取系统剪贴板。

@@ -17,7 +17,7 @@ function presetId(shadow) {
 
 export function shadowEditorMarkup(item) {
   const shadow = settings(item);
-  return `<section class="image-shadow" aria-label="Image shadow">
+  return `<section class="image-shadow" aria-label="${item.type === 'image' ? 'Image' : 'Object'} shadow">
     <label class="shadow-heading" for="shadow-enabled"><span>Shadow</span><input id="shadow-enabled" type="checkbox" ${shadow.enabled ? 'checked' : ''} ${item.locked ? 'disabled' : ''}></label>
     <label class="shadow-option"><span>Presets</span><select id="shadow-preset" ${item.locked ? 'disabled' : ''}>
       ${SHADOW_PRESETS.map(preset => `<option value="${preset.id}" ${preset.id === presetId(shadow) ? 'selected' : ''}>${preset.label}</option>`).join('')}

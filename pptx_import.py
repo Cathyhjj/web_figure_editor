@@ -226,7 +226,7 @@ class Converter:
         if ref is None or num(ref,'idx') <= 0:
             return None
         index = int(num(ref,'idx'))
-        collection = 'lnStyleLst' if kind == 'ln' else 'bgFillStyleLst' if index>=1001 else 'fillStyleLst'
+        collection = 'effectStyleLst' if kind == 'effect' else 'lnStyleLst' if kind == 'ln' else 'bgFillStyleLst' if index>=1001 else 'fillStyleLst'
         styles = children(self.theme,'a:themeElements/a:fmtScheme/a:'+collection+'/*')
         index -= 1001 if index>=1001 else 1
         if index < len(styles):
@@ -236,11 +236,42 @@ class Converter:
                 if tag(node)=='schemeClr' and node.get('val')=='phClr':
                     node.tag='{'+NS['a']+'}srgbClr';node.set('val',color[1:7])
             return result
+        if kind == 'effect':
+            return None
         # A missing theme still has a usable reference color.
         solid=ET.Element('{'+NS['a']+'}solidFill');ET.SubElement(solid,'{'+NS['a']+'}srgbClr',val=self.color(ref)[1:7])
         if kind=='ln':
             line=ET.Element('{'+NS['a']+'}ln',w='12700');line.append(solid);return line
         return solid
+
+    def shadow_style(self, shape, chain, name, scale=1):
+        """Nearest explicit effect list (including an empty list) overrides the theme."""
+        containers = [el if el is not None and tag(el) in ('rPr','defRPr','endParaRPr') else first(find(el,'p:spPr'), find(el,'p:grpSpPr')) for el in [shape,*chain]]
+        containers.append(self.theme_style(shape,chain,'effect'))
+        effects = first(*(first(find(el,'a:effectLst'),find(el,'a:effectDag')) for el in containers))
+        if effects is None:
+            return None
+        node = find(effects,'a:outerShdw')
+        if any(tag(child) != 'outerShdw' for child in effects):
+            self.warn('Effects other than outer shadow are not retained.',name)
+        if node is None:
+            return None
+        color = self.color(node)
+        alpha = int(color[7:9],16)/255 if len(color)==9 else 1
+        # Keep exact DrawingML alpha, rather than its 8-bit display-color approximation.
+        color_node = next(iter(node),None)
+        if color_node is not None and find(color_node,'a:alpha') is not None:
+            alpha = max(0,min(1,num(find(color_node,'a:alpha'),'val')/100000))
+        sx,sy = num(node,'sx',100000)/1000,num(node,'sy',100000)/1000
+        blur,distance = num(node,'blurRad')/12700*scale,num(node,'dist')/12700*scale
+        if sx != sy or num(node,'kx') or num(node,'ky'):
+            self.warn('Nonuniform or skewed shadow transform is approximated.',name)
+        if not (0 <= sx <= 200 and 0 <= blur <= 100 and 0 <= distance <= 200):
+            self.warn('Shadow size, blur or distance exceeds editable limits and is clamped.',name)
+        return {'enabled':True,'color':color[:7],'transparency':(1-alpha)*100,
+                'size':max(0,min(200,sx)),'blur':max(0,min(100,blur)),
+                'distance':max(0,min(200,distance)),'angle':num(node,'dir')/60000%360,
+                'alignment':node.get('algn','b'),'rotateWithShape':node.get('rotWithShape','1') not in ('0','false')}
 
     def line_style(self, shape, chain):
         # A local line often sets only width; paint still comes from layout/theme.
@@ -291,7 +322,8 @@ class Converter:
         baseline = num(ET.Element('r', props), 'baseline') / 100000
         if baseline:
             size *= .65
-        return {'fontFamily': family[:200] or 'Arial', 'fontSize': max(1, min(2000, size)),
+        shadow = self.shadow_style(nodes[-1],list(reversed(nodes[:-1])),'Text',scale) if nodes else None
+        return {**({'shadow':shadow} if shadow else {}), 'fontFamily': family[:200] or 'Arial', 'fontSize': max(1, min(2000, size)),
                 'fontWeight': 700 if props.get('b') in ('1', 'true') else 400,
                 'fontStyle': 'italic' if props.get('i') in ('1', 'true') else 'normal',
                 'color': self.color(fill), 'baseline': baseline,
@@ -422,6 +454,27 @@ class Converter:
             rot = (c*fx,s*fx,-s*fy,c*fy,0,0)
             cx, cy = x+w/2,y+h/2
             rot = (*rot[:4],cx-rot[0]*cx-rot[2]*cy,cy-rot[1]*cx-rot[3]*cy)
+            group_geometry = self.geometry(xf,matrix,name)
+            group_shadow = self.shadow_style(shape,[],name,group_geometry['_scaleY'])
+            if group_shadow and group_shadow['transparency'] < 100:
+                # Keep the composited group alpha, including each child's own effects.
+                # The browser stores this bounded group as an editable SVG asset.
+                start = len(self.items)
+                gx,gy=group_geometry['_scaleX']*sx,group_geometry['_scaleY']*sy
+                local=(gx,0,0,gy,-num(co,'x')/EMU*gx,-num(co,'y')/EMU*gy)
+                for child in shape:self.shape(child,path,local,inherited)
+                group_items=self.items[start:];del self.items[start:]
+                for child in group_items:
+                    if child.get('shadow',{}).get('rotateWithShape') is False:
+                        angle=child['shadow']['angle']-group_geometry['rotation']
+                        if group_geometry['_flipX']:angle=180-angle
+                        if group_geometry['_flipY']:angle=-angle
+                        child['shadow']['angle']=angle%360
+                if group_items:
+                    item=self.base(name,group_geometry,'shadowGroup')
+                    item.update(items=group_items,shadow=group_shadow,_flipX=group_geometry['_flipX'],_flipY=group_geometry['_flipY'])
+                    self.items.append(item)
+                return
             for child in shape: self.shape(child,path,multiply(matrix,multiply(rot,mapping)),inherited)
             return
         chain = []
@@ -434,6 +487,7 @@ class Converter:
             self.warn('Object without usable coordinates was omitted.', name)
             return
         g = self.geometry(xf,matrix,name)
+        native_shadow = self.shadow_style(shape,chain,name,g['_scaleY'])
         if typ == 'graphicFrame':
             self.warn('Chart, table, SmartArt or embedded object was omitted. Export it as an image in PowerPoint to include it.', name)
             return
@@ -448,7 +502,7 @@ class Converter:
             target = svg_target or fallback_target
             if svg_blip is not None and not svg_target:
                 self.warn('SVG source is missing; its preview image is used.', name)
-            if not target:
+            if not target or target not in self.pkg.names:
                 self.warn('Linked or missing image was omitted; embed it in PowerPoint first.', name)
                 return
             mid = self.add_media(target)
@@ -460,6 +514,17 @@ class Converter:
                 if fallback_mid:
                     self.media[target]['fallbackId'] = fallback_mid
             item = self.base(name,g,'image'); item['assetId'] = mid
+            if native_shadow:item['shadow']=native_shadow
+            border=self.line_style(shape,chain)
+            if border is not None and find(border,'a:noFill') is None:
+                gradient=self.stroke_gradient(find(border,'a:gradFill'),g,name)
+                stroke=self.color(find(border,'a:solidFill'),'none')
+                if gradient:stroke=gradient['stops'][0]['color']
+                if stroke!='none' or gradient:
+                    dash=find(border,'a:prstDash')
+                    item.update(stroke=stroke,strokeWidth=num(border,'w',12700)/EMU*g['_scaleY'],
+                                strokeDash={'dash':'dash','sysDash':'dash','lgDash':'dash','dot':'dot','sysDot':'dot'}.get(dash.get('val') if dash is not None else '', 'solid'))
+                    if gradient:item['strokeGradient']=gradient
             crop = find(shape,'p:blipFill/a:srcRect')
             l,t,r,b = [num(crop,k)/100000 for k in ('l','t','r','b')]
             if min(l,t,r,b) < 0 or l+r >= 1 or t+b >= 1:
@@ -553,9 +618,16 @@ class Converter:
                         if g['_rawWidth'] and g['_rawHeight']:
                             self.warn('Diagonal line border gradient projection is approximated.',name)
                     imported['strokeGradient'] = paint
-            if find(sp,'a:effectLst') is not None:
-                self.warn('Shadows and other shape effects are not retained.',name)
+            text_start=len(self.items)
             self.text(shape,chain,g,name)
+            if native_shadow:
+                # Filled geometry already casts the shape shadow; an unfilled text box
+                # instead casts its visible glyphs. Run-level shadows remain independent.
+                targets=self.items[first_shape_index:text_start] or self.items[text_start:]
+                for imported in targets:
+                    imported['shadow']=copy.deepcopy(native_shadow)
+                    if native_shadow['rotateWithShape']:
+                        imported['shadow']['angle']=(native_shadow['angle']+g['rotation']-imported['rotation'])%360
         if len(self.items)>2000:
             raise PptxImportError(413,'This slide contains too many objects to import.')
 

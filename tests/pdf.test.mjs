@@ -347,6 +347,19 @@ test('PDF rasterizes only the shadow object bounds at the requested DPI', async 
   });
 });
 
+test('PDF keeps world-fixed shadows in local axes when rasterizing rotated native objects', async () => {
+  await withBrowser({}, async state => {
+    const project=fixture(300,300);
+    project.items=[item('shadow-line','line',{width:100,height:0,rotation:90,stroke:'#ff0000',strokeWidth:4,
+      shadow:{enabled:true,blur:0,distance:3,angle:0,rotateWithShape:false}})];
+    await exportPDF(project,96);
+    const svg=await state.blobs.at(-1).text();
+    assert.match(svg,/translate\(0 -4\)/,'the patch counter-rotates the fixed offset before PDF rotates the object');
+    assert.match(svg,/height="[1-9]/,'zero-height lines receive a nonzero shadow patch');
+    assertReleased(state);
+  });
+});
+
 test('PDF exports large vector pages at any DPI without whole-page raster limits', async () => {
   await withBrowser(vectorOnly, async state => {
     for (const dpi of [1, 96, 300, 600, 2400]) {

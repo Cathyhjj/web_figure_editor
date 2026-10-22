@@ -180,3 +180,8 @@
 !/tests/test_pptx_clipboard.py
 !/tests/pptx-paste.html
 !/tests/pptx-paste-browser.js
+
+# Native PPTX shadows and picture borders.
+!/tests/test_native_shadow.py
+!/tests/native-shadow.html
+!/tests/native-shadow-browser.js

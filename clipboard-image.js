@@ -11,6 +11,7 @@ const MAX_PIXELS = 32_000_000;
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 function localBounds(item, measured) {
+  if (item.shadow) return shadowBounds(item, measured?.get(item.id));
   if (measured?.has(item.id)) return measured.get(item.id);
   if (isMediaItem(item)) return shadowBounds(item);
   if (item.type === 'shape') return vectorShapeBounds(item);
@@ -90,7 +91,7 @@ function originalPNG(selection) {
   const items = selection.items.filter(item => !item.hidden);
   if (items.length !== 1 || items[0].type !== 'image') return null;
   const item = items[0], asset = selection.assets.find(value => value.id === item.assetId);
-  if (asset.mime !== 'image/png' || item.rotation % 360 !== 0 || item.opacity !== 1 || isCropped(item) || item.shadow?.enabled) return null;
+  if (asset.mime !== 'image/png' || item.rotation % 360 !== 0 || item.opacity !== 1 || isCropped(item) || item.shadow?.enabled || item.strokeWidth > 0) return null;
   if (Math.abs(item.width / item.height / (asset.width / asset.height) - 1) > 1e-9) return null;
   if (asset.width > MAX_SIDE || asset.height > MAX_SIDE || asset.width * asset.height > MAX_PIXELS) return null;
   const binary = atob(asset.dataUrl.slice(asset.dataUrl.indexOf(',') + 1));

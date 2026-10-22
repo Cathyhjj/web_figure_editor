@@ -1,14 +1,15 @@
-import { mirrorSVG, svgDataURL } from './svg-vector.js';
+import { mirrorSVG, svgDataURL, serializeSVG, SVG_NS } from './svg-vector.js';
 /** Local PPTX conversion and explicit, previewed single-slide insertion. */
 import { uid, validateProject, projectToSVG } from './core.js';
 import { validateDeck } from './deck.js';
 import { importFiles } from './assets.js?v=locate-1';
+import { shadowBounds } from './shadow.js';
 
 const launchHint = 'PPTX import needs the local Figure Editor server. Restart with start.command (or npm start), then reload this page.';
 const MAX_BYTES = 100 * 1024 * 1024;
 const styleKeys = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'color'];
-const sameStyle = (a, b) => styleKeys.every(k => a[k] === b[k]) && a.baseline === b.baseline;
-function textStyle(run) { return Object.fromEntries(styleKeys.map(key => [key, run[key]])); }
+const sameStyle = (a, b) => styleKeys.every(k => a[k] === b[k]) && a.baseline === b.baseline && JSON.stringify(a.shadow) === JSON.stringify(b.shadow);
+function textStyle(run) { return { ...Object.fromEntries(styleKeys.map(key => [key, run[key]])), ...(run.shadow ? {shadow:{...run.shadow}} : {}) }; }
 
 function canvasMeasure() {
   const context = document.createElement('canvas').getContext('2d');
@@ -24,6 +25,7 @@ function positionText(block, item, x, y) {
   const angle = block.rotation * Math.PI / 180, cs = Math.cos(angle), sn = Math.sin(angle);
   const cx = x + item.width / 2 - block.width / 2, cy = y + item.height / 2 - block.height / 2;
   return { ...item, id: uid(), type: 'text', name: block.name, rotation: block.rotation,
+    ...(block.shadow && !item.shadow ? {shadow:{...block.shadow}} : {}),
     opacity: block.opacity, locked: false, hidden: false,
     x: block.x + block.width / 2 + cx * cs - cy * sn - item.width / 2,
     y: block.y + block.height / 2 + cx * sn + cy * cs - item.height / 2 };
@@ -117,6 +119,36 @@ async function mirroredAsset(asset, flipX, flipY) {
   return { ...result.assets[0], relativePath: asset.relativePath + ' (mirrored)' };
 }
 
+/** Expand only already-validated SVG assets; never allow arbitrary nested SVG URLs. */
+function groupSVG(project) {
+  const doc=new DOMParser().parseFromString(projectToSVG(project),'image/svg+xml');
+  const known=new Map(project.assets.filter(a=>a.mime==='image/svg+xml').map(a=>[a.dataUrl,a]));
+  for(const image of [...doc.querySelectorAll('image')]){
+    const asset=known.get(image.getAttribute('href'));if(!asset)continue;
+    const prefix='nested-'+uid()+'-';
+    const root=new DOMParser().parseFromString(serializeSVG(asset.svgDocument),'image/svg+xml').documentElement;
+    const ids=new Map([...root.querySelectorAll('[id]')].map(node=>[node.id,prefix+node.id]));
+    if(root.id)ids.set(root.id,prefix+root.id);
+    for(const node of [root,...root.querySelectorAll('*')]){
+      for(const attr of [...node.attributes]){
+        let value=attr.value;
+        if(attr.name==='id')value=ids.get(value)||value;
+        else {
+          value=value.replace(/url\(\s*(['"]?)#([\w:.-]+)\1\s*\)/g,(_,quote,id)=>`url(#${ids.get(id)||id})`);
+          if((attr.localName==='href')&&value.startsWith('#'))value='#'+(ids.get(value.slice(1))||value.slice(1));
+        }
+        node.setAttributeNS(attr.namespaceURI,attr.name,value);
+      }
+      if(node.localName==='style')for(const [id,replacement] of ids)node.textContent=node.textContent.replaceAll('#'+id,'#'+replacement);
+    }
+    for(const key of ['x','y','width','height','preserveAspectRatio'])if(image.hasAttribute(key))root.setAttribute(key,image.getAttribute(key));
+    const wrapper=doc.createElementNS(SVG_NS,'g');
+    for(const attr of image.attributes)if(!['href','x','y','width','height','preserveAspectRatio'].includes(attr.localName))wrapper.setAttribute(attr.name,attr.value);
+    wrapper.append(doc.importNode(root,true));image.replaceWith(wrapper);
+  }
+  return new XMLSerializer().serializeToString(doc);
+}
+
 export async function preparePPTXSlide(converted, signal) {
   const assets = [], ids = new Map(), warnings = [...converted.warnings];
   let bytes = 0, pixels = 0, embeddedBytes = 0;
@@ -154,7 +186,31 @@ export async function preparePPTXSlide(converted, signal) {
   for (const source of converted.items) {
     signal?.throwIfAborted();
     const { _flipX, _flipY, ...item } = source;
-    if (item.type === 'textBlock') items.push(...layoutTextBlock(item, measure));
+    if (item.type === 'shadowGroup') {
+      const prepared = await preparePPTXSlide({ ...converted, name:item.name, items:item.items, warnings:[] }, signal);
+      warnings.push(...prepared.warnings);
+      const children = prepared.deck.slides[0].items;
+      let left=0, top=0, right=item.width, bottom=item.height;
+      for(const child of children){
+        const b=shadowBounds(child), r=child.rotation*Math.PI/180, cs=Math.cos(r), sn=Math.sin(r), cx=child.width/2, cy=child.height/2;
+        for(const x of [b.x,b.x+b.width])for(const y of [b.y,b.y+b.height]){
+          const px=child.x+cx+(x-cx)*cs-(y-cy)*sn, py=child.y+cy+(x-cx)*sn+(y-cy)*cs;
+          left=Math.min(left,px);top=Math.min(top,py);right=Math.max(right,px);bottom=Math.max(bottom,py);
+        }
+      }
+      const width=right-left,height=bottom-top;
+      const local={format:'figure-editor',version:1,id:uid(),name:item.name,canvas:{width,height,background:'transparent'},assets:prepared.deck.assets,
+        items:children.map(child=>({...child,x:child.x-left,y:child.y-top}))};
+      const result=await importFiles([new File([groupSVG(local)],item.name+'.svg',{type:'image/svg+xml'})]);
+      if(result.errors.length||!result.assets.length)throw new Error('Could not preserve group shadow: '+result.errors.map(e=>e.message).join('; '));
+      const asset=(_flipX||_flipY)?await mirroredAsset(result.assets[0],_flipX,_flipY):result.assets[0];accountAsset(asset);assets.push(asset);
+      const r=item.rotation*Math.PI/180,dx=(left+right-item.width)/2*(_flipX?-1:1),dy=(top+bottom-item.height)/2*(_flipY?-1:1);
+      items.push({id:uid(),type:'image',name:item.name,assetId:asset.id,width,height,
+        x:item.x+item.width/2+dx*Math.cos(r)-dy*Math.sin(r)-width/2,
+        y:item.y+item.height/2+dx*Math.sin(r)+dy*Math.cos(r)-height/2,
+        rotation:item.rotation,opacity:item.opacity,locked:false,hidden:false,shadow:item.shadow});
+    }
+    else if (item.type === 'textBlock') items.push(...layoutTextBlock(item, measure));
     else if (item.type === 'image') {
       let asset = ids.get(item.assetId);
       if (!asset) continue;

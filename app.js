@@ -21,7 +21,7 @@ import { POWERPOINT_MIME, initPowerPointPaste } from './pptx-clipboard.js';
 import { exportPDF } from './pdf.js';
 import { initWindows } from './windows.js';
 import { initSlideDrag } from './slide-drag.js';
-import { imageShadowSVG } from './shadow.js';
+import { imageShadowSVG, objectShadowSVG, imageBorderSVG } from './shadow.js';
 import { shadowEditorMarkup, bindShadowEditor } from './shadow-editor.js';
 import { isShapeItem, isLineShape, shapeSVG, shapeBounds } from './shapes.js';
 import { opacityEditorMarkup, shapeEditorMarkup, bindShapeEditor } from './shape-editor.js';
@@ -149,6 +149,8 @@ function appendItemContent(g,item,context='stage'){
    String(item.text).split('\n').forEach((line,j)=>text.append(svg('tspan',{x:item.align==='center'?item.width/2:item.align==='right'?item.width:0,dy:j?item.fontSize*1.2:0},line||' ')));g.append(text);
   }else if(item.type==='shape')g.innerHTML=vectorShapeSVG(item,`vector-${context}-${item.id}`);
   else if(isShapeItem(item))g.innerHTML=shapeSVG(item,`preset-${context}-${item.id}`);
+  if(!isMediaItem(item)&&item.shadow)g.innerHTML=objectShadowSVG(item,g.innerHTML,`native-shadow-${context}-${item.id}`);
+  if(item.type==='image')g.insertAdjacentHTML('beforeend',imageBorderSVG(item,`picture-border-${context}-${item.id}`));
 }
 function previewVideo(asset){
  if(!asset||asset.mime!=='video/mp4')return;
@@ -378,7 +380,7 @@ function renderInspector(){
  if(i.type==='image'){const a=assetById(i.assetId),c=imageCrop(i);const effectiveDPI=a?Math.round(Math.min(a.width*c.width/i.width,a.height*c.height/i.height)*96):0;box.innerHTML+=`<div class="image-crop-actions"><button id="crop-image" class="button" ${i.locked?'disabled':''}>${isCropped(i)?'Edit crop':'Crop'}</button><button id="restore-image" class="button" ${i.locked||!isCropped(i)?'disabled':''}>Restore original</button></div><p class="hint">Source: ${escapeHTML(a?.name)}<br>Original size: ${a?.width} × ${a?.height} px${isCropped(i)?`<br>Cropped area: ${Math.round(a.width*c.width)} × ${Math.round(a.height*c.height)} px`:''}${a?.mime==='image/svg+xml'?'<br>Vector SVG · resolution independent':`<br>Effective resolution: ${effectiveDPI} DPI`}<br>Drag the bottom-right corner to keep proportions; hold Shift to resize freely. Drag side handles to stretch width or height. Width and height fields keep proportions.</p>`;}
  if(i.type==='video'){const a=assetById(i.assetId);box.innerHTML+=`<div class="image-crop-actions"><button id="preview-video" class="button">▶ Preview video</button></div><p class="hint">MP4 · ${a.width} × ${a.height} px · ${a.duration.toFixed(1)} s<br>Embedded in PowerPoint; click the video during Slide Show to play. H.264 video with AAC audio is recommended.<br>PNG, SVG, PDF, and HTML reports use the poster frame.</p>`;}
  if(i.type==='image'&&editableSVGAsset(assetById(i.assetId)))box.innerHTML+=`<button id="edit-svg" class="button" ${i.locked?'disabled':''}>${assetById(i.assetId).mime==='image/svg+xml'?'Edit SVG elements':'Restore editable SVG'}</button>`;
- if(i.type==='image')box.innerHTML+=shadowEditorMarkup(i);
+ if(!['video','html'].includes(i.type))box.innerHTML+=shadowEditorMarkup(i);
  box.innerHTML+=vectorShapeEditor(i);
  box.innerHTML+=shapeEditorMarkup(i);
  box.innerHTML+=`<label class="field inline"><input id="object-locked" type="checkbox" ${i.locked?'checked':''}> Lock object</label>`;
@@ -388,8 +390,8 @@ function renderInspector(){
    geometry:formatSection('size','Size',`<div class="field-row">${field('Width / px','width',round(i.width),'number',`min="${isLineShape(i)?0:1}" step="1"`)}${field('Height / px','height',round(i.height),'number',`min="${isLineShape(i)?0:1}" step="1"`)}</div>${field('Rotation / °','rotation',round(i.rotation))}`)+formatSection('position','Position',`<div class="field-row">${field('Horizontal / px','x',round(i.x),'number','step="1"')}${field('Vertical / px','y',round(i.y),'number','step="1"')}</div>`),
    opacity:opacityEditorMarkup(i),
    appearance:formatSection('fill-line','Fill & Line',vectorShapeEditor(i)+shapeEditorMarkup(i)),
-   picture:crop?crop.outerHTML+crop.nextElementSibling.outerHTML+(box.querySelector('#edit-svg')?.outerHTML||''):'',
-   effects:i.type==='image'?shadowEditorMarkup(i):'',
+   picture:crop?crop.outerHTML+crop.nextElementSibling.outerHTML+(box.querySelector('#edit-svg')?.outerHTML||'')+formatSection('picture-border','Picture Border',shapeEditorMarkup(i)+vectorShapeEditor(i)):'',
+   effects:shadowEditorMarkup(i),
    properties:field('Name','name',i.name,'text')+`<label class="field inline"><input id="object-locked" type="checkbox" ${i.locked?'checked':''}> Lock object</label>`,
   });
   bindFormatInspector(box,{beforeSwitch:flushText});

@@ -15,7 +15,7 @@ export function formatInspectorMarkup(item, { geometry, opacity, appearance, pic
   const kind = item.type === 'image' ? 'picture' : 'shape';
   const tabs = kind === 'picture'
     ? [['picture', 'Picture', formatSection('picture-transparency', 'Picture Transparency', opacity) + formatSection('crop', 'Crop & Source', picture)], ['effects', 'Effects', formatSection('shadow', 'Shadow', effects)]]
-    : [['paint', 'Fill & Line', appearance + formatSection('object-transparency', 'Object Transparency', opacity)]];
+    : [['paint', 'Fill & Line', appearance + formatSection('object-transparency', 'Object Transparency', opacity)], ['effects', 'Effects', formatSection('shadow', 'Shadow', effects)]];
   tabs.push(['size', 'Size & Properties', geometry + formatSection('properties', 'Properties', properties)]);
   const selected = tabs.some(([key]) => key === preferences.get(kind)) ? preferences.get(kind) : tabs[0][0];
   return `<div class="format-inspector" data-format-kind="${kind}">

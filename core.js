@@ -3,7 +3,7 @@ import { validateSVGDocument, svgDataURL, svgDimensions } from './svg-vector.js'
 import { isMP4, isMediaItem, posterSource } from './video.js';
 import { HTML_MIME, looksLikeHTML, requireHTMLSnapshots, validateSnapshot } from './html-chart.js';
 import { validateCrop, imageCrop } from './crop.js';
-import { validateShadow, imageShadowSVG } from './shadow.js';
+import { validateShadow, imageShadowSVG, objectShadowSVG, imageBorderSVG } from './shadow.js';
 import { validateShape, validateGradient, shapeSVG as vectorShapeSVG } from './shape.js';
 import { SHAPE_TYPES, isLineShape, shapeSVG as presetShapeSVG } from './shapes.js';
 const LIMITS = Object.freeze({ assets: 500, items: 2000, assetBytes: 40 * 1024 * 1024, totalBytes: 160 * 1024 * 1024 });
@@ -184,6 +184,13 @@ function validateProjectInternal(input, assetCache) {
       if (['video', 'html'].includes(type) && (item.crop !== undefined || item.shadow !== undefined)) fail('video and HTML crop and shadow are not supported.');
       if (item.crop !== undefined) canonical.crop = validateCrop(item.crop);
       if (item.shadow !== undefined) canonical.shadow = validateShadow(item.shadow);
+      if(type==='image' && ['stroke','strokeWidth','strokeGradient'].some(key=>item[key]!==undefined)){
+        canonical.stroke=color(item.stroke,'item.stroke','none');
+        canonical.strokeWidth=number(item.strokeWidth,'item.strokeWidth',0,1000,0);
+        canonical.strokeOpacity=number(item.strokeOpacity,'item.strokeOpacity',0,1,1);
+        canonical.strokeDash=choice(item.strokeDash,'item.strokeDash',['solid','dash','dot'],'solid');
+        if(item.strokeGradient!==undefined)canonical.strokeGradient=validateGradient(item.strokeGradient);
+      }
     } else if (type === 'text') {
       canonical.text = string(item.text, 'item.text', 100000, '').replace(/\r\n?/g, '\n');
       canonical.fontFamily = string(item.fontFamily, 'item.fontFamily', 200, 'Arial');
@@ -212,6 +219,7 @@ function validateProjectInternal(input, assetCache) {
       }
       if (type === 'roundRect') canonical.cornerRadius = number(item.cornerRadius, 'item.cornerRadius', 0, 0.5, 1 / 6);
     }
+    if (item.shadow !== undefined) canonical.shadow = validateShadow(item.shadow);
     project.items.push(canonical);
   }
   return project;
@@ -274,6 +282,7 @@ function svgFromCanonical(project) {
     if (item.hidden) continue;
     const { width: w, height: h } = item;
     lines.push(`<g id="${xml(item.id)}" transform="translate(${n(item.x)} ${n(item.y)}) rotate(${n(item.rotation)} ${n(w / 2)} ${n(h / 2)})" opacity="${n(item.opacity)}">`);
+    const contentStart = lines.length;
     if (isMediaItem(item)) {
       let filterID;
       do { filterID = `figure-shadow-${project.id}-${item.id}-${shadowIndex++}`; } while (usedIDs.has(filterID));
@@ -284,6 +293,7 @@ function svgFromCanonical(project) {
       if (item.crop) lines.push(`<svg width="${n(w)}" height="${n(h)}" viewBox="${c.x} ${c.y} ${c.width} ${c.height}" preserveAspectRatio="none" overflow="hidden">`);
       lines.push(`<image x="0" y="0" width="${item.crop ? '1' : n(w)}" height="${item.crop ? '1' : n(h)}" preserveAspectRatio="none" href="${xml(posterSource(assets.get(item.assetId)))}"/>`);
       if (item.crop) lines.push('</svg>');
+      if(item.type==='image')lines.push(imageBorderSVG(item,`picture-border-${project.id}-${item.id}`));
     } else if (item.type === 'text') {
       const textX = item.align === 'center' ? w / 2 : item.align === 'right' ? w : 0;
       const anchor = item.align === 'center' ? 'middle' : item.align === 'right' ? 'end' : 'start';
@@ -294,6 +304,10 @@ function svgFromCanonical(project) {
       lines.push(vectorShapeSVG(item, `shape-${project.id}-${item.id}`));
     } else {
       lines.push(presetShapeSVG(item, `preset-${project.id}-${item.id}`));
+    }
+    if (!isMediaItem(item) && item.shadow) {
+      const content = lines.splice(contentStart).join('\n');
+      lines.push(objectShadowSVG(item, content, `figure-native-shadow-${project.id}-${item.id}`));
     }
     lines.push('</g>');
   }

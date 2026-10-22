@@ -14,10 +14,10 @@ export function opacityEditorMarkup(item) {
 }
 
 export function shapeEditorMarkup(item) {
-  if (!isShapeItem(item) && item.type !== 'shape') return '';
+  if (!isShapeItem(item) && item.type !== 'shape' && item.type !== 'image') return '';
   const paint = (key, label) => {
     const gradient=item[key+'Gradient'];
-    const none = !gradient && transparent(item[key]);
+    const none = !gradient && transparent(item[key]??'none');
     const { hex, alpha } = shapeColor(none ? (paints.get(item)?.[key] ?? (key === 'fill' ? '#ffffff' : '#252735')) : item[key]);
     return `<fieldset class="shape-paint"><legend>${label}</legend>
       <div class="shape-paint-row"><select data-shape-paint="${key}" aria-label="${label} style" ${item.locked ? 'disabled' : ''}>
@@ -29,9 +29,9 @@ export function shapeEditorMarkup(item) {
     </fieldset>`;
   };
   return `<section class="shape-style" aria-label="Shape appearance">
-    ${isLineShape(item) || item.type === 'shape' && item.paths.every(path => path.fillMode === 'none') ? '' : item.fillGradient ? slider('Fill transparency', 'fillOpacity', percent(item.fillOpacity ?? 1), item.locked) : paint('fill', 'Fill')}
+    ${item.type === 'image' || isLineShape(item) || item.type === 'shape' && item.paths.every(path => path.fillMode === 'none') ? '' : item.fillGradient ? slider('Fill transparency', 'fillOpacity', percent(item.fillOpacity ?? 1), item.locked) : paint('fill', 'Fill')}
     ${paint('stroke', 'Border')}
-    <div class="field-row"><label class="field"><span>Line width / px</span><input type="number" data-property="strokeWidth" value="${item.strokeWidth}" min="0" max="1000" step="0.5"></label>
+    <div class="field-row"><label class="field"><span>Line width / px</span><input type="number" data-property="strokeWidth" value="${item.strokeWidth??0}" min="0" max="1000" step="0.5"></label>
     <label class="field"><span>Line style</span><select data-property="strokeDash" aria-label="Line style">
       ${[['solid', 'Solid'], ['dash', 'Dashed'], ['dot', 'Dotted']].map(([key, label]) => `<option value="${key}" ${(item.strokeDash ?? 'solid') === key ? 'selected' : ''}>${label}</option>`).join('')}
     </select></label></div>
@@ -67,6 +67,7 @@ export function bindShapeEditor(item, box, { begin, preview, commit, change }) {
       if (item.locked) return;
       const key = input.dataset.shapePaint;
       change(() => {
+        if(item.type==='image' && key==='stroke' && input.value!=='none' && !(item.strokeWidth>0))item.strokeWidth=2;
         if(input.value==='gradient'){
           item.strokeGradient ||= {angle:0,stops:[{offset:0,color:'#4472c4'},{offset:1,color:'#ffffff'}]};
           item.stroke='#4472c4';return;
