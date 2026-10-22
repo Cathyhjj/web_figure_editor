@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { importFiles, importFolderFiles, importDroppedFiles, pickFolder, replaceAsset, refreshAsset, assetLinkStatus, pickImages, linkAsset, MAX_FILE_BYTES } from '../assets.js';
+import { needsLocalSource } from '../local-source.js';
 import { createProject, serializeProject, validateProject } from '../core.js';
 
 // Image decode itself is covered by browser checks. This stand-in keeps IO/permission tests deterministic.
@@ -250,6 +251,7 @@ test('drop handles support nested directories and linked images, with plain File
   project.assets = plain.assets;
   const reopened = validateProject(JSON.parse(serializeProject(project))).assets[0];
   assert.equal(reopened.sourceOrigin, 'file');
+  assert.equal(needsLocalSource(reopened), false);
   assert.equal(plain.errors[0].name, 'notes.txt');
 });
 
@@ -264,6 +266,7 @@ test('legacy dropped entries retain session links and reread original bytes on R
   assert.deepEqual(result.errors, []);
   assert.equal(original.sourceKind, 'linked');
   assert.equal(original.linkPersistence, 'session');
+  assert.equal(needsLocalSource(original), false);
   assert.match(await assetLinkStatus(original), /Local file linked \(this session only\)/);
   current = Object.assign(new Blob([pngBytes, new Uint8Array([1])], { type: 'image/png' }), { name: 'original.png', lastModified: 456 });
   const refreshed = await refreshAsset(JSON.parse(JSON.stringify(original)));

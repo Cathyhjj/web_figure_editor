@@ -178,12 +178,31 @@ runButton.onclick = async () => {
   window.clipboardChecks = { finished: false, checks };
   let restore = () => {};
   try {
-    if (!['18766', '18770'].includes(location.port) || !['127.0.0.1', 'localhost'].includes(location.hostname)) throw new Error('Use a separate localhost server on port 18766 to protect the normal editor draft.');
+    if (!['18766', '18768', '18770'].includes(location.port) || !['127.0.0.1', 'localhost'].includes(location.hostname)) throw new Error('Use a separate localhost server on port 18766, 18768, or 18770 to protect the normal editor draft.');
     const iframe = await loadEditor();
     const win = iframe.contentWindow, doc = iframe.contentDocument;
     const get = id => doc.getElementById(id);
     const stageCount = () => get('stage').querySelectorAll('[data-item]').length;
-    const oldCreateURL = win.URL.createObjectURL, oldClick = win.HTMLAnchorElement.prototype.click, oldConfirm = win.confirm, oldSavePicker = win.showSaveFilePicker;
+    const oldCreateURL = win.URL.createObjectURL, oldClick = win.HTMLAnchorElement.prototype.click, oldConfirm = win.confirm, oldFetch = win.fetch, oldSavePicker = win.showSaveFilePicker;
+    const localCalls = [];
+    const capability = { app: 'figure-editor-local', version: 1, token: 'test', locate: true, saveClipboardImage: true };
+    const json = (value, status = 200) => new win.Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
+    const savedSource = async dataUrl => {
+      const bytes = Uint8Array.from(win.atob(dataUrl.split(',')[1]), character => character.charCodeAt(0));
+      const fingerprint = [...new Uint8Array(await win.crypto.subtle.digest('SHA-256', bytes))].map(byte => byte.toString(16).padStart(2, '0')).join('');
+      return { relativePath: `local-assets/pasted/${fingerprint}.png`, fingerprint };
+    };
+    const saveImage = async options => json(await savedSource(JSON.parse(options.body).dataUrl));
+    let saveImageReply = saveImage;
+    win.fetch = async (url, options) => {
+      if (url === '/api/local' || url === '/api/clipboard-image' || url === '/api/locate') {
+        localCalls.push({ url, options });
+        if (url === '/api/local') return json(capability);
+        if (url === '/api/clipboard-image') return saveImageReply(options);
+        return json({ status: 'revealed' });
+      }
+      return oldFetch.call(win, url, options);
+    };
     const clipboardDescriptor = Object.getOwnPropertyDescriptor(win.navigator, 'clipboard');
     const savePickerDescriptor = Object.getOwnPropertyDescriptor(win, 'showSaveFilePicker');
     // Snapshot capture must not open a real native file picker as the editor's
@@ -223,6 +242,7 @@ runButton.onclick = async () => {
       win.HTMLAnchorElement.prototype.click = oldClick;
       win.confirm = oldConfirm;
       win.showSaveFilePicker = oldSavePicker;
+      win.fetch = oldFetch;
       for (const url of createdURLs.keys()) win.URL.revokeObjectURL(url);
     };
     const save = async () => {
@@ -315,11 +335,22 @@ runButton.onclick = async () => {
     const external = await makePNG('#2368ab', 40, 30);
     const files = new win.DataTransfer();
     files.items.add(new win.File([external.blob], 'pasted-external.png', { type: 'image/png', lastModified: 456 }));
+    const callsBeforePaste = localCalls.length;
+    let finishImageSave;
+    saveImageReply = options => new Promise(resolve => { finishImageSave = async () => resolve(await saveImage(options)); });
     const externalEvent = clipboard('paste', files);
+    await until(() => finishImageSave, 'clipboard source-file save request');
+    check('External paste waits for its local source file before adding the image to the project', stageCount() === originals.length * 2 && JSON.stringify(await save()) === JSON.stringify(fallback));
+    await finishImageSave();
+    saveImageReply = saveImage;
     await until(() => stageCount() === originals.length * 2 + 1, 'external PNG paste');
     const imported = await save(), externalItem = currentSlide(imported).items.at(-1), externalAsset = imported.assets.find(asset => asset.id === externalItem.assetId);
     check('An external PNG clipboard file imports asynchronously as a selected image', externalEvent.defaultPrevented && externalItem.type === 'image' && selectedIDs().includes(externalItem.id) && imported.assets.length === 2);
     check('External image paste preserves PNG bytes and intrinsic dimensions', externalAsset?.dataUrl === external.dataUrl && externalAsset?.width === external.width && externalAsset?.height === external.height);
+    const saveCall = localCalls.slice(callsBeforePaste).find(call => call.url === '/api/clipboard-image');
+    const expectedSource = await savedSource(external.dataUrl);
+    check('External paste saves the original image bytes through the authenticated local endpoint', saveCall?.options.method === 'POST' && saveCall.options.headers['X-Figure-Token'] === capability.token && JSON.parse(saveCall.options.body).dataUrl === external.dataUrl);
+    check('Saved projects retain the pasted source path and fingerprint alongside portable image data', externalAsset?.relativePath === expectedSource.relativePath && externalAsset?.fingerprint === expectedSource.fingerprint && externalAsset?.dataUrl === external.dataUrl);
     get('undo').click();
     check('One Undo removes both the external pasted image and its new asset', JSON.stringify(await save()) === JSON.stringify(fallback));
     get('redo').click();
@@ -509,6 +540,44 @@ runButton.onclick = async () => {
       await settle();
       check('A newer Copy prevents an older pending Cut from deleting originals', JSON.stringify(await save()) === JSON.stringify(fixture));
     } finally { win.navigator.clipboard.write = systemWrite; }
+
+    await open(fixture);
+    get('workspace').focus();
+    const failedImage = await makePNG('#dc7832', 31, 23);
+    const failedFiles = new win.DataTransfer();
+    failedFiles.items.add(new win.File([failedImage.blob], 'unsaved-paste.png', { type: 'image/png' }));
+    try {
+      saveImageReply = async () => json({ error: 'Test source directory is not writable.' }, 500);
+      clipboard('paste', failedFiles);
+      await until(() => stageCount() === originals.length + 1, 'portable paste after local save failure');
+      const warning = get('status').textContent, warningIsVisible = get('status').classList.contains('error');
+      const failedPaste = await save(), failedAsset = failedPaste.assets.find(asset => asset.dataUrl === failedImage.dataUrl);
+      check('A failed local source save keeps a usable portable image without inventing a file path', failedAsset?.dataUrl === failedImage.dataUrl && !failedAsset?.relativePath && currentSlide(failedPaste).items.at(-1).assetId === failedAsset?.id);
+      check('A failed local source save displays the server error instead of claiming a local file exists', warningIsVisible && warning.includes('Test source directory is not writable.'));
+      get('undo').click();
+      check('Undo after a failed local save removes the entire portable paste in one step', JSON.stringify(await save()) === JSON.stringify(fixture));
+      get('redo').click();
+      check('Redo after a failed local save restores the portable image and its original bytes', JSON.stringify(await save()) === JSON.stringify(failedPaste));
+    } finally { saveImageReply = saveImage; }
+
+    const pastedFixture = structuredClone(fixture);
+    pastedFixture.assets[0].sourceOrigin = 'clipboard';
+    await open(pastedFixture);
+    const legacyCard = doc.querySelector('[data-asset="clipboard-asset"]');
+    const callsBeforeLocate = localCalls.length;
+    await legacyCard.onclick({ target: legacyCard.querySelector('[data-action="locate"]') });
+    const legacyCalls = localCalls.slice(callsBeforeLocate);
+    const legacySave = legacyCalls.findIndex(call => call.url === '/api/clipboard-image');
+    const legacyLocate = legacyCalls.findIndex(call => call.url === '/api/locate');
+    const located = await save(), legacySource = await savedSource(png.dataUrl);
+    const locateBody = legacyLocate >= 0 ? JSON.parse(legacyCalls[legacyLocate].options.body) : null;
+    check('Locate saves a known pathless pasted image before requesting Finder', legacySave >= 0 && legacyLocate > legacySave && JSON.parse(legacyCalls[legacySave].options.body).dataUrl === png.dataUrl);
+    check('Locate uses the newly saved path and fingerprint without sending image bytes to Finder', locateBody?.asset.relativePath === legacySource.relativePath && locateBody?.asset.fingerprint === legacySource.fingerprint && !('dataUrl' in locateBody.asset));
+    check('Locate persists the older pasted source metadata without changing its canvas objects or embedded data', located.assets[0].relativePath === legacySource.relativePath && located.assets[0].fingerprint === legacySource.fingerprint && located.assets[0].dataUrl === png.dataUrl && JSON.stringify(located.slides) === JSON.stringify(fixture.slides));
+    check('Recovering an older pasted source adds no canvas Undo or Redo entry', get('undo').disabled && get('redo').disabled);
+    await open(located);
+    const reopened = await save();
+    check('Save/Open retains the recovered pasted source path and portable original bytes', JSON.stringify(reopened) === JSON.stringify(located));
 
     // Whole-slide clipboard operations have their own payload and focus scope.
     // Include hidden, locked and out-of-canvas objects so a visible selection or

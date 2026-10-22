@@ -162,3 +162,7 @@
 !/svg-editor.js
 !/tests/svg-editor.html
 !/tests/svg-editor-browser.js
+
+# Managed local originals from pasted images.
+!/local-source.js
+/local-assets/

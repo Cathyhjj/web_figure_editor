@@ -13,6 +13,7 @@ import { initRecentProjectMenu } from './recent-project-menu.js';
 import { importFiles, pickImages, importFolderFiles, pickFolder, importDroppedFiles, linkAsset, refreshAsset, replaceAsset } from './assets.js?v=locate-1';
 import { buildAssetTree } from './asset-tree.js';
 import { locateAsset } from './locate.js';
+import { hasSavedLocalSource, needsLocalSource, saveClipboardAsset, savePastedSources } from './local-source.js';
 import { generateHTMLReport } from './report.js';
 import { exportPPTX, pptxLayout } from './pptx.js';
 import { initPPTXImport } from './pptx-import.js';
@@ -298,7 +299,7 @@ function renderAssets(){
  if(!project.assets.length){const p=document.createElement('p');p.className='hint';p.textContent='Drop images, HTML charts, MP4 videos, or folders here to preview them. Folder structure is kept. Files are processed locally.';list.append(p);}
  function assetCard(a){
   const card=document.createElement('div');card.className='asset-card';card.dataset.asset=a.id;card.draggable=false;
-  card.innerHTML=`<button class="asset-preview" data-action="select" title="Select existing object · Use Place to add a copy" aria-label="Select existing ${escapeHTML(a.name)} in project"><img draggable="false" loading="lazy" decoding="async" class="asset-thumb" alt="${escapeHTML(a.name)}" src="${posterSource(a)}"></button><div class="asset-name" title="${escapeHTML(a.relativePath||a.name)}">${escapeHTML(a.name)}</div><div class="asset-meta">${a.width} × ${a.height}${a.mime==='text/html'?' · Interactive HTML':''}${a.mime==='video/mp4'?` · MP4 · ${a.duration.toFixed(1)} s`:''} · ${a.sourceKind==='linked'?(a.linkPersistence==='session'?'Session link + copy':'Local link + copy'):'Portable copy'}${a.mime==='image/svg+xml'?' · Editable SVG':a.originalMime==='image/svg+xml'?' · SVG original available':''}</div><div class="asset-actions"><button data-action="place">Place</button><button data-action="relink">Link</button>${a.sourceKind==='linked'?'<button data-action="refresh">Refresh</button>':''}</div>`;
+  card.innerHTML=`<button class="asset-preview" data-action="select" title="Select existing object · Use Place to add a copy" aria-label="Select existing ${escapeHTML(a.name)} in project"><img draggable="false" loading="lazy" decoding="async" class="asset-thumb" alt="${escapeHTML(a.name)}" src="${posterSource(a)}"></button><div class="asset-name" title="${escapeHTML(a.relativePath||a.name)}">${escapeHTML(a.name)}</div><div class="asset-meta">${a.width} × ${a.height}${a.mime==='text/html'?' · Interactive HTML':''}${a.mime==='video/mp4'?` · MP4 · ${a.duration.toFixed(1)} s`:''} · ${a.sourceKind==='linked'?(a.linkPersistence==='session'?'Session link + copy':'Local link + copy'):hasSavedLocalSource(a)?'Local file + copy':'Portable copy'}${a.mime==='image/svg+xml'?' · Editable SVG':a.originalMime==='image/svg+xml'?' · SVG original available':''}</div><div class="asset-actions"><button data-action="place">Place</button><button data-action="relink">Link</button>${a.sourceKind==='linked'?'<button data-action="refresh">Refresh</button>':''}</div>`;
   card.setAttribute('role','group');
   const selectionLabel=document.createElement('div');selectionLabel.className='asset-selection-label';selectionLabel.textContent='Selected on canvas';card.append(selectionLabel);
   const locateButton=document.createElement('button');locateButton.type='button';locateButton.dataset.action='locate';locateButton.textContent='Locate';locateButton.title='Show source image in Finder';locateButton.setAttribute('aria-label',`Show ${a.name} in Finder`);locateButton.disabled=locatingAsset;card.querySelector('.asset-actions').insertBefore(locateButton,card.querySelector('[data-action="refresh"]'));
@@ -468,7 +469,7 @@ async function importResult(result,position,target,{libraryOnly=false}={}){
  if(!result)return;
  const page=target?.project===project?project.slides.find(s=>s.id===target.slideId):null;
  if(target?.project!==project||(!libraryOnly&&!page)){status('Import cancelled because the target project or slide changed. Please import again.',true);return;}
- const errors=result.errors.map(e=>`${e.name}: ${e.message}`).join('; ');
+ const errors=[...result.errors.map(e=>`${e.name}: ${e.message}`),...(result.warnings||[])].join('; ');
  const skipped=result.skipped?` Skipped ${result.skipped} unsupported file${result.skipped===1?'':'s'}.`:'';
  if(result.assets.length){
   const applied=change(()=>{for(const [j,a] of result.assets.entries()){
@@ -478,11 +479,12 @@ async function importResult(result,position,target,{libraryOnly=false}={}){
    page.items.push(i);if(page.id===project.activeSlideId)selected=new Set([i.id]);
   }});
   if(!applied)return;
+  const sources=result.savedSources?` Saved ${result.savedSources} local source file${result.savedSources===1?'':'s'} in local-assets/pasted/. Use Locate to show in Finder.`:'';
   const linked=result.assets.filter(a=>a.sourceKind==='linked'),sessionLinks=linked.filter(a=>a.linkPersistence==='session').length;
   const unlinked=result.assets.filter(a=>a.sourceOrigin==='file'&&a.sourceKind!=='linked').length;
   const links=linked.length?` ${linked.length} original file${linked.length===1?'':'s'} linked; use Refresh after editing the original.${sessionLinks?' Session links need relinking after reloading.':''}`:'';
   const copies=unlinked?` ${unlinked} file${unlinked===1?' was':'s were'} imported as copies because this browser could not keep a file link. Use Locate to select the original.`:'';
-  status(`Imported ${result.assets.length} asset${result.assets.length===1?'':'s'} into ${libraryOnly?'Assets':page.name}.${libraryOnly?' Click Place to add an asset to the canvas.':' Portable copies are included.'}${links}${copies}${skipped}${errors?' '+errors:''}`,!!errors);
+  status(`Imported ${result.assets.length} asset${result.assets.length===1?'':'s'} into ${libraryOnly?'Assets':page.name}.${libraryOnly?' Click Place to add an asset to the canvas.':' Portable copies are included.'}${links}${copies}${sources}${skipped}${errors?' '+errors:''}`,!!errors);
   if(!libraryOnly&&page.id===project.activeSlideId&&chosen()[0]?.type==='html')openHTMLChart(chosen()[0]);
  }else if(errors)status(errors+skipped,true);
  else if('skipped' in result)status('No supported media found. Choose a folder containing PNG, JPG, WebP, SVG, MP4, or HTML files.'+skipped);
@@ -512,9 +514,18 @@ async function relink(a){try{const updated=await linkAsset(a);if(updated)change(
 async function refresh(a){try{const updated=await refreshAsset(a);change(()=>{project.assets=project.assets.map(x=>x.id===a.id?updated:x);});status('Embedded copy updated from the authorized local file.');}catch(e){status(e.message,true);}}
 async function locate(a){
  if(locatingAsset)return;
+ const targetProject=project;
  locatingAsset=true;for(const button of document.querySelectorAll('[data-action="locate"]'))button.disabled=true;
- status(`Locating ${a.name}… Finding its source file.`);
- try{const result=await locateAsset(a);status(result==='cancelled'?'Locate cancelled.':`Asked Finder to show ${a.name}.`);}
+ status(`Locating ${a.name}…${needsLocalSource(a)?' Saving its local source file.':' Finding its source file.'}`);
+ try{
+  if(needsLocalSource(a)){
+   const saved=await saveClipboardAsset(a);
+   if(project!==targetProject||assetById(a.id)!==a){status('Locate cancelled because the project or source image changed.');return;}
+   // Source metadata is a persistence update, not a canvas edit or a new undo step.
+   Object.assign(a,{relativePath:saved.relativePath,fingerprint:saved.fingerprint});changed();renderAssets();
+  }
+  const result=await locateAsset(a);status(result==='cancelled'?'Locate cancelled.':`Asked Finder to show ${a.name}.`);
+ }
  catch(error){status(error.message,true);}
  finally{locatingAsset=false;for(const button of document.querySelectorAll('[data-action="locate"]'))button.disabled=false;}
 }
@@ -928,7 +939,7 @@ document.addEventListener('paste',async e=>{
   if(!images.length)return;
   e.preventDefault();const target=importTarget();lastPaste=null;$('workspace').focus({preventScroll:true});
   status('Pasting clipboard images…');
-  await importResult(await importFiles(images),undefined,target);
+  await importResult(await savePastedSources(await importFiles(images)),undefined,target);
  }catch(error){e.preventDefault();status('Could not paste: '+error.message,true);}
 });
 document.addEventListener('keydown',e=>{
