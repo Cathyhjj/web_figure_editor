@@ -105,6 +105,11 @@ document.querySelector('#run').onclick = async () => {
     get('duplicate').click();get('object-locked').click();
     check('New preset duplicate locks all paint controls', [...get('inspector').querySelectorAll('[data-transparency],[data-shape-color],[data-shape-paint],[data-property],[data-shape]')].every(node=>node.disabled));
     get('object-locked').click();
+    set('[data-shape=mode]','gradient');
+    const sourceId=selected().dataset.item;
+    get('duplicate').click();set('[data-shape=stopColor]','#00ff00');
+    const sourceStop=get('stage').querySelector(`[data-item="${sourceId}"] stop`).getAttribute('stop-color');
+    check('Editing a duplicated gradient leaves the source shape unchanged',sourceStop==='#4472c4');
     for(const key of ['donut','frame','noSmoking']){
       const shape={id:key,x:10,y:10,...createCatalogShape(key),width:80,height:80,fill:'#ff0000',stroke:'none'};
       const image=await pixels(await exportPNG({...rasterProject,items:[shape]},96));

@@ -1,8 +1,9 @@
 /** Bounded, portable vector geometry. Coordinates are relative to the object's size. */
 const MODES = ['norm', 'none', 'darkenLess', 'darken', 'lightenLess', 'lighten'];
 const COLORS = { black:'#000000', white:'#ffffff', red:'#ff0000', green:'#008000', blue:'#0000ff', gray:'#808080', grey:'#808080', none:'#00000000', transparent:'#00000000' };
-const invalid = () => { throw new Error('Invalid figure shape geometry.'); };
+const invalid = () => { throw new Error('Invalid figure shape geometry or gradient.'); };
 const finite = (n, min, max) => typeof n === 'number' && Number.isFinite(n) && n >= min && n <= max;
+const colorOK = c => typeof c === 'string' && (/^#[\da-f]{3,4}$|^#[\da-f]{6}(?:[\da-f]{2})?$/i.test(c) || Object.hasOwn(COLORS,c.toLowerCase()));
 export function validateShape(item) {
   if (!Array.isArray(item.paths) || !item.paths.length || item.paths.length > 32) invalid();
   let count = 0;
@@ -14,10 +15,22 @@ export function validateShape(item) {
     });
     return { commands, fillMode:path.fillMode, stroke:path.stroke };
   });
-  return {paths};
+  return {paths,...(item.fillGradient !== undefined ? {fillGradient:validateGradient(item.fillGradient)} : {})};
+}
+export function validateGradient(g) {
+  if (!g || !finite(g.angle,-36000,36000) || !Array.isArray(g.stops) || g.stops.length < 2 || g.stops.length > 16) invalid();
+  let previous=-1;
+  const stops=g.stops.map(s=>{
+    if(!s || !finite(s.offset,0,1) || s.offset<previous || !colorOK(s.color))invalid();
+    previous=s.offset;return {offset:s.offset,color:s.color};
+  });
+  return {angle:g.angle,stops};
 }
 export function cloneShape(item) {
-  return item.type === 'shape' ? {paths:item.paths.map(p=>({...p,commands:p.commands.map(c=>[...c])}))} : {};
+  return {
+    ...(item.type==='shape' ? {paths:item.paths.map(p=>({...p,commands:p.commands.map(c=>[...c])}))} : {}),
+    ...Object.fromEntries(['fillGradient','strokeGradient'].filter(key=>item[key]).map(key=>[key,{...item[key],stops:item[key].stops.map(s=>({...s}))}])),
+  };
 }
 
 export function shadeColor(value, mode='norm') {
@@ -35,18 +48,35 @@ export function shapeBounds(item) {
     const x=c[j]*item.width,y=c[j+1]*item.height;
     l=Math.min(l,x);t=Math.min(t,y);r=Math.max(r,x);b=Math.max(b,y);
   }
-  const pad=item.stroke==='none'||(item.strokeOpacity??1)===0 ? 0 : item.strokeWidth*2; // Include the bounded miter join.
+  const pad=(!item.strokeGradient&&item.stroke==='none')||(item.strokeOpacity??1)===0 ? 0 : item.strokeWidth*2; // Include the bounded miter join.
   return {x:l-pad,y:t-pad,width:r-l+2*pad,height:b-t+2*pad};
 }
 const n = v => Number(v.toFixed(6));
-/** Paints only; object opacity belongs to the enclosing group. */
-export function shapeSVG(item) {
-  let result = '';
-  for (const path of item.paths) {
-    const fill = shadeColor(item.fill,path.fillMode);
+/** User-space paint servers also work on horizontal and vertical zero-area lines. */
+export function gradientSVG(item,g,id,mode='norm',stroke=false) {
+  id=String(id).replace(/[^a-zA-Z0-9_-]/g,'-');
+  const a=g.angle*Math.PI/180,dx=Math.cos(a),dy=Math.sin(a),norm=Math.max(Math.abs(dx),Math.abs(dy));
+  const w=Math.max(item.width,stroke?item.strokeWidth:0,.01),h=Math.max(item.height,stroke?item.strokeWidth:0,.01);
+  return `<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${n(item.width/2-dx/norm*w/2)}" y1="${n(item.height/2-dy/norm*h/2)}" x2="${n(item.width/2+dx/norm*w/2)}" y2="${n(item.height/2+dy/norm*h/2)}">`+
+    g.stops.map(s=>`<stop offset="${n(s.offset)}" stop-color="${shadeColor(s.color,mode)}"/>`).join('')+'</linearGradient>';
+}
+export function shapeSVG(item, id) {
+  // IDs come from project IDs, but also constrain callers to inert identifiers.
+  id = String(id).replace(/[^a-zA-Z0-9_-]/g,'-');
+  let definitions='', result='',stroke=item.stroke;
+  if(item.strokeGradient) {
+    const name=`${id}-stroke-gradient`;definitions+=gradientSVG(item,item.strokeGradient,name,'norm',true);stroke=`url(#${name})`;
+  }
+  for (const [index,path] of item.paths.entries()) {
+    let fill = shadeColor(item.fill,path.fillMode);
+    if (item.fillGradient && path.fillMode !== 'none') {
+      const name=`${id}-gradient-${index}`;
+      definitions+=gradientSVG(item,item.fillGradient,name,path.fillMode);
+      fill=`url(#${name})`;
+    }
     const d=path.commands.map(c=>c[0]+c.slice(1).map((v,j)=>n(v*(j%2 ? item.height : item.width))).join(' ')).join(' ');
     const dash=item.strokeDash==='dash' ? `${4*item.strokeWidth} ${3*item.strokeWidth}` : item.strokeDash==='dot' ? `${item.strokeWidth} ${2*item.strokeWidth}` : 'none';
-    result+=`<path d="${d}" fill="${fill}" fill-opacity="${n(item.fillOpacity??1)}" stroke="${path.stroke ? item.stroke : 'none'}" stroke-opacity="${n(item.strokeOpacity??1)}" stroke-width="${item.strokeWidth}" stroke-dasharray="${dash}" stroke-linejoin="miter" stroke-miterlimit="4"/>`;
+    result+=`<path d="${d}" fill="${fill}" fill-opacity="${n(item.fillOpacity??1)}" stroke="${path.stroke ? stroke : 'none'}" stroke-opacity="${n(item.strokeOpacity??1)}" stroke-width="${item.strokeWidth}" stroke-dasharray="${dash}" stroke-linejoin="miter" stroke-miterlimit="4"/>`;
   }
-  return result;
+  return (definitions ? `<defs>${definitions}</defs>` : '')+result;
 }

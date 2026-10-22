@@ -1,3 +1,4 @@
+import { gradientSVG } from './shape.js';
 /** Shared vector geometry for the editor, thumbnails and exports. Units are CSS px. */
 export const SHAPE_TYPES = Object.freeze(['rect', 'roundRect', 'ellipse', 'line', 'arrow', 'doubleArrow']);
 export const SHAPE_NAMES = Object.freeze({ rect: 'Rectangle', roundRect: 'Rounded rectangle', ellipse: 'Ellipse', line: 'Line', arrow: 'Arrow', doubleArrow: 'Double arrow' });
@@ -53,9 +54,12 @@ export function shapePath(item) {
 export const pathData = commands => commands.map(([op, ...values]) => [op, ...values.map(n)].join(' ')).join(' ');
 
 /** Paints only; object opacity belongs to the enclosing group. */
-export function shapeSVG(item) {
+export function shapeSVG(item, id = `preset-${item.id||'shape'}`) {
+  id=String(id).replace(/[^a-zA-Z0-9_-]/g,'-');
+  const gradient=item.strokeGradient,strokePaint=gradient?`url(#${id}-stroke-gradient)`:item.stroke;
+  const defs=gradient?`<defs>${gradientSVG(item,gradient,`${id}-stroke-gradient`,'norm',true)}</defs>`:'';
   const dash = strokeDashArray(item);
-  const stroke = `stroke="${item.stroke}" stroke-width="${n(item.strokeWidth)}" stroke-opacity="${n(item.strokeOpacity ?? 1)}" stroke-linejoin="${isLineShape(item) ? 'round' : 'miter'}"`;
+  const stroke = `stroke="${strokePaint}" stroke-width="${n(item.strokeWidth)}" stroke-opacity="${n(item.strokeOpacity ?? 1)}" stroke-linejoin="${isLineShape(item) ? 'round' : 'miter'}"`;
   const fill = `fill="${isLineShape(item) ? 'none' : item.fill}" fill-opacity="${n(item.fillOpacity ?? 1)}"`;
   let geometry;
   if (item.type === 'rect' || item.type === 'roundRect') {
@@ -73,14 +77,20 @@ export function shapeSVG(item) {
   if (heads.length) {
     const body = `${geometry} fill="none" stroke-dasharray="${dash.length ? dash.map(n).join(' ') : 'none'}"/>`;
     const ends = heads.map(points => `<path d="${pathData(points.map(([x, y], i) => [i ? 'L' : 'M', x, y]))}" fill="none"/>`).join('');
+    if (gradient) {
+      // Merge opaque coverage before applying translucent gradient stops once.
+      const bounds=shapeBounds({...item,strokeOpacity:1}),mask=`${id}-stroke-mask`;
+      const box=`x="${n(bounds.x)}" y="${n(bounds.y)}" width="${n(bounds.width)}" height="${n(bounds.height)}"`;
+      return `${defs}<defs><mask id="${mask}" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" ${box}><g stroke="white" stroke-width="${n(item.strokeWidth)}" stroke-linejoin="round">${body}${ends}</g></mask></defs><rect ${box} fill="${strokePaint}" stroke="none" opacity="${n(item.strokeOpacity??1)}" mask="url(#${mask})"/>`;
+    }
     const paint = shapeColor(item.stroke);
-    return `<g stroke="${paint.hex}" stroke-width="${n(item.strokeWidth)}" stroke-linejoin="round" opacity="${n(paint.alpha * (item.strokeOpacity ?? 1))}">${body}${ends}</g>`;
+    return `${defs}<g stroke="${paint.hex}" stroke-width="${n(item.strokeWidth)}" stroke-linejoin="round" opacity="${n(paint.alpha * (item.strokeOpacity ?? 1))}">${body}${ends}</g>`;
   }
-  return `${geometry} ${fill} ${stroke}${dash.length ? ` stroke-dasharray="${dash.map(n).join(' ')}"` : ''}/>`;
+  return `${defs}${geometry} ${fill} ${stroke}${dash.length ? ` stroke-dasharray="${dash.map(n).join(' ')}"` : ''}/>`;
 }
 
 export function shapeBounds(item) {
-  const pad = item.stroke !== 'none' && item.stroke !== 'transparent' && (item.strokeOpacity ?? 1) > 0 ? item.strokeWidth / 2 : 0;
+  const pad = (item.strokeGradient || item.stroke !== 'none' && item.stroke !== 'transparent') && (item.strokeOpacity ?? 1) > 0 ? item.strokeWidth / 2 : 0;
   const points = [[0, 0], [item.width, item.height], ...arrowHeads(item).flat()];
   const xs = points.map(p => p[0]), ys = points.map(p => p[1]);
   const x = Math.min(...xs) - pad, y = Math.min(...ys) - pad;

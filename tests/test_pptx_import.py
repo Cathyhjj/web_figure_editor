@@ -51,6 +51,17 @@ def fixture(slides=None, extra=None):
 
 
 class PptxImportTests(unittest.TestCase):
+    def test_gradient_arrows_are_independent_vectors_with_editable_text(self):
+        gradient='<a:gradFill><a:gsLst><a:gs pos="0"><a:srgbClr val="FF0000"><a:alpha val="50000"/></a:srgbClr></a:gs><a:gs pos="100000"><a:srgbClr val="0000FF"/></a:gs></a:gsLst><a:lin ang="5400000"/></a:gradFill>'
+        content=text_shape(geometry=xfrm()+f'<a:prstGeom prst="curvedDownArrow"><a:avLst/></a:prstGeom>{gradient}')
+        result=import_pptx({**fixture([slide(content)]),'slide':1})
+        shape,text=result['items']
+        self.assertEqual((shape['type'],text['type']),('shape','textBlock'))
+        self.assertEqual(len(shape['paths']),3)
+        self.assertTrue(any(c[0]=='C' for p in shape['paths'] for c in p['commands']))
+        self.assertEqual(shape['fillGradient']['stops'][0]['color'],'#ff000080')
+        self.assertEqual(result['media'],[])
+
     def test_inspect_follows_presentation_order_and_does_not_return_images(self):
         data=fixture()
         result=import_pptx(data)

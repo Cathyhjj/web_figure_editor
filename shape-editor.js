@@ -16,18 +16,20 @@ export function opacityEditorMarkup(item) {
 export function shapeEditorMarkup(item) {
   if (!isShapeItem(item) && item.type !== 'shape') return '';
   const paint = (key, label) => {
-    const none = transparent(item[key]);
+    const gradient=item[key+'Gradient'];
+    const none = !gradient && transparent(item[key]);
     const { hex, alpha } = shapeColor(none ? (paints.get(item)?.[key] ?? (key === 'fill' ? '#ffffff' : '#252735')) : item[key]);
     return `<fieldset class="shape-paint"><legend>${label}</legend>
       <div class="shape-paint-row"><select data-shape-paint="${key}" aria-label="${label} style" ${item.locked ? 'disabled' : ''}>
-        <option value="solid" ${none ? '' : 'selected'}>Solid ${label.toLowerCase()}</option>
+        <option value="solid" ${none || gradient ? '' : 'selected'}>Solid ${label.toLowerCase()}</option>
+        ${key==='stroke'?`<option value="gradient" ${gradient?'selected':''}>Gradient border</option>`:''}
         <option value="none" ${none ? 'selected' : ''}>No ${label.toLowerCase()}</option>
-      </select><input type="color" data-shape-color="${key}" value="${hex}" aria-label="${label} color" ${item.locked || none ? 'disabled' : ''}></div>
-      ${slider(`${label} transparency`, key + 'Opacity', percent((item[key + 'Opacity'] ?? 1) * alpha), item.locked || none)}
+      </select><input type="color" data-shape-color="${key}" value="${hex}" aria-label="${label} color" ${item.locked || none || gradient ? 'disabled' : ''}></div>
+      ${slider(`${label} transparency`, key + 'Opacity', percent((item[key + 'Opacity'] ?? 1) * (gradient ? 1 : alpha)), item.locked || none)}
     </fieldset>`;
   };
   return `<section class="shape-style" aria-label="Shape appearance">
-    ${isLineShape(item) || item.type === 'shape' && item.paths.every(path => path.fillMode === 'none') ? '' : paint('fill', 'Fill')}
+    ${isLineShape(item) || item.type === 'shape' && item.paths.every(path => path.fillMode === 'none') ? '' : item.fillGradient ? slider('Fill transparency', 'fillOpacity', percent(item.fillOpacity ?? 1), item.locked) : paint('fill', 'Fill')}
     ${paint('stroke', 'Border')}
     <div class="field-row"><label class="field"><span>Line width / px</span><input type="number" data-property="strokeWidth" value="${item.strokeWidth}" min="0" max="1000" step="0.5"></label>
     <label class="field"><span>Line style</span><select data-property="strokeDash" aria-label="Line style">
@@ -40,7 +42,7 @@ export function shapeEditorMarkup(item) {
 export function bindShapeEditor(item, box, { begin, preview, commit, change }) {
   box.querySelectorAll('[data-transparency]').forEach(input => {
     const key = input.dataset.transparency;
-    const paintKey = key === 'fillOpacity' ? 'fill' : key === 'strokeOpacity' ? 'stroke' : null;
+    const paintKey = key === 'fillOpacity' && !item.fillGradient ? 'fill' : key === 'strokeOpacity' && !item.strokeGradient ? 'stroke' : null;
     const current = () => (item[key] ?? 1) * (paintKey ? shapeColor(item[paintKey]).alpha : 1);
     const apply = () => {
       if (item.locked || input.disabled || input.value === '') return;
@@ -65,6 +67,11 @@ export function bindShapeEditor(item, box, { begin, preview, commit, change }) {
       if (item.locked) return;
       const key = input.dataset.shapePaint;
       change(() => {
+        if(input.value==='gradient'){
+          item.strokeGradient ||= {angle:0,stops:[{offset:0,color:'#4472c4'},{offset:1,color:'#ffffff'}]};
+          item.stroke='#4472c4';return;
+        }
+        delete item[key+'Gradient'];
         if (input.value === 'none') {
           paints.set(item, { ...paints.get(item), [key]: item[key] });
           item[key] = 'none';

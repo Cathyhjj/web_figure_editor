@@ -43,17 +43,20 @@ function preflightSize(deck) {
     for (const item of slide.items) {
       if (item.hidden) continue;
       xmlBytes += 2600 + item.name.length * 6;
+      if(item.strokeGradient)xmlBytes += 240 + item.strokeGradient.stops.length * 160;
       if (item.type === 'text') {
         // Count without split(): hostile newline-heavy text must not allocate XML first.
         let paragraphs = 1;
         for (let i = 0; i < item.text.length; i++) if (item.text.charCodeAt(i) === 10) paragraphs++;
         xmlBytes += item.text.length * 6 + paragraphs * (2000 + item.fontFamily.length * 54);
       } else if (item.type === 'shape') {
-        // Bound custom-path XML before constructing its coordinate strings.
+        // Bound output before constructing strings. Custom paths have at most
+        // three points per command, including coordinates outside their frame.
         for (const path of item.paths) {
           xmlBytes += 160 + path.commands.length * 240;
           checkBudget(xmlBytes + mediaBytes);
         }
+        if (item.fillGradient) xmlBytes += 240 + item.fillGradient.stops.length * 160;
       } else if (isMediaItem(item)) {
         const asset = assets.get(item.assetId);
         xmlBytes += asset.name.length * 6;
@@ -110,11 +113,18 @@ function fill(value, opacity = 1) {
 function line(item, scale) {
   const width = emu(item.strokeWidth * scale);
   if (width > 20116800) error(`the outline of “${item.name}” exceeds PowerPoint’s supported line width after scaling. Reduce the outline width.`);
-  if (!width || item.stroke === 'none') return '<a:ln><a:noFill/></a:ln>';
+  if (!width || !item.strokeGradient && item.stroke === 'none') return '<a:ln><a:noFill/></a:ln>';
   const ends = item.type === 'arrow' || item.type === 'doubleArrow'
     ? `<a:headEnd type="${item.type === 'doubleArrow' ? 'arrow' : 'none'}" w="med" len="med"/><a:tailEnd type="arrow" w="med" len="med"/>` : '';
   const dash = { solid: 'solid', dash: 'dash', dot: 'sysDot' }[item.strokeDash ?? 'solid'];
-  return `<a:ln w="${width}" cap="flat" cmpd="sng" algn="ctr">${fill(item.stroke, item.opacity * (item.strokeOpacity ?? 1))}<a:prstDash val="${dash}"/>${isLineShape(item) ? '<a:round/>' : '<a:miter lim="800000"/>'}${ends}</a:ln>`;
+  let gradient = item.strokeGradient;
+  if(gradient && (item.connectorFlipX || item.connectorFlipY)) {
+    let angle=gradient.angle;
+    if(item.connectorFlipY)angle=-angle;
+    if(item.connectorFlipX)angle=180-angle;
+    gradient={...gradient,angle};
+  }
+  return `<a:ln w="${width}" cap="flat" cmpd="sng" algn="ctr">${gradient ? gradientFill(gradient, item.opacity * (item.strokeOpacity ?? 1)) : fill(item.stroke, item.opacity * (item.strokeOpacity ?? 1))}<a:prstDash val="${dash}"/>${isLineShape(item) ? '<a:round/>' : '<a:miter lim="800000"/>'}${ends}</a:ln>`;
 }
 function transform(item, layout) {
   const rotation = Math.round(((item.rotation % 360 + 360) % 360) * 60000) % 21600000;
@@ -134,12 +144,21 @@ function customGeometry(paths) {
   }).join('');
   return `<a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/><a:rect l="0" t="0" r="w" b="h"/><a:pathLst>${paths.map(path => `<a:path w="1000000" h="1000000" fill="${path.fillMode}" stroke="${path.stroke ? 1 : 0}" extrusionOk="0">${commands(path)}</a:path>`).join('')}</a:pathLst></a:custGeom>`;
 }
+function gradientFill(gradient, opacity) {
+  const angle = Math.round(((gradient.angle % 360 + 360) % 360) * 60000) % 21600000;
+  const stops = gradient.stops.map(stop => {
+    const { hex, alpha } = color(stop.color), amount = Math.round(alpha * opacity * 100000);
+    return `<a:gs pos="${Math.round(stop.offset * 100000)}"><a:srgbClr val="${hex}">${amount === 100000 ? '' : `<a:alpha val="${amount}"/>`}</a:srgbClr></a:gs>`;
+  }).join('');
+  return `<a:gradFill rotWithShape="1"><a:gsLst>${stops}</a:gsLst><a:lin ang="${angle}" scaled="1"/><a:tileRect/></a:gradFill>`;
+}
 function shape(item, id, layout) {
   const adjustments = item.type === 'roundRect' ? `<a:avLst><a:gd name="adj" fmla="val ${Math.round((item.cornerRadius ?? 1 / 6) * 100000)}"/></a:avLst>` : '<a:avLst/>';
   const geometry = item.type === 'shape' ? customGeometry(item.paths)
     : `<a:prstGeom prst="${item.connector === 'elbow' ? 'bentConnector3' : item.connector === 'curved' ? 'curvedConnector3' : isLineShape(item) ? 'line' : item.type}">${adjustments}</a:prstGeom>`;
   const fillOpacity = item.opacity * (item.fillOpacity ?? 1);
-  const paint = isLineShape(item) ? '<a:noFill/>' : fill(item.fill, fillOpacity);
+  const paint = isLineShape(item) ? '<a:noFill/>' : item.type === 'shape' && item.fillGradient
+    ? gradientFill(item.fillGradient, fillOpacity) : fill(item.fill, fillOpacity);
   return `<p:sp>${nonVisual(id, item.name)}<p:spPr>${transform(item, layout)}${geometry}${paint}${line(item, layout.scale)}</p:spPr></p:sp>`;
 }
 function fontFamily(value) {

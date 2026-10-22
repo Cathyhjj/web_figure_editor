@@ -4,6 +4,7 @@ import { inflateSync } from 'node:zlib';
 import { createProject } from '../core.js';
 import { exportPDF } from '../pdf.js';
 import { shadowBounds } from '../shadow.js';
+import { shapeBounds } from '../shape.js';
 
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC';
 
@@ -175,6 +176,60 @@ test('PDF keeps rectangles and lines as native paths with transforms and no draw
     assert.doesNotMatch(content, /777|333/);
     assert.equal(state.canvases.length, 0);
     assert.equal(state.requests.length, 0);
+  });
+});
+
+test('PDF keeps layered vector shapes and cubic curves editable as paths, with shading and object opacity', async () => {
+  await withBrowser(vectorOnly, async state => {
+    const project = fixture(200, 100);
+    project.items = [item('curved-arrow', 'shape', {
+      x: 10, y: 20, width: 40, height: 20, rotation: 90, opacity: .5,
+      fill: '#ff000080', stroke: '#0000ff', strokeWidth: 2,
+      paths: [
+        { fillMode: 'norm', stroke: false, commands: [['M', -.1, 0], ['C', 0, -.2, .5, .2, 1, .5], ['L', .7, 1], ['Z']] },
+        { fillMode: 'darkenLess', stroke: false, commands: [['M', .7, 1], ['L', .6, .5], ['L', 1, .5], ['Z']] },
+        { fillMode: 'none', stroke: true, commands: [['M', -.1, 0], ['C', 0, -.2, .5, .2, 1, .5]] },
+      ],
+    })];
+    const objects = await parsePDF(await exportPDF(project, 300));
+    const content = graphics(objects);
+    assert.equal(images(objects).length, 0);
+    assert.match(content, /-4 0 m\s+0 -4 20 4 40 10 c\s+28 20 l\s+h\s+f/);
+    assert.match(content, /0\.8 0 0 rg/, 'secondary path retains DrawingML darkenLess shading');
+    assert.match(content, /0 0 1 RG/);
+    assert.match(content, /0 -4 20 4 40 10 c\s+S/);
+    assert.match(dictionaries(objects), /\/ca 0\.501961/);
+    assert.match(dictionaries(objects), /\/ca 0\.5\b/);
+    const bounds = shapeBounds({ ...project.items[0] });
+    assert.match(dictionaries(objects), new RegExp(`/BBox \\[${bounds.x} ${bounds.y} ${bounds.x + bounds.width} ${bounds.y + bounds.height}\\]`));
+    assert.equal(state.canvases.length, 0);
+  });
+});
+
+test('PDF rasterizes only a gradient shape at the selected DPI and retains other vectors', async () => {
+  await withBrowser({}, async state => {
+    const project = fixture(16000, 16000);
+    const gradientShape = item('gradient-arrow', 'shape', {
+      x: 25, y: 30, width: 8, height: 6, rotation: 45, opacity: .5,
+      fill: '#ff0000', stroke: '#123456', strokeWidth: 1,
+      paths: [{ fillMode: 'norm', stroke: true, commands: [['M', -.1, 0], ['L', 1, .5], ['L', 0, 1], ['Z']] }],
+      fillGradient: { angle: 45, stops: [{ offset: 0, color: '#ff000080' }, { offset: 1, color: '#0000ff' }] },
+    });
+    project.items = [gradientShape, item('native-rect', 'rect', { width: 777, height: 333, fill: '#ff0000' })];
+    const bounds = shapeBounds(gradientShape);
+    for (const dpi of [96, 192]) {
+      const objects = await parsePDF(await exportPDF(project, dpi));
+      const width = Math.round(bounds.width * dpi / 96), height = Math.round(bounds.height * dpi / 96);
+      assert.equal(images(objects).filter(object => /\/DeviceRGB/.test(object.dictionary)).length, 1);
+      assert.match(images(objects).find(object => /\/DeviceRGB/.test(object.dictionary)).dictionary, new RegExp(`/Width ${width} /Height ${height}\\b`));
+      assert.deepEqual(state.reads.at(-1), [0, 0, width, height]);
+      assert.match(graphics(objects), /0 0 777 333 re/);
+      assert.match(dictionaries(objects), /\/ca 0\.5\b/);
+      const svg = await state.blobs.at(-1).text();
+      assert.match(svg, /linearGradient/);
+      assert.doesNotMatch(svg, /native-rect|width="777"|height="333"/);
+    }
+    assertReleased(state);
   });
 });
 

@@ -237,7 +237,7 @@ function textShape(pdf, item, lines) {
   return commands.length > 1 ? { bounds, content: commands.join('\n') + '\n' } : null;
 }
 
-/** Vectors stay vectors; only an image with an active shadow is rasterized as a local patch. */
+/** Vectors stay vectors; image shadows and gradient shapes use individual raster patches. */
 export async function exportPDF(input, dpi = 300) {
   const project = posterProject(validateProject(input));
   if (typeof dpi !== 'number' || !Number.isFinite(dpi) || dpi < 1 || dpi > 2400) fail('export DPI must be a finite number between 1 and 2400.');
@@ -251,6 +251,17 @@ export async function exportPDF(input, dpi = 300) {
   for (const item of visible) {
     let drawing;
     if (item.type === 'text') drawing = outlines.has(item.id) ? textShape(pdf, item, outlines.get(item.id)) : null;
+    else if (item.strokeGradient || item.type === 'shape' && item.fillGradient) {
+      const bounds = item.type === 'shape' ? vectorShapeBounds(item) : shapeBounds(item);
+      if (bounds.width <= 0 || bounds.height <= 0) continue;
+      // The raster canvas requires at least 1 CSS px; keep thin strokes centered.
+      if (bounds.width < 1) { bounds.x -= (1-bounds.width)/2; bounds.width = 1; }
+      if (bounds.height < 1) { bounds.y -= (1-bounds.height)/2; bounds.height = 1; }
+      checkPixels(Math.max(1, Math.round(bounds.width * dpi / 96)), Math.max(1, Math.round(bounds.height * dpi / 96)));
+      const local = { ...project, canvas: { width: bounds.width, height: bounds.height, background: 'transparent' }, assets: [], items: [{ ...item, x: -bounds.x, y: -bounds.y, rotation: 0, opacity: 1 }] };
+      const name = await withRasterCanvas(local, dpi, async (canvas, context) => embedPixels(pdf, context.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height), 'PDF gradient shape');
+      drawing = { bounds: [bounds.x, bounds.y, bounds.x + bounds.width, bounds.y + bounds.height], content: `q ${n(bounds.width)} 0 0 ${n(-bounds.height)} ${n(bounds.x)} ${n(bounds.y + bounds.height)} cm /${name} Do Q\n` };
+    }
     else if (item.type !== 'image') drawing = shape(pdf, item);
     else {
       const asset = assets.get(item.assetId), shadow = item.shadow;

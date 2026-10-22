@@ -3,8 +3,8 @@ import { isMP4, isMediaItem, posterSource } from './video.js';
 import { HTML_MIME, looksLikeHTML, requireHTMLSnapshots, validateSnapshot } from './html-chart.js';
 import { validateCrop, imageCrop } from './crop.js';
 import { validateShadow, imageShadowSVG } from './shadow.js';
-import { validateShape, shapeSVG as vectorShapeSVG } from './shape.js';
-import { SHAPE_TYPES, isLineShape, shapeSVG } from './shapes.js';
+import { validateShape, validateGradient, shapeSVG as vectorShapeSVG } from './shape.js';
+import { SHAPE_TYPES, isLineShape, shapeSVG as presetShapeSVG } from './shapes.js';
 const LIMITS = Object.freeze({ assets: 500, items: 2000, assetBytes: 40 * 1024 * 1024, totalBytes: 160 * 1024 * 1024 });
 const RASTER_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 const PNG_SIGNATURE = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -190,6 +190,7 @@ function validateProjectInternal(input, assetCache) {
       canonical.strokeWidth = number(item.strokeWidth, 'item.strokeWidth', 0, 1000, 2);
       canonical.fillOpacity = number(item.fillOpacity, 'item.fillOpacity', 0, 1, 1);
       canonical.strokeOpacity = number(item.strokeOpacity, 'item.strokeOpacity', 0, 1, 1);
+      if(item.strokeGradient !== undefined)canonical.strokeGradient=validateGradient(item.strokeGradient);
       canonical.strokeDash = choice(item.strokeDash, 'item.strokeDash', ['solid', 'dash', 'dot'], 'solid');
       if (isLineShape(item) && item.connector !== undefined) {
         canonical.connector = choice(item.connector, 'item.connector', ['elbow', 'curved']);
@@ -282,9 +283,9 @@ function svgFromCanonical(project) {
       item.text.split('\n').forEach((line, index) => lines.push(`<tspan x="${n(textX)}" y="${n(item.fontSize * (1 + index * 1.2))}">${xml(line)}</tspan>`));
       lines.push('</text>');
     } else if (item.type === 'shape') {
-      lines.push(vectorShapeSVG(item));
+      lines.push(vectorShapeSVG(item, `shape-${project.id}-${item.id}`));
     } else {
-      lines.push(shapeSVG(item));
+      lines.push(presetShapeSVG(item, `preset-${project.id}-${item.id}`));
     }
     lines.push('</g>');
   }

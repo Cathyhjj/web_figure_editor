@@ -241,6 +241,40 @@ class Converter:
             line=ET.Element('{'+NS['a']+'}ln',w='12700');line.append(solid);return line
         return solid
 
+    def line_style(self, shape, chain):
+        # A local line often sets only width; paint still comes from layout/theme.
+        candidates = [find(shape,'p:spPr/a:ln'), *(find(el,'p:spPr/a:ln') for el in chain), self.theme_style(shape,chain,'ln')]
+        result = None
+        paints = {'noFill','solidFill','gradFill','pattFill','blipFill'}
+        for source in reversed(candidates):
+            if source is None:
+                continue
+            if result is None:
+                result = ET.Element('{'+NS['a']+'}ln')
+            result.attrib.update(source.attrib)
+            for child in source:
+                for old in list(result):
+                    if tag(old) == tag(child) or tag(old) in paints and tag(child) in paints:
+                        result.remove(old)
+                result.append(copy.deepcopy(child))
+        return result
+
+    def stroke_gradient(self, node, geometry, name):
+        if node is None:
+            return None
+        stops=[{'offset':max(0,min(1,num(st,'pos')/100000)),'color':self.color(st)} for st in sorted(children(node,'a:gsLst/a:gs'),key=lambda s:num(s,'pos'))]
+        if not 2 <= len(stops) <= 16:
+            self.warn('Unsupported border gradient stops; the first color is used.', name)
+            return None
+        angle=num(find(node,'a:lin'),'ang')/60000
+        if geometry['_flipX']:angle=180-angle
+        if geometry['_flipY']:angle=-angle
+        if find(node,'a:lin') is None:
+            self.warn('Nonlinear border gradient is approximated as a linear gradient.',name)
+        if node.get('rotWithShape') in ('0','false') or find(node,'a:lin') is not None and find(node,'a:lin').get('scaled') in ('0','false'):
+            self.warn('Fixed-orientation or unscaled border gradient direction is approximated.',name)
+        return {'angle':angle%360,'stops':stops}
+
     def run_style(self, nodes, scale):
         props = {}
         fill, font = None, None
@@ -433,8 +467,12 @@ class Converter:
             fill_node=first(*(next((c for c in s if tag(c) in ('solidFill','noFill','gradFill','blipFill','pattFill')),None) if s is not None else None for s in [sp,*(find(el,'p:spPr') for el in chain)]),self.theme_style(shape,chain,'fill'))
             solid=fill_node if fill_node is not None and tag(fill_node)=='solidFill' else None
             fill=self.color(solid,'none')
-            line = first(find(sp,'a:ln'),*(find(el,'p:spPr/a:ln') for el in chain),self.theme_style(shape,chain,'ln'))
+            line = self.line_style(shape,chain)
             stroke = 'none' if line is None or find(line,'a:noFill') is not None else self.color(find(line,'a:solidFill'))
+            stroke_gradient_node = find(line,'a:gradFill')
+            stroke_gradient = self.stroke_gradient(stroke_gradient_node,g,name)
+            if stroke_gradient_node is not None:
+                stroke = self.color(find(stroke_gradient_node,'a:gsLst/a:gs'))
             width = num(line,'w',12700)/EMU*g['_scaleY'] if line is not None else 0
             dash_node = find(line,'a:prstDash')
             dash_value = dash_node.get('val','solid') if dash_node is not None else 'solid'
@@ -443,6 +481,7 @@ class Converter:
             gradient = fill_node if fill_node is not None and tag(fill_node)=='gradFill' else None
             if fill_node is not None and tag(fill_node) in ('blipFill','pattFill'):
                 self.warn('Picture or pattern shape fill is not retained.',name)
+            first_shape_index = len(self.items)
             if preset in ('line', 'bentConnector3', 'curvedConnector3') or (typ == 'cxnSp' and preset in ('rect', 'straightConnector1')):
                 item = self.base(name,g,'line')
                 item.update(fill='none',stroke=stroke,strokeWidth=width,strokeDash=stroke_dash)
@@ -464,7 +503,7 @@ class Converter:
                 if any(value not in ('none','arrow') for value in (start,end)):
                     self.warn('Unsupported line arrowhead style is not retained.',name)
                 self.items.append(item)
-            elif fill != 'none' or stroke != 'none' or gradient is not None:
+            elif fill != 'none' or stroke != 'none' or gradient is not None or stroke_gradient is not None:
                 if preset in ('rect','ellipse','roundRect') and gradient is None and find(sp,'a:custGeom') is None:
                     item=self.base(name,g,preset); item.update(fill=fill,stroke=stroke,strokeWidth=width,strokeDash=stroke_dash)
                     if preset == 'roundRect':
@@ -472,20 +511,7 @@ class Converter:
                         match=re.fullmatch(r'val\s+(-?\d+)',adjustment)
                         item['cornerRadius']=max(0,min(.5,int(match.group(1))/100000)) if match else 1/6
                     self.items.append(item)
-                elif preset in ('rect','ellipse','roundRect') and find(sp,'a:custGeom') is None:
-                    w,h=g['width'],g['height']; defs=''
-                    if gradient is not None:
-                        stops=''.join(f'<stop offset="{num(st,"pos")/1000}%" stop-color="{self.color(st)}"/>' for st in sorted(children(gradient,'a:gsLst/a:gs'),key=lambda s:num(s,'pos')))
-                        angle=math.radians(num(find(gradient,'a:lin'),'ang')/60000)
-                        dx,dy=math.cos(angle),math.sin(angle);norm=max(abs(dx),abs(dy))
-                        defs=f'<defs><linearGradient id="g" x1="{.5-dx/norm/2}" y1="{.5-dy/norm/2}" x2="{.5+dx/norm/2}" y2="{.5+dy/norm/2}">{stops}</linearGradient></defs>'; fill='url(#g)'
-                        self.warn('Gradient shape is imported as an image.' if find(gradient,'a:lin') is not None else 'Nonlinear gradient is approximated as a linear gradient image.',name)
-                    else: self.warn('Curved shape is imported as an image.',name)
-                    geom=f'<ellipse cx="{w/2}" cy="{h/2}" rx="{max(0,w-width)/2}" ry="{max(0,h-width)/2}"' if preset=='ellipse' else f'<rect x="{width/2}" y="{width/2}" width="{max(0,w-width)}" height="{max(0,h-width)}" rx="{min(w,h)*.15 if preset=="roundRect" else 0}"'
-                    raw=f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">{defs}{geom} fill="{fill}" stroke="{stroke}" stroke-width="{width}"/></svg>'.encode()
-                    mid=self.add_media('converted/shape-'+str(len(self.items))+'.svg',raw,'image/svg+xml')
-                    item=self.base(name,g,'image');item['assetId']=mid;self.items.append(item)
-                elif gradient is None:
+                else:
                     from pptx_geometry import geometry_paths
                     geom=first(find(sp,'a:custGeom'),prst)
                     try:
@@ -497,11 +523,26 @@ class Converter:
                                     if g['_flipY']:command[j+1]=1-command[j+1]
                         item=self.base(name,g,'shape')
                         item.update(paths=paths,fill=fill,stroke=stroke,strokeWidth=width,strokeDash=stroke_dash)
+                        if gradient is not None:
+                            stops=[{'offset':max(0,min(1,num(st,'pos')/100000)),'color':self.color(st)} for st in sorted(children(gradient,'a:gsLst/a:gs'),key=lambda s:num(s,'pos'))]
+                            if not 2<=len(stops)<=16:raise ValueError('Unsupported gradient stops')
+                            angle=num(find(gradient,'a:lin'),'ang')/60000
+                            if g['_flipX']:angle=180-angle
+                            if g['_flipY']:angle=-angle
+                            item['fillGradient']={'angle':angle%360,'stops':stops}
+                            if find(gradient,'a:lin') is None:self.warn('Nonlinear gradient is approximated as a linear gradient.',name)
                         self.items.append(item)
                     except (ValueError,ZeroDivisionError):
-                        self.warn('Unsupported shape geometry was omitted; its text is retained.',name)
-                else:
-                    self.warn('Unsupported shape geometry was omitted; its text is retained.',name)
+                        self.warn('Unsupported shape geometry or gradient was omitted; its text is retained.',name)
+            if stroke_gradient is not None:
+                for imported in self.items[first_shape_index:]:
+                    paint = copy.deepcopy(stroke_gradient)
+                    if imported['type'] in ('line','arrow','doubleArrow') and 'connector' not in imported:
+                        # Geometry normalization/arrow direction already rotates this line.
+                        paint['angle'] = (paint['angle'] - imported['rotation'] + g['rotation']) % 360
+                        if g['_rawWidth'] and g['_rawHeight']:
+                            self.warn('Diagonal line border gradient projection is approximated.',name)
+                    imported['strokeGradient'] = paint
             if find(sp,'a:effectLst') is not None:
                 self.warn('Shadows and other shape effects are not retained.',name)
             self.text(shape,chain,g,name)

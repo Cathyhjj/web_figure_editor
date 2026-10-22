@@ -10,6 +10,7 @@ import { SHAPE_CATEGORIES, DRAWING_TOOLS, createCatalogShape, catalogIcon } from
 import { createDrawingShape } from '../shape-drawing.js';
 import { shapePath, arrowHeads } from '../shapes.js';
 import { PRESET_PATHS } from '../shape-presets.js';
+import { bindShapeEditor } from '../shape-editor.js';
 
 const entries=SHAPE_CATEGORIES.flatMap(group=>group.shapes);
 const insertable=entries.filter(entry=>entry.id!=='textBox'&&!DRAWING_TOOLS.includes(entry.id));
@@ -97,4 +98,12 @@ test('curve/freeform/scribble gestures generate portable paths with safe flat-ax
   }
   assert.equal(createDrawingShape('scribble',[{x:10,y:10}]),null);
   assert.equal(createDrawingShape('scribble',[{x:10,y:10},{x:30,y:10}]).height,1);
+});
+
+test('imported gradient transparency is independent of the inactive solid fill',()=>{
+  const shape={...item('heart'),fill:'none',fillGradient:{angle:0,stops:[{offset:0,color:'#ff0000'},{offset:1,color:'#ffffff'}]}};
+  const input={dataset:{transparency:'fillOpacity'},value:'100',disabled:false};
+  const box={querySelectorAll:selector=>selector.startsWith('[data-transparency')?[input]:[]};
+  bindShapeEditor(shape,box,{begin(){},preview(){},commit(){},change(fn){fn();}});
+  input.oninput();assert.equal(shape.fillOpacity,0);assert.equal(shape.fill,'none');
 });

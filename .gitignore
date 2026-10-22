@@ -150,3 +150,9 @@
 # Asset card selection integration checks.
 !/tests/asset-selection.html
 !/tests/asset-selection-browser.js
+
+# Editable shape gradients and regression checks.
+!/vector-shape-editor.js
+!/tests/gradient-stroke.html
+!/tests/gradient-stroke-browser.js
+!/tests/test_gradient_stroke.py

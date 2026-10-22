@@ -170,10 +170,11 @@ test('text and shapes remain separate editable objects with stacking, styling an
   assert.deepEqual(transform(line), { x: 0, y: 640 * EMU, width: 960 * EMU, height: 0 });
 });
 
-test('PPTX keeps custom vector paths, curves and shaded layers as native editable geometry', async () => {
+test('PPTX keeps custom vector paths, curves, shading and gradients as native editable geometry', async () => {
   const deck = createDeck();
   deck.slides[0].items = [item('curved-arrow', 'shape', {
     fill: '#f08020', stroke: '#12345680', strokeWidth: 2, opacity: .5, rotation: 45,
+    fillGradient: { angle: -90, stops: [{ offset: 0, color: '#ff000080' }, { offset: .35, color: '#00ff00' }, { offset: 1, color: '#0000ff00' }] },
     paths: [
       { fillMode: 'norm', stroke: false, commands: [['M', -.1, .2], ['C', .1, -.2, .8, .4, 1, .9], ['L', .5, 1], ['Z']] },
       { fillMode: 'darkenLess', stroke: false, commands: [['M', .5, 1], ['L', .7, .5], ['L', 1, .9], ['Z']] },
@@ -183,7 +184,7 @@ test('PPTX keeps custom vector paths, curves and shaded layers as native editabl
   const parts = await unzip(await exportPPTX(deck));
   const object = named(xml(parts, 'ppt/slides/slide1.xml'), 'curved-arrow');
   assert.match(object, /<a:custGeom>/);
-  assert.doesNotMatch(object, /<a:prstGeom|<p:pic|blip|gradFill/);
+  assert.doesNotMatch(object, /<a:prstGeom|<p:pic|blip/);
   assert.deepEqual(tags(object, 'a:path').map(path => [path.w, path.h, path.fill, path.stroke]), [
     ['1000000', '1000000', 'norm', '0'],
     ['1000000', '1000000', 'darkenLess', '0'],
@@ -192,10 +193,26 @@ test('PPTX keeps custom vector paths, curves and shaded layers as native editabl
   assert.match(object, /<a:moveTo><a:pt x="-100000" y="200000"\/><\/a:moveTo>/);
   assert.match(object, /<a:cubicBezTo><a:pt x="100000" y="-200000"\/><a:pt x="800000" y="400000"\/><a:pt x="1000000" y="900000"\/><\/a:cubicBezTo>/);
   assert.equal(tags(object, 'a:close').length, 2);
-  assert.match(object, /<\/a:custGeom><a:solidFill><a:srgbClr val="F08020"><a:alpha val="50000"\/>/);
+  assert.deepEqual(tags(object, 'a:gs').map(stop => stop.pos), ['0', '35000', '100000']);
+  assert.match(object, /<a:lin ang="16200000" scaled="1"\/>/);
+  assert.match(object, /<a:gs pos="0"><a:srgbClr val="FF0000"><a:alpha val="25098"\/>/);
+  assert.match(object, /<a:gs pos="35000"><a:srgbClr val="00FF00"><a:alpha val="50000"\/>/);
+  assert.match(object, /<a:gs pos="100000"><a:srgbClr val="0000FF"><a:alpha val="0"\/>/);
   assert.equal(tags(object, 'a:xfrm')[0].rot, String(45 * 60000));
   assert.deepEqual(transform(object), { x: 20 * EMU, y: 30 * EMU, width: 120 * EMU, height: 80 * EMU });
   assert.equal([...parts.keys()].filter(name => name.startsWith('ppt/media/')).length, 0);
+});
+
+test('PPTX custom shapes keep a solid editable fill without a gradient', async () => {
+  const deck = createDeck();
+  deck.slides[0].items = [item('triangle', 'shape', {
+    fill: '#123456', stroke: 'none', strokeWidth: 0,
+    paths: [{ fillMode: 'norm', stroke: false, commands: [['M', 0, 1], ['L', .5, 0], ['L', 1, 1], ['Z']] }],
+  })];
+  const parts = await unzip(await exportPPTX(deck));
+  const object = named(xml(parts, 'ppt/slides/slide1.xml'), 'triangle');
+  assert.match(object, /<\/a:custGeom><a:solidFill><a:srgbClr val="123456">/);
+  assert.doesNotMatch(object, /gradFill/);
 });
 
 test('PPTX preserves elbow and curved connector geometry, reflections and open arrowheads', async () => {
