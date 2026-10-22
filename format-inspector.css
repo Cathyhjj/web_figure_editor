@@ -1,0 +1,32 @@
+.format-tabs{display:flex;gap:4px;border-bottom:1px solid var(--drx-border);padding:0 0 10px;margin-bottom:8px}
+.format-tabs [role="tab"]{flex:1;min-width:0;white-space:normal;display:flex;flex-direction:column;align-items:center;gap:7px;padding:10px 4px 8px;border:0;border-bottom:3px solid transparent;border-radius:5px 5px 0 0;background:transparent;color:var(--drx-text-muted);font-size:10px;line-height:1.3}
+.format-tabs [role="tab"] svg{width:22px;height:22px}
+.format-tabs [role="tab"]:hover{background:var(--drx-surface-subtle)}
+.format-tabs [role="tab"][aria-selected="true"]{border-bottom-color:var(--drx-accent);background:var(--drx-accent-soft);color:var(--drx-accent)}
+.format-section{border-bottom:1px solid var(--drx-border)}
+.format-section>summary{cursor:pointer;list-style:none;display:flex;gap:9px;align-items:center;padding:15px 0;font-size:12px;font-weight:600}
+.format-section>summary::-webkit-details-marker{display:none}
+.format-section>summary::before{content:'›';font-size:18px;line-height:12px;font-weight:400;transform:rotate(0)}
+.format-section[open]>summary::before{transform:rotate(90deg)}
+.format-section-body{padding:0 0 8px 6px}
+.format-section-body .shape-style,.format-section-body .image-shadow{border:0;margin:0;padding:0}
+.format-section-body .shape-paint{padding-top:0}
+.format-section-body .shadow-heading span{font-weight:400;font-size:11px}
+.format-locked{margin:12px 0;padding:10px;background:var(--drx-surface-subtle);font-size:11px;line-height:1.6}
+.format-close{border:0;background:transparent;color:var(--drx-text-muted);padding:3px 8px;font-size:20px;line-height:24px;border-radius:4px}
+.format-close:hover{background:var(--drx-accent-soft);color:var(--drx-accent)}
+.format-panel-open .properties-panel{grid-template-rows:minmax(0,1fr)!important}
+.format-panel-open .properties-panel>.layers-panel,.format-panel-open .property-scroll>.canvas-properties,.format-panel-open .property-scroll>.precision-note{display:none}
+.format-panel-open .property-scroll{display:flex;flex-direction:column;overflow:hidden;min-height:0}
+.format-panel-open .object-properties:not(.is-floating){display:flex;flex-direction:column;flex:1;min-height:0;height:auto;overflow:hidden;align-self:stretch}
+.format-panel-open .object-properties>.window-header{flex-shrink:0}
+.format-panel-open .object-properties>.window-body{overflow:auto;min-height:0;flex:1}
+.format-panel-open .object-properties>.window-resize-height{display:none}
+@media(min-width:1051px){.editor-layout.windows-ready.format-panel-open{--properties-dock-width:320px}}
+@media(max-width:1050px){
+  .format-panel-open .properties-panel{position:fixed;right:10px;top:10px;bottom:10px;width:min(340px,calc(100vw - 20px));height:auto;display:flex;flex-direction:column;z-index:65;background:var(--drx-surface);border:1px solid var(--drx-border);border-radius:8px;box-shadow:0 12px 48px #24143530;overflow:hidden}
+  .format-panel-open .property-scroll{flex:1}
+}
+
+/* Closing a floating formatting pane must override its floating display rule. */
+.panel-window[hidden]{display:none!important}

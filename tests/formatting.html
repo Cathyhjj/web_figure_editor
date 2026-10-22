@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Formatting panel integration checks</title>
+<style>body{font:14px system-ui;margin:24px;color:#252735}button{padding:10px 20px}li{margin:6px 0}li[data-pass=false]{color:#b00020}li[data-pass=true]{color:#16734b}iframe{display:block;width:1400px;height:900px;border:1px solid #ccc}#summary{font-weight:700}</style>
+<h1>Formatting panel integration checks</h1>
+<p>Run on a dedicated localhost test port. These checks replace only this origin's draft and panel preferences with synthetic shapes and a generated PNG. They do not use the system clipboard or modify source files.</p>
+<button id="run">Run formatting checks</button>
+<p id="summary">Ready</p>
+<ol id="results"></ol>
+<div id="editor-host"></div>
+<script type="module" src="./formatting-browser.js"></script>
+</html>

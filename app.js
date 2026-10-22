@@ -33,6 +33,9 @@ import { initFontTools, fontValue } from './font-tools.js';
 import { CLIPBOARD_MIME, createSelection, encodeSelection, decodeSelection, pasteSelection, SLIDE_CLIPBOARD_MIME, SLIDES_CLIPBOARD_MIME, createSlidesClipboard, encodeSlides, decodeSlides, pasteSlides } from './clipboard.js';
 import { selectionToPNG } from './clipboard-image.js';
 
+import { formatTitle, formatSection, formatInspectorMarkup, bindFormatInspector } from './format-inspector.js';
+import { createObjectContextMenu } from './object-context-menu.js';
+
 const $ = id => document.getElementById(id);
 const ns = 'http://www.w3.org/2000/svg';
 let project = createDeck(), selected = new Set(), zoom = .75, undoStack = [], redoStack = [];
@@ -54,6 +57,8 @@ let clipboardWriteId = 0;
 let readingSlideClipboard = false;
 let libraryImports = 0;
 let activeHTMLChart = null;
+let panelWindows = null;
+const canFormat = item => item && (item.type === 'image' || item.type === 'shape' || isShapeItem(item));
 let shapeDrawing = null;
 let libraryImportNotice = { hidden: true, text: '', error: false };
 const recentProjects = createRecentProjects();
@@ -364,6 +369,7 @@ function editSVG(item) {
 
 function renderInspector(){
  const items=chosen(), box=$('inspector');
+ panelWindows?.setTitle('objects',items.length===1&&canFormat(items[0])?formatTitle(items[0]):'Object properties');
  if(items.length!==1){box.innerHTML=`<div class="section-heading">${items.length?'Multiple objects':'Object properties'}</div><p class="hint">${items.length?'Drag any selected object to move them together. Shift + click or Shift + drag on blank space to adjust the selection.':'Drag on blank canvas space to select objects, or click an image, text, or shape. Double-click text to edit its content.'}</p>`;return;}
  const i=items[0];
  box.innerHTML=`<div class="section-heading">${i.type==='html'?'HTML chart':i.type==='video'?'Video':i.type==='image'?'Image':i.type==='text'?'Text':'Shape'} properties${i.locked?' · Locked':''}</div>${field('Name','name',i.name,'text')}<div class="field-row">${field('X / px','x',round(i.x),'number','step="1"')}${field('Y / px','y',round(i.y),'number','step="1"')}</div><div class="field-row">${field('Width / px','width',round(i.width),'number',`min="${isLineShape(i)?0:1}" step="1"`)}${field('Height / px','height',round(i.height),'number',`min="${isLineShape(i)?0:1}" step="1"`)}</div>${field('Rotation / °','rotation',round(i.rotation))}${opacityEditorMarkup(i)}`;
@@ -375,6 +381,18 @@ function renderInspector(){
  box.innerHTML+=vectorShapeEditor(i);
  box.innerHTML+=shapeEditorMarkup(i);
  box.innerHTML+=`<label class="field inline"><input id="object-locked" type="checkbox" ${i.locked?'checked':''}> Lock object</label>`;
+ if(canFormat(i)){
+  const crop=box.querySelector('.image-crop-actions');
+  box.innerHTML=formatInspectorMarkup(i,{
+   geometry:formatSection('size','Size',`<div class="field-row">${field('Width / px','width',round(i.width),'number',`min="${isLineShape(i)?0:1}" step="1"`)}${field('Height / px','height',round(i.height),'number',`min="${isLineShape(i)?0:1}" step="1"`)}</div>${field('Rotation / °','rotation',round(i.rotation))}`)+formatSection('position','Position',`<div class="field-row">${field('Horizontal / px','x',round(i.x),'number','step="1"')}${field('Vertical / px','y',round(i.y),'number','step="1"')}</div>`),
+   opacity:opacityEditorMarkup(i),
+   appearance:formatSection('fill-line','Fill & Line',vectorShapeEditor(i)+shapeEditorMarkup(i)),
+   picture:crop?crop.outerHTML+crop.nextElementSibling.outerHTML+(box.querySelector('#edit-svg')?.outerHTML||''):'',
+   effects:i.type==='image'?shadowEditorMarkup(i):'',
+   properties:field('Name','name',i.name,'text')+`<label class="field inline"><input id="object-locked" type="checkbox" ${i.locked?'checked':''}> Lock object</label>`,
+  });
+  bindFormatInspector(box,{beforeSwitch:flushText});
+ }
  if(i.type==='image'){
   if($('edit-svg'))$('edit-svg').onclick=()=>editSVG(i);
   $('crop-image').onclick=()=>{flushText();cropEditor.show(i,assetById(i.assetId));};
@@ -431,6 +449,7 @@ function renderToolbar(){
  $('distribute-x').disabled=chosen().filter(i=>!i.locked).length<3;
 }
 function render(){
+ objectMenu.close();
  shapeDrawing?.cancel();
  if(gesture?.mode==='select'&&!marqueeCurrent())finishMarquee(true,false);
  selected=new Set([...selected].filter(id=>byId(id)));renderStage();renderSlides();renderAssets();renderLayers();renderInspector();renderToolbar();
@@ -571,9 +590,69 @@ function updateMarquee(e){
  selected=next;renderStage();
  if(selectionChanged){renderLayers();renderInspector();renderToolbar();syncAssetSelection();}
 }
+function focusTextEditor(){
+ panelWindows?.show('objects');
+ $('text-content')?.focus();$('text-content')?.select();
+}
+function openFormatPanel(){
+ const item=chosen()[0];if(selected.size!==1||!canFormat(item))return;
+ flushText();renderInspector();
+ document.querySelector('.editor-layout').classList.add('format-panel-open');
+ panelWindows?.show('objects',{dock:true});
+ document.querySelector('.property-scroll').scrollTop=0;
+ $('inspector').querySelector('[role="tab"][aria-selected="true"]')?.focus({preventScroll:true});fit();
+}
+const objectMenu=createObjectContextMenu({onAction(action){
+ if(action==='format'){openFormatPanel();return;}
+ if(action==='crop'){openFormatPanel();$('crop-image')?.click();return;}
+ const button={duplicate:'duplicate',delete:'delete-item',front:'bring-forward',back:'send-backward'}[action];
+ if(button)$(button).click();$('workspace').focus({preventScroll:true});
+}});
+function showObjectMenu(event,item){
+ if(!canFormat(item)||gesture)return;
+ const anchor=event.target.closest('[data-layer]')?$('layer-list'):$('workspace');
+ event.preventDefault();event.stopPropagation();flushText();closeHTMLChart();
+ selected=new Set([item.id]);lastTap=null;lastPointerItem=item.id;render();$('workspace').focus({preventScroll:true});
+ let x=event.clientX,y=event.clientY;
+ if(!x&&!y){const bounds=$('stage').querySelector(`[data-item="${CSS.escape(item.id)}"]`)?.getBoundingClientRect()||$('workspace').getBoundingClientRect();x=bounds.left+bounds.width/2;y=bounds.top+bounds.height/2;}
+ objectMenu.open({x,y,anchor,title:formatTitle(item),actions:[
+  {id:'duplicate',label:'Duplicate',disabled:item.locked},
+  {id:'front',label:'Bring Forward',disabled:item.locked},
+  {id:'back',label:'Send Backward',disabled:item.locked},
+  ...(item.type==='image'?[{id:'crop',label:'Crop…',disabled:item.locked,separator:true}]:[]),
+  {id:'format',label:formatTitle(item)+'…',separator:true},
+  {id:'delete',label:'Delete',disabled:item.locked,separator:true},
+ ]});
+}
+$('workspace').addEventListener('contextmenu',event=>{
+ if(event.target.closest('#html-chart-overlay'))return;
+ const id=event.target.closest('[data-item]')?.dataset.item;
+ showObjectMenu(event,id?byId(id):(!event.clientX&&!event.clientY&&selected.size===1?chosen()[0]:null));
+});
+$('layer-list').addEventListener('contextmenu',event=>showObjectMenu(event,byId(event.target.closest('[data-layer]')?.dataset.layer)));
+$('workspace').addEventListener('keydown',event=>{
+ if(event.key==='ContextMenu'||event.shiftKey&&event.key==='F10'){if(selected.size===1)showObjectMenu(event,chosen()[0]);}
+});
+$('close-format-panel').onpointerdown=event=>event.stopPropagation();
+$('close-format-panel').onclick=()=>{
+ flushText();document.querySelector('.editor-layout').classList.remove('format-panel-open');
+ panelWindows?.hide('objects');$('workspace').focus({preventScroll:true});fit();
+};
+for(const id of ['reset-layout','show-all-panels'])$(id).addEventListener('click',()=>{
+ document.querySelector('.editor-layout').classList.remove('format-panel-open');fit();
+});
+$('view-panel-options').addEventListener('change',event=>{
+ if(event.target.checked&&['layers','canvas'].includes(event.target.dataset.panel)){
+  document.querySelector('.editor-layout').classList.remove('format-panel-open');fit();
+ }
+});
+new MutationObserver(()=>{
+ const panel=document.querySelector('[data-window="objects"]');
+ if(panel.hidden||panel.classList.contains('is-floating'))document.querySelector('.editor-layout').classList.remove('format-panel-open');
+}).observe(document.querySelector('[data-window="objects"]'),{attributes:true,attributeFilter:['hidden','class']});
 $('workspace').onpointerdown=e=>{
  if(e.target.closest('#html-chart-overlay'))return;
- if(e.button!==0||gesture)return;$('workspace').focus({preventScroll:true});flushText();const id=e.target.closest('[data-item]')?.dataset.item;lastPointerItem=id;
+ if(e.button!==0||e.ctrlKey&&/Mac/.test(navigator.platform)||gesture)return;$('workspace').focus({preventScroll:true});flushText();const id=e.target.closest('[data-item]')?.dataset.item;lastPointerItem=id;
  if(!id){
   const start=point(e);lastTap=null;
   gesture={mode:'select',pointerId:e.pointerId,start,current:start,clientX:e.clientX,clientY:e.clientY,selection:new Set(selected),additive:e.shiftKey,moved:false,project,slideId:project.activeSlideId,revision:editRevision};
@@ -600,13 +679,13 @@ function endGesture(e){
   if(e.type==='pointerup')updateMarquee(e);
   if(gesture)finishMarquee(e.type!=='pointerup');return;
  }
- const edit=gesture.edit&&!gesture.moved;if(gesture.moved)record(gesture.before);releaseGesture();render();if(edit){$('text-content')?.focus();$('text-content')?.select();}
+ const edit=gesture.edit&&!gesture.moved;if(gesture.moved)record(gesture.before);releaseGesture();render();if(edit){focusTextEditor();}
 }
 $('workspace').onpointerup=endGesture;$('workspace').onpointercancel=endGesture;
 $('stage').onlostpointercapture=e=>{if(gesture?.mode==='select'&&e.pointerId===gesture.pointerId)finishMarquee(true);};
 window.addEventListener('blur',()=>{if(gesture?.mode==='select')finishMarquee(true);});
-$('stage').ondblclick=e=>{const i=byId(e.target.closest('[data-item]')?.dataset.item||lastPointerItem);if(i?.type==='html'){openHTMLChart(i);return;}if(i?.type==='image'&&editableSVGAsset(assetById(i.assetId))){editSVG(i);return;}if(i?.type==='text'&&!i.locked){selected=new Set([i.id]);render();$('text-content')?.focus();$('text-content')?.select();}};
-$('add-text').onclick=()=>{change(()=>{const i={...base('text',60,50,260,44),name:'Text',text:'Double-click to edit',fontFamily:'Arial',fontSize:28,fontWeight:400,fontStyle:'normal',color:'#20212b',align:'left'};slide().items.push(i);selected=new Set([i.id]);});$('text-content').focus();$('text-content').select();};
+$('stage').ondblclick=e=>{const i=byId(e.target.closest('[data-item]')?.dataset.item||lastPointerItem);if(i?.type==='html'){openHTMLChart(i);return;}if(i?.type==='image'&&editableSVGAsset(assetById(i.assetId))){editSVG(i);return;}if(i?.type==='text'&&!i.locked){selected=new Set([i.id]);render();focusTextEditor();}};
+$('add-text').onclick=()=>{change(()=>{const i={...base('text',60,50,260,44),name:'Text',text:'Double-click to edit',fontFamily:'Arial',fontSize:28,fontWeight:400,fontStyle:'normal',color:'#20212b',align:'left'};slide().items.push(i);selected=new Set([i.id]);});focusTextEditor();};
 function insertGalleryShape(shape){
  if(change(()=>{const i={...base(shape.type),...shape};slide().items.push(i);selected=new Set([i.id]);})){
   $('workspace').focus({preventScroll:true});status(`${shape.name} added.`);
@@ -1014,6 +1093,6 @@ $('demo-project').onclick=async()=>{
  try{const {makeDemo}=await import('./demo.js');const example=await makeDemo();if(revision!==editRevision&&dirty&&!confirm('Replace the current draft with the example?'))return;replaceProject(example);status('Example loaded. Use Save to choose its file location.');}catch(e){status(e.message,true);}
  finally{fileOperation=false;renderFileActions();}
 };
-render();initWindows({onLayoutChange:fit});requestAnimationFrame(fit);await Promise.all([loadDraft(),recentProjects.load()]);recentMenu.render();fileOperation=false;renderFileActions();scheduleAutosave();
+render();panelWindows=initWindows({onLayoutChange:fit});requestAnimationFrame(fit);await Promise.all([loadDraft(),recentProjects.load()]);recentMenu.render();fileOperation=false;renderFileActions();scheduleAutosave();
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){if(dirty)void saveDraft();if(!fileOperation&&!gesture)void saveProject(false,{automatic:true});}});
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});

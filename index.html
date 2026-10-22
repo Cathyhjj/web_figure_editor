@@ -7,6 +7,8 @@
   <meta name="description" content="Arrange images, add annotations, and export paper figures locally.">
   <title>Figure Editor · Paper Figure Workspace</title>
   <link rel="stylesheet" href="./style.css?v=view-panels-1">
+  <link rel="stylesheet" href="./format-inspector.css">
+  <link rel="stylesheet" href="./object-context-menu.css">
 </head>
 <body class="drx-ui" data-drx-theme="light">
   <svg class="icon-definitions" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -165,7 +167,7 @@
         <button id="apply-canvas" class="button apply-button">Apply canvas settings</button>
         <p class="hint canvas-note">Layout uses 96 px per inch. Choose the output resolution when exporting.</p>
       </section>
-      <section class="object-properties" aria-label="Object properties" data-window="objects" data-window-title="Object properties"><div class="section-heading" data-window-handle><h2>Object properties</h2></div><div id="inspector"><div class="inspector-empty"><svg><use href="#i-rect"/></svg><p>Select an object</p><span>Adjust its position, size, and style here.</span></div></div></section>
+      <section class="object-properties" aria-label="Object properties" data-window="objects" data-window-title="Object properties"><div class="section-heading" data-window-handle><h2>Object properties</h2><button id="close-format-panel" class="format-close" type="button" aria-label="Close formatting panel" title="Close formatting panel">×</button></div><div id="inspector"><div class="inspector-empty"><svg><use href="#i-rect"/></svg><p>Select an object</p><span>Adjust its position, size, and style here.</span></div></div></section>
       <div class="precision-note"><span>Fine adjustments</span><p><kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd> Move 1 px<br><kbd>Shift</kbd> + arrow keys: move 10 px</p></div>
       </div>
     </aside>

@@ -168,6 +168,21 @@ export function initWindows({ onLayoutChange } = {}) {
     panel.toggle.setAttribute('aria-pressed', String(panel.floating));
     panel.resize.hidden = !panel.floating;
   }
+  function syncTitle(panel) {
+    panel.element.dataset.windowTitle = panel.title;
+    if (panel.element.hasAttribute('aria-label')) panel.element.setAttribute('aria-label', panel.title);
+    const heading = panel.header.querySelector('h2');
+    if (heading) heading.textContent = panel.title;
+    panel.header.setAttribute('aria-label', `${panel.title} panel header`);
+    panel.resize.setAttribute('aria-label', `Resize ${panel.title} panel`);
+    if (panel.visibilityLabel) panel.visibilityLabel.nodeValue = panel.title;
+    for (const [axis, handle] of [['width', panel.widthResize], ['height', panel.heightResize]]) {
+      const label = axis === 'width' && widthKey(panel) === 'properties' ? 'Resize properties sidebar width' : `Resize ${panel.title} panel ${axis}`;
+      handle.setAttribute('aria-label', label);
+      handle.title = `${label}. Drag or use arrow keys; Shift + arrows adjusts 1 px.`;
+    }
+    chrome(panel);
+  }
   function setVisible(panel, visible) {
     if (panel.visible === visible) return;
     if (gesture?.panel === panel) finishGesture(true);
@@ -447,6 +462,40 @@ export function initWindows({ onLayoutChange } = {}) {
   dockColumns();
   activeController = {
     reset,
+    /** Reveal a panel without resetting the user's other panel preferences. */
+    show(key, { dock: docked = false, focus = false } = {}) {
+      const panel = panels.get(key);
+      if (destroyed || !panel) return false;
+      if (gesture?.panel === panel) finishGesture(true);
+      const wasVisible = panel.visible;
+      panel.visible = true;
+      if (docked) dock(panel);
+      chrome(panel);
+      if (panel.floating) { applyRect(panel, panel.rect); raise(panel); }
+      dockColumns();
+      persist();
+      notifyLayout();
+      if (focus) {
+        panel.header.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        panel.header.focus({ preventScroll: true });
+      }
+      if (!wasVisible) say(`${panel.title} panel shown.`);
+      return true;
+    },
+    hide(key) {
+      const panel = panels.get(key);
+      if (destroyed || !panel) return false;
+      setVisible(panel, false);
+      return true;
+    },
+    /** Keep visible and accessible panel names aligned with its current content. */
+    setTitle(key, title) {
+      const panel = panels.get(key);
+      if (destroyed || !panel || typeof title !== 'string' || !title.trim()) return false;
+      panel.title = title.trim();
+      syncTitle(panel);
+      return true;
+    },
     destroy() {
       finishGesture(true);
       for (const panel of panels.values()) { panel.visible = true; chrome(panel); dock(panel); }

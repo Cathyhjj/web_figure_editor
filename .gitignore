@@ -19,6 +19,10 @@
 !/shadow-editor.js
 !/shapes.js
 !/shape-editor.js
+!/format-inspector.js
+!/format-inspector.css
+!/object-context-menu.js
+!/object-context-menu.css
 !/crop.js
 !/crop-editor.js
 !/resize.js
@@ -39,6 +43,8 @@
 !/windows.js
 !/tests/
 /tests/*
+!/tests/formatting.html
+!/tests/formatting-browser.js
 !/tests/*.test.mjs
 !/tests/test_server.py
 !/tests/test_pdf_text.py
