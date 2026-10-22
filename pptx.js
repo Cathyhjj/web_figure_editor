@@ -48,6 +48,12 @@ function preflightSize(deck) {
         let paragraphs = 1;
         for (let i = 0; i < item.text.length; i++) if (item.text.charCodeAt(i) === 10) paragraphs++;
         xmlBytes += item.text.length * 6 + paragraphs * (2000 + item.fontFamily.length * 54);
+      } else if (item.type === 'shape') {
+        // Bound custom-path XML before constructing its coordinate strings.
+        for (const path of item.paths) {
+          xmlBytes += 160 + path.commands.length * 240;
+          checkBudget(xmlBytes + mediaBytes);
+        }
       } else if (isMediaItem(item)) {
         const asset = assets.get(item.assetId);
         xmlBytes += asset.name.length * 6;
@@ -112,14 +118,26 @@ function line(item, scale) {
 }
 function transform(item, layout) {
   const rotation = Math.round(((item.rotation % 360 + 360) % 360) * 60000) % 21600000;
-  return `<a:xfrm${rotation ? ` rot="${rotation}"` : ''}><a:off x="${emu(layout.x + item.x * layout.scale)}" y="${emu(layout.y + item.y * layout.scale)}"/><a:ext cx="${emu(item.width * layout.scale)}" cy="${emu(item.height * layout.scale)}"/></a:xfrm>`;
+  return `<a:xfrm${rotation ? ` rot="${rotation}"` : ''}${item.connectorFlipX ? ' flipH="1"' : ''}${item.connectorFlipY ? ' flipV="1"' : ''}><a:off x="${emu(layout.x + item.x * layout.scale)}" y="${emu(layout.y + item.y * layout.scale)}"/><a:ext cx="${emu(item.width * layout.scale)}" cy="${emu(item.height * layout.scale)}"/></a:xfrm>`;
 }
 function nonVisual(id, name, textBox = false) {
   return `<p:nvSpPr><p:cNvPr id="${id}" name="${escapeXML(name)}"/><p:cNvSpPr${textBox ? ' txBox="1"' : ''}/><p:nvPr/></p:nvSpPr>`;
 }
+function customGeometry(paths) {
+  const coordinate = value => Math.round(value * 1000000);
+  const point = (x, y) => `<a:pt x="${coordinate(x)}" y="${coordinate(y)}"/>`;
+  const commands = path => path.commands.map(([op, ...values]) => {
+    if (op === 'Z') return '<a:close/>';
+    if (op === 'C') return `<a:cubicBezTo>${point(values[0], values[1])}${point(values[2], values[3])}${point(values[4], values[5])}</a:cubicBezTo>`;
+    const tag = op === 'M' ? 'moveTo' : 'lnTo';
+    return `<a:${tag}>${point(values[0], values[1])}</a:${tag}>`;
+  }).join('');
+  return `<a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/><a:rect l="0" t="0" r="w" b="h"/><a:pathLst>${paths.map(path => `<a:path w="1000000" h="1000000" fill="${path.fillMode}" stroke="${path.stroke ? 1 : 0}" extrusionOk="0">${commands(path)}</a:path>`).join('')}</a:pathLst></a:custGeom>`;
+}
 function shape(item, id, layout) {
   const adjustments = item.type === 'roundRect' ? `<a:avLst><a:gd name="adj" fmla="val ${Math.round((item.cornerRadius ?? 1 / 6) * 100000)}"/></a:avLst>` : '<a:avLst/>';
-  const geometry = `<a:prstGeom prst="${isLineShape(item) ? 'line' : item.type}">${adjustments}</a:prstGeom>`;
+  const geometry = item.type === 'shape' ? customGeometry(item.paths)
+    : `<a:prstGeom prst="${item.connector === 'elbow' ? 'bentConnector3' : item.connector === 'curved' ? 'curvedConnector3' : isLineShape(item) ? 'line' : item.type}">${adjustments}</a:prstGeom>`;
   const fillOpacity = item.opacity * (item.fillOpacity ?? 1);
   const paint = isLineShape(item) ? '<a:noFill/>' : fill(item.fill, fillOpacity);
   return `<p:sp>${nonVisual(id, item.name)}<p:spPr>${transform(item, layout)}${geometry}${paint}${line(item, layout.scale)}</p:spPr></p:sp>`;

@@ -3,6 +3,7 @@ import { posterProject } from './video.js';
 import { validateProject, withRasterCanvas } from './core.js';
 import { imageCrop } from './crop.js';
 import { shadowBounds } from './shadow.js';
+import { shadeColor, shapeBounds as vectorShapeBounds } from './shape.js';
 import { isLineShape, shapePath, arrowHeads, shapeBounds, strokeDashArray } from './shapes.js';
 
 const encoder = new TextEncoder();
@@ -181,6 +182,25 @@ function transform(item) {
 }
 
 function shape(pdf, item) {
+  if (item.type === 'shape') {
+    const stroke = color(item.stroke), commands = [];
+    stroke.alpha *= item.strokeOpacity ?? 1;
+    const dash = `[${strokeDashArray(item).map(n).join(' ')}] 0 d`;
+    for (const path of item.paths) {
+      const fill = color(path.fillMode === 'none' ? 'none' : shadeColor(item.fill, path.fillMode));
+      fill.alpha *= item.fillOpacity ?? 1;
+      const filled = fill.alpha > 0, stroked = path.stroke && stroke.alpha > 0 && item.strokeWidth > 0;
+      if (!filled && !stroked) continue;
+      const geometry = path.commands.map(([op, ...values]) => {
+        if (op === 'Z') return 'h';
+        return `${values.map((value, index) => n(value * (index % 2 ? item.height : item.width))).join(' ')} ${{ M: 'm', L: 'l', C: 'c' }[op]}`;
+      }).join('\n');
+      commands.push(`q ${pdf.alpha(fill.alpha, stroke.alpha)}\n${fill.rgb} rg\n${stroke.rgb} RG\n${n(item.strokeWidth)} w\n0 J 0 j 4 M\n${dash}\n${geometry}\n${filled ? (stroked ? 'B' : 'f') : 'S'} Q`);
+    }
+    if (!commands.length) return null;
+    const bounds = vectorShapeBounds(item);
+    return { bounds: [bounds.x, bounds.y, bounds.x + bounds.width, bounds.y + bounds.height], content: commands.join('\n') + '\n' };
+  }
   const fill = color(isLineShape(item) ? 'none' : item.fill), stroke = color(item.stroke);
   fill.alpha *= item.fillOpacity ?? 1;
   stroke.alpha *= item.strokeOpacity ?? 1;

@@ -14,7 +14,7 @@ export function opacityEditorMarkup(item) {
 }
 
 export function shapeEditorMarkup(item) {
-  if (!isShapeItem(item)) return '';
+  if (!isShapeItem(item) && item.type !== 'shape') return '';
   const paint = (key, label) => {
     const none = transparent(item[key]);
     const { hex, alpha } = shapeColor(none ? (paints.get(item)?.[key] ?? (key === 'fill' ? '#ffffff' : '#252735')) : item[key]);
@@ -27,7 +27,7 @@ export function shapeEditorMarkup(item) {
     </fieldset>`;
   };
   return `<section class="shape-style" aria-label="Shape appearance">
-    ${isLineShape(item) ? '' : paint('fill', 'Fill')}
+    ${isLineShape(item) || item.type === 'shape' && item.paths.every(path => path.fillMode === 'none') ? '' : paint('fill', 'Fill')}
     ${paint('stroke', 'Border')}
     <div class="field-row"><label class="field"><span>Line width / px</span><input type="number" data-property="strokeWidth" value="${item.strokeWidth}" min="0" max="1000" step="0.5"></label>
     <label class="field"><span>Line style</span><select data-property="strokeDash" aria-label="Line style">

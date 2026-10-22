@@ -170,6 +170,50 @@ test('text and shapes remain separate editable objects with stacking, styling an
   assert.deepEqual(transform(line), { x: 0, y: 640 * EMU, width: 960 * EMU, height: 0 });
 });
 
+test('PPTX keeps custom vector paths, curves and shaded layers as native editable geometry', async () => {
+  const deck = createDeck();
+  deck.slides[0].items = [item('curved-arrow', 'shape', {
+    fill: '#f08020', stroke: '#12345680', strokeWidth: 2, opacity: .5, rotation: 45,
+    paths: [
+      { fillMode: 'norm', stroke: false, commands: [['M', -.1, .2], ['C', .1, -.2, .8, .4, 1, .9], ['L', .5, 1], ['Z']] },
+      { fillMode: 'darkenLess', stroke: false, commands: [['M', .5, 1], ['L', .7, .5], ['L', 1, .9], ['Z']] },
+      { fillMode: 'none', stroke: true, commands: [['M', -.1, .2], ['C', .1, -.2, .8, .4, 1, .9]] },
+    ],
+  })];
+  const parts = await unzip(await exportPPTX(deck));
+  const object = named(xml(parts, 'ppt/slides/slide1.xml'), 'curved-arrow');
+  assert.match(object, /<a:custGeom>/);
+  assert.doesNotMatch(object, /<a:prstGeom|<p:pic|blip|gradFill/);
+  assert.deepEqual(tags(object, 'a:path').map(path => [path.w, path.h, path.fill, path.stroke]), [
+    ['1000000', '1000000', 'norm', '0'],
+    ['1000000', '1000000', 'darkenLess', '0'],
+    ['1000000', '1000000', 'none', '1'],
+  ]);
+  assert.match(object, /<a:moveTo><a:pt x="-100000" y="200000"\/><\/a:moveTo>/);
+  assert.match(object, /<a:cubicBezTo><a:pt x="100000" y="-200000"\/><a:pt x="800000" y="400000"\/><a:pt x="1000000" y="900000"\/><\/a:cubicBezTo>/);
+  assert.equal(tags(object, 'a:close').length, 2);
+  assert.match(object, /<\/a:custGeom><a:solidFill><a:srgbClr val="F08020"><a:alpha val="50000"\/>/);
+  assert.equal(tags(object, 'a:xfrm')[0].rot, String(45 * 60000));
+  assert.deepEqual(transform(object), { x: 20 * EMU, y: 30 * EMU, width: 120 * EMU, height: 80 * EMU });
+  assert.equal([...parts.keys()].filter(name => name.startsWith('ppt/media/')).length, 0);
+});
+
+test('PPTX preserves elbow and curved connector geometry, reflections and open arrowheads', async () => {
+  const deck = createDeck();
+  deck.slides[0].items = ['elbow', 'curved'].map((connector, index) => item(connector, 'doubleArrow', {
+    connector, connectorFlipX: index === 0, connectorFlipY: index === 1,
+    fill: 'none', stroke: '#123456', strokeWidth: 2,
+  }));
+  const parts = await unzip(await exportPPTX(deck));
+  for (const [connector, preset, flip] of [['elbow', 'bentConnector3', 'flipH'], ['curved', 'curvedConnector3', 'flipV']]) {
+    const object = named(xml(parts, 'ppt/slides/slide1.xml'), connector);
+    assert.equal(tags(object, 'a:prstGeom')[0].prst, preset);
+    assert.equal(tags(object, 'a:xfrm')[0][flip], '1');
+    assert.equal(tags(object, 'a:headEnd')[0].type, 'arrow');
+    assert.equal(tags(object, 'a:tailEnd')[0].type, 'arrow');
+  }
+});
+
 test('pictures preserve original embedded PNG/JPEG bytes and reuse assets across slides', async () => {
   const parts = await unzip(await exportPPTX(fixture()));
   const media = [...parts.keys()].filter(path => path.startsWith('ppt/media/'));

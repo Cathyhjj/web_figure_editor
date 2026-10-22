@@ -1,0 +1,26 @@
+DrawingML preset shape definitions
+=================================
+
+resources/presetShapeDefinitions.xml is the shape definition resource
+distributed by Apache POI 5.4.1 (release tag REL_5_4_1), with mixed CRLF/LF
+line endings normalized to LF. XML content is unchanged.
+
+Source:
+https://github.com/apache/poi/blob/REL_5_4_1/poi/src/main/resources/org/apache/poi/sl/draw/geom/presetShapeDefinitions.xml
+
+Copyright 2003-2025 The Apache Software Foundation.
+Licensed under the Apache License, Version 2.0.
+The upstream license and full-project notice are included in
+LICENSE-Apache-POI.txt and NOTICE-Apache-POI.txt.
+
+SHA-256 of the upstream resource:
+a7dad593d27bd70536b41da9b761fa16409536cc0c25ef2b6c7a61c5d9b3e738
+
+SHA-256 of the line-ending-normalized resource:
+4a762444d8d85876881c02a5b1dedf6f73006fcd8acb7b4e393435615b37c780
+
+Figure Editor evaluates numeric guides and paths from this fixed resource.
+It does not execute XML, load remote resources, or evaluate source code.
+The preset resource's circularArrow, leftCircularArrow and
+leftRightCircularArrow definitions contain formulas with surplus operands.
+Those definitions are rejected rather than silently repaired.

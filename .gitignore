@@ -126,3 +126,18 @@
 **/*.pdf
 **/*.zip
 **/~$*
+
+# PowerPoint shape gallery and editable vector paths.
+!/shape-catalog.js
+!/shape-presets.js
+!/shape-drawing.js
+!/shape.js
+!/pptx_geometry.py
+!/scripts/build_shape_catalog.py
+!/tests/test_pptx_geometry.py
+!/resources/
+/resources/*
+!/resources/presetShapeDefinitions.xml
+!/resources/LICENSE-Apache-POI.txt
+!/resources/NOTICE-Apache-POI.txt
+!/resources/NOTICE-preset-shapes.txt

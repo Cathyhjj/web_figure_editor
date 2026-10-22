@@ -15,20 +15,25 @@ export function arrowHeads(item) {
   if (!['arrow', 'doubleArrow'].includes(item.type)) return [];
   const length = Math.hypot(item.width, item.height);
   if (!length || !item.strokeWidth) return [];
-  const ux = item.width / length, uy = item.height / length;
+  const ux = item.connector && item.width ? 1 : item.width / length, uy = item.connector && item.width ? 0 : item.height / length;
   const size = Math.min(3 * item.strokeWidth, length / (item.type === 'doubleArrow' ? 3 : 2));
   const head = (x, y, direction) => [
     [x - direction * size * ux - size / 2 * uy, y - direction * size * uy + size / 2 * ux],
     [x, y],
     [x - direction * size * ux + size / 2 * uy, y - direction * size * uy - size / 2 * ux],
   ];
-  return [...(item.type === 'doubleArrow' ? [head(0, 0, -1)] : []), head(item.width, item.height, 1)];
+  return [...(item.type === 'doubleArrow' ? [head(0, 0, -1)] : []), head(item.width, item.height, 1)]
+    .map(points => points.map(([x,y]) => [item.connectorFlipX ? item.width-x : x, item.connectorFlipY ? item.height-y : y]));
 }
 
 /** M/L/C/Z commands shared with PDF and native PowerPoint custom arrow paths. */
 export function shapePath(item) {
   const w = item.width, h = item.height, k = 0.5522847498307936;
-  if (isLineShape(item)) return [['M', 0, 0], ['L', w, h]];
+  if (isLineShape(item)) {
+    const commands = item.connector === 'elbow' ? [['M',0,0],['L',w/2,0],['L',w/2,h],['L',w,h]]
+      : item.connector === 'curved' ? [['M',0,0],['C',w/4,0,w/2,h/4,w/2,h/2],['C',w/2,3*h/4,3*w/4,h,w,h]] : [['M', 0, 0], ['L', w, h]];
+    return commands.map(([op,...values]) => [op,...values.map((v,i) => i%2 ? (item.connectorFlipY ? h-v : v) : (item.connectorFlipX ? w-v : v))]);
+  }
   if (item.type === 'ellipse') {
     const x = w / 2, y = h / 2;
     return [['M', w, y], ['C', w, y + k * y, x + k * x, h, x, h],
@@ -58,6 +63,8 @@ export function shapeSVG(item) {
     geometry = `<rect width="${n(item.width)}" height="${n(item.height)}"${r ? ` rx="${n(r)}"` : ''}`;
   } else if (item.type === 'ellipse') {
     geometry = `<ellipse cx="${n(item.width / 2)}" cy="${n(item.height / 2)}" rx="${n(item.width / 2)}" ry="${n(item.height / 2)}"`;
+  } else if (item.connector) {
+    geometry = `<path d="${pathData(shapePath(item))}"`;
   } else {
     geometry = `<line x1="0" y1="0" x2="${n(item.width)}" y2="${n(item.height)}"`;
   }

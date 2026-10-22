@@ -10,7 +10,7 @@ export function resizeItem(item, handle, dx, dy, { free = false } = {}) {
   const clamp = value => Math.max(isLineShape(item) ? 0 : 4, Math.min(20000, value));
   let width = horizontal ? clamp(item.width + horizontal * localX) : item.width;
   let height = vertical ? clamp(item.height + vertical * localY) : item.height;
-  if (handle === 'se' && ((isMediaItem(item) && !free) || (isShapeItem(item) && !isLineShape(item) && free))) {
+  if (handle === 'se' && ((isMediaItem(item) && !free) || ((isShapeItem(item)||item.type==='shape') && !isLineShape(item) && free))) {
     const minScale = Math.max(4 / item.width, 4 / item.height);
     const maxScale = Math.min(20000 / item.width, 20000 / item.height);
     // Very narrow crops may not fit both limits; preserve the ratio and upper bound.

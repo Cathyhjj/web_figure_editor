@@ -3,6 +3,7 @@ import { isMP4, isMediaItem, posterSource } from './video.js';
 import { HTML_MIME, looksLikeHTML, requireHTMLSnapshots, validateSnapshot } from './html-chart.js';
 import { validateCrop, imageCrop } from './crop.js';
 import { validateShadow, imageShadowSVG } from './shadow.js';
+import { validateShape, shapeSVG as vectorShapeSVG } from './shape.js';
 import { SHAPE_TYPES, isLineShape, shapeSVG } from './shapes.js';
 const LIMITS = Object.freeze({ assets: 500, items: 2000, assetBytes: 40 * 1024 * 1024, totalBytes: 160 * 1024 * 1024 });
 const RASTER_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp']);
@@ -151,12 +152,13 @@ function validateProjectInternal(input, assetCache) {
   }
   if (assetCache && !cachedAssets) assetCache.set(p.assets, project.assets);
   const itemIDs = new Set();
+  let shapeCommands = 0;
   for (const raw of p.items) {
     const item = object(raw, 'item');
     const itemID = id(item.id, 'item.id');
     if (itemIDs.has(itemID)) fail(`duplicate item ID ${itemID}.`);
     itemIDs.add(itemID);
-    const type = choice(item.type, 'item.type', ['image', 'video', 'html', 'text', ...SHAPE_TYPES]);
+    const type = choice(item.type, 'item.type', ['image', 'video', 'html', 'text', 'shape', ...SHAPE_TYPES]);
     const canonical = {
       id: itemID, type, name: string(item.name, 'item.name', 1000, type === 'text' ? 'Text' : type === 'image' ? 'Image' : type === 'video' ? 'Video' : 'Shape'),
       x: number(item.x, 'item.x', -100000, 100000), y: number(item.y, 'item.y', -100000, 100000),
@@ -188,6 +190,16 @@ function validateProjectInternal(input, assetCache) {
       canonical.fillOpacity = number(item.fillOpacity, 'item.fillOpacity', 0, 1, 1);
       canonical.strokeOpacity = number(item.strokeOpacity, 'item.strokeOpacity', 0, 1, 1);
       canonical.strokeDash = choice(item.strokeDash, 'item.strokeDash', ['solid', 'dash', 'dot'], 'solid');
+      if (isLineShape(item) && item.connector !== undefined) {
+        canonical.connector = choice(item.connector, 'item.connector', ['elbow', 'curved']);
+        canonical.connectorFlipX = boolean(item.connectorFlipX, 'item.connectorFlipX');
+        canonical.connectorFlipY = boolean(item.connectorFlipY, 'item.connectorFlipY');
+      }
+      if (type === 'shape') {
+        Object.assign(canonical, validateShape(item));
+        shapeCommands += canonical.paths.reduce((sum,p)=>sum+p.commands.length,0);
+        if (shapeCommands > 50000) fail('shape geometry exceeds 50,000 commands.');
+      }
       if (type === 'roundRect') canonical.cornerRadius = number(item.cornerRadius, 'item.cornerRadius', 0, 0.5, 1 / 6);
     }
     project.items.push(canonical);
@@ -267,6 +279,8 @@ function svgFromCanonical(project) {
       lines.push(`<text xml:space="preserve" font-family="${xml(item.fontFamily + ', Arial, sans-serif')}" font-size="${n(item.fontSize)}" font-weight="${xml(item.fontWeight)}" font-style="${xml(item.fontStyle)}" fill="${xml(item.color)}" text-anchor="${anchor}">`);
       item.text.split('\n').forEach((line, index) => lines.push(`<tspan x="${n(textX)}" y="${n(item.fontSize * (1 + index * 1.2))}">${xml(line)}</tspan>`));
       lines.push('</text>');
+    } else if (item.type === 'shape') {
+      lines.push(vectorShapeSVG(item));
     } else {
       lines.push(shapeSVG(item));
     }

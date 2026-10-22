@@ -1,4 +1,5 @@
 import { isMediaItem } from './video.js';
+import { cloneShape } from './shape.js';
 /** Multi-slide projects. The asset registry is shared; each slide owns its canvas and items. */
 import { createProject, uid, validateProject, validateProjectBatch, sourceManifest } from './core.js';
 
@@ -68,7 +69,7 @@ export function validateDeck(input) {
 
 /** Cheap independent undo snapshot of an already validated deck; binary data are immutable strings. */
 export function cloneDeck(deck) {
-  return { ...deck, assets: deck.assets.map(asset => ({ ...asset })), slides: deck.slides.map(slide => ({ ...slide, canvas: { ...slide.canvas }, items: slide.items.map(item => ({ ...item, ...(item.crop ? { crop: { ...item.crop } } : {}), ...(item.shadow ? { shadow: { ...item.shadow } } : {}) })) })) };
+  return { ...deck, assets: deck.assets.map(asset => ({ ...asset })), slides: deck.slides.map(slide => ({ ...slide, canvas: { ...slide.canvas }, items: slide.items.map(item => ({ ...item, ...cloneShape(item), ...(item.crop ? { crop: { ...item.crop } } : {}), ...(item.shadow ? { shadow: { ...item.shadow } } : {}) })) })) };
 }
 
 export function currentSlide(deck) {
@@ -105,7 +106,7 @@ export function addSlide(deck) {
 export function duplicateSlide(deck) {
   const active = currentSlide(deck);
   ensureRoom(deck, active.items.length);
-  const slide = { id: uid(), name: `${active.name.slice(0, 295)} copy`, canvas: { ...active.canvas }, items: active.items.map(item => ({ ...item, ...(item.crop ? { crop: { ...item.crop } } : {}), ...(item.shadow ? { shadow: { ...item.shadow } } : {}), id: uid() })) };
+  const slide = { id: uid(), name: `${active.name.slice(0, 295)} copy`, canvas: { ...active.canvas }, items: active.items.map(item => ({ ...item, ...cloneShape(item), ...(item.crop ? { crop: { ...item.crop } } : {}), ...(item.shadow ? { shadow: { ...item.shadow } } : {}), id: uid() })) };
   deck.slides.splice(deck.slides.indexOf(active) + 1, 0, slide);
   deck.activeSlideId = slide.id;
   return slide;

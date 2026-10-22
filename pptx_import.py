@@ -202,7 +202,7 @@ class Converter:
         return {'x': cx-w*sx/2, 'y': cy-h*sy/2, 'width': max(.01, w*sx), 'height': max(.01, h*sy),
                 'rotation': math.degrees(math.atan2(m[1], m[0])),
                 '_flipX': flag(xfrm, 'flipH'), '_flipY': flag(xfrm, 'flipV') != mirrored,
-                '_scaleX': sx, '_scaleY': sy}
+                '_scaleX': sx, '_scaleY': sy, '_rawWidth': max(0,w*sx), '_rawHeight': max(0,h*sy)}
 
     def base(self, name, g, kind):
         return {'id': 'ppt-' + str(len(self.items)+1), 'type': kind, 'name': name[:1000],
@@ -443,12 +443,18 @@ class Converter:
             gradient = fill_node if fill_node is not None and tag(fill_node)=='gradFill' else None
             if fill_node is not None and tag(fill_node) in ('blipFill','pattFill'):
                 self.warn('Picture or pattern shape fill is not retained.',name)
-            if typ == 'cxnSp' or preset == 'line':
+            if preset in ('line', 'bentConnector3', 'curvedConnector3') or (typ == 'cxnSp' and preset in ('rect', 'straightConnector1')):
                 item = self.base(name,g,'line')
                 item.update(fill='none',stroke=stroke,strokeWidth=width,strokeDash=stroke_dash)
                 # Convert flipped endpoints to a positive-length rotated line.
-                w,h=g['width'],g['height']; dx=(-w if g['_flipX'] else w); dy=(-h if g['_flipY'] else h)
-                item.update(width=math.hypot(dx,dy),height=0,rotation=g['rotation']+math.degrees(math.atan2(dy,dx)),x=g['x']+w/2-math.hypot(dx,dy)/2,y=g['y']+h/2)
+                w,h=g['_rawWidth'],g['_rawHeight']; dx=(-w if g['_flipX'] else w); dy=(-h if g['_flipY'] else h)
+                if preset in ('bentConnector3', 'curvedConnector3'):
+                    item.update(width=w,height=h,connector='elbow' if preset == 'bentConnector3' else 'curved',
+                                connectorFlipX=g['_flipX'], connectorFlipY=g['_flipY'])
+                    if children(prst, 'a:avLst/a:gd'):
+                        self.warn('Connector bend adjustments use the default midpoint.', name)
+                else:
+                    item.update(width=math.hypot(dx,dy),height=0,rotation=g['rotation']+math.degrees(math.atan2(dy,dx)),x=g['x']+w/2-math.hypot(dx,dy)/2,y=g['y']+h/2)
                 head,tail=find(line,'a:headEnd'),find(line,'a:tailEnd')
                 start=head.get('type','none') if head is not None else 'none'
                 end=tail.get('type','none') if tail is not None else 'none'
@@ -479,6 +485,21 @@ class Converter:
                     raw=f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">{defs}{geom} fill="{fill}" stroke="{stroke}" stroke-width="{width}"/></svg>'.encode()
                     mid=self.add_media('converted/shape-'+str(len(self.items))+'.svg',raw,'image/svg+xml')
                     item=self.base(name,g,'image');item['assetId']=mid;self.items.append(item)
+                elif gradient is None:
+                    from pptx_geometry import geometry_paths
+                    geom=first(find(sp,'a:custGeom'),prst)
+                    try:
+                        paths=geometry_paths(geom,g['width']/g['_scaleX'],g['height']/g['_scaleY'])
+                        for layer in paths:
+                            for command in layer['commands']:
+                                for j in range(1,len(command),2):
+                                    if g['_flipX']:command[j]=1-command[j]
+                                    if g['_flipY']:command[j+1]=1-command[j+1]
+                        item=self.base(name,g,'shape')
+                        item.update(paths=paths,fill=fill,stroke=stroke,strokeWidth=width,strokeDash=stroke_dash)
+                        self.items.append(item)
+                    except (ValueError,ZeroDivisionError):
+                        self.warn('Unsupported shape geometry was omitted; its text is retained.',name)
                 else:
                     self.warn('Unsupported shape geometry was omitted; its text is retained.',name)
             if find(sp,'a:effectLst') is not None:

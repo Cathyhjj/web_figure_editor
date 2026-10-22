@@ -3,7 +3,8 @@ import { isMediaItem } from './video.js';
 import { exportPNG, validateProject } from './core.js';
 import { shadowBounds } from './shadow.js';
 import { isCropped } from './crop.js';
-import { isShapeItem, shapeBounds } from './shapes.js';
+import { shapeBounds as vectorShapeBounds } from './shape.js';
+import { isShapeItem, shapeBounds as presetShapeBounds } from './shapes.js';
 
 const MAX_SIDE = 16000;
 const MAX_PIXELS = 32_000_000;
@@ -12,7 +13,8 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 function localBounds(item, measured) {
   if (measured?.has(item.id)) return measured.get(item.id);
   if (isMediaItem(item)) return shadowBounds(item);
-  if (isShapeItem(item)) return shapeBounds(item);
+  if (item.type === 'shape') return vectorShapeBounds(item);
+  if (isShapeItem(item)) return presetShapeBounds(item);
   return { x: 0, y: 0, width: item.width, height: item.height };
 }
 

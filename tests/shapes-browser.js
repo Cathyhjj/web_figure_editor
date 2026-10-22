@@ -1,6 +1,7 @@
 import { createDeck, validateDeck } from '../deck.js';
 import { exportPNG, projectToSVG } from '../core.js';
 import { selectionToPNG } from '../clipboard-image.js';
+import { SHAPE_CATEGORIES, DRAWING_TOOLS, createCatalogShape } from '../shape-catalog.js';
 
 const checks = [];
 function check(name, passed) {
@@ -45,7 +46,8 @@ document.querySelector('#run').onclick = async () => {
     };
     const selected = () => get('stage').querySelector('.figure-item.selected');
     const selectLatest = () => get('layer-list').querySelector('.layer-select').click();
-    for (const [index, button] of [...doc.querySelectorAll('[data-add-shape]')].entries()) {
+    const legacy=['rect','roundRect','circle','ellipse','line','arrow','doubleArrow'].map(key=>doc.querySelector(`[data-shape-choice="${key}"]`));
+    for (const [index, button] of legacy.entries()) {
       get('shapes-toggle').click(); button.click();
       check(`Insert ${button.textContent.trim()} and select it`, get('stage').querySelectorAll('.figure-item').length === index + 1 && Boolean(selected()));
       set('[data-property=x]', 40 + (index % 4) * 210);
@@ -87,13 +89,42 @@ document.querySelector('#run').onclick = async () => {
     const copied = await pixels(await selectionToPNG(arrow, { dpi:96 }));
     check('Copied arrow includes head height rather than clipping to the shaft', copied.height > 12 && copied.width > copied.height);
     check('SVG retains editable vector geometry', !projectToSVG(rasterProject).includes('<image'));
+    const extra=SHAPE_CATEGORIES.flatMap(group=>group.shapes).filter(entry=>!DRAWING_TOOLS.includes(entry.id)&&entry.id!=='textBox'&&!legacy.some(button=>button.dataset.shapeChoice===entry.id));
+    for(const entry of extra){
+      get('shapes-toggle').click();doc.querySelector(`[data-shape-choice="${entry.id}"]`).click();
+      check(`Insert ${entry.name} as editable geometry`,Boolean(selected()?.querySelector('path')));
+    }
+    get('shapes-toggle').click();doc.querySelector('[data-shape-choice="heart"]').click();
+    set('[data-shape-color=fill]','#ee7755');set('[data-transparency=fillOpacity][type=number]','80');
+    set('[data-transparency=strokeOpacity][type=number]','25');set('[data-property=strokeDash]','dash');
+    check('New preset has independent paint alpha and dashed outline',Boolean(selected().querySelector('path[fill-opacity="0.2"][stroke-opacity="0.75"][stroke-dasharray="8 6"]')));
+    set('[data-shape-paint=stroke]','none');
+    check('New preset supports No border',Boolean(selected().querySelector('path[stroke="none"]')));
+    get('undo').click();selectLatest();
+    check('Undo restores new preset outline',Boolean(selected().querySelector('path[stroke="#252735"]')));
+    get('duplicate').click();get('object-locked').click();
+    check('New preset duplicate locks all paint controls', [...get('inspector').querySelectorAll('[data-transparency],[data-shape-color],[data-shape-paint],[data-property],[data-shape]')].every(node=>node.disabled));
+    get('object-locked').click();
+    for(const key of ['donut','frame','noSmoking']){
+      const shape={id:key,x:10,y:10,...createCatalogShape(key),width:80,height:80,fill:'#ff0000',stroke:'none'};
+      const image=await pixels(await exportPNG({...rasterProject,items:[shape]},96));
+      const hole=key==='noSmoking'?image.at(65,35):image.at(50,50);
+      check(`${key} retains transparent holes in rendered PNG`,hole[3]===0);
+    }
+    get('shapes-toggle').click();const search=doc.querySelector('.shape-search');search.value='triangle';search.dispatchEvent(new win.Event('input'));
+    check('Gallery search finds both triangles',doc.querySelectorAll('.shape-category:not([hidden]) button:not([hidden])').length===2);
+    check('Matching search hides the empty-results message',get('shapes-menu').querySelector('p.hint').hidden);
+    search.value='no such shape';search.dispatchEvent(new win.Event('input'));
+    check('Empty search results show a helpful message',!get('shapes-menu').querySelector('p.hint').hidden&&doc.querySelectorAll('.shape-category:not([hidden])').length===0);
+    get('shapes-menu').hidePopover();
+    const expectedCount=get('stage').querySelectorAll('.figure-item').length;
     // Wait for the actual persisted draft, then reopen the editor through a fresh document.
     await new Promise(resolve => setTimeout(resolve, 900));
     const reloaded = new Promise(resolve => iframe.onload = resolve);
     iframe.src = '../index.html?shapes-reopen=1'; await reloaded;
     const deadline = performance.now() + 5000;
     while (!iframe.contentDocument.querySelector('#stage .figure-item') && performance.now() < deadline) await new Promise(resolve => setTimeout(resolve, 30));
-    check('Reload restores all nine synthetic shapes with saved paint styles', iframe.contentDocument.querySelectorAll('#stage .figure-item').length === 9 && iframe.contentDocument.querySelector('#stage rect[fill-opacity="0.2"][stroke-opacity="0.75"]'));
+    check('Reload restores all synthetic shapes with saved paint styles', iframe.contentDocument.querySelectorAll('#stage .figure-item').length === expectedCount && iframe.contentDocument.querySelector('#stage path[fill-opacity="0.2"][stroke-opacity="0.75"]'));
   } catch (error) {
     check(error.stack || error.message, false);
   }
