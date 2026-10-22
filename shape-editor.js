@@ -1,4 +1,6 @@
 import { isShapeItem, isLineShape, shapeColor } from './shapes.js';
+import { formatSection } from './format-inspector.js';
+import { defaultGradient, gradientEditorMarkup, bindGradientEditors } from './gradient-editor.js';
 
 const paints = new WeakMap();
 const transparent = value => value === 'none' || value === 'transparent';
@@ -19,27 +21,21 @@ export function shapeEditorMarkup(item) {
     const gradient=item[key+'Gradient'];
     const none = !gradient && transparent(item[key]??'none');
     const { hex, alpha } = shapeColor(none ? (paints.get(item)?.[key] ?? (key === 'fill' ? '#ffffff' : '#252735')) : item[key]);
-    return `<fieldset class="shape-paint"><legend>${label}</legend>
-      <div class="shape-paint-row"><select data-shape-paint="${key}" aria-label="${label} style" ${item.locked ? 'disabled' : ''}>
-        <option value="solid" ${none || gradient ? '' : 'selected'}>Solid ${label.toLowerCase()}</option>
-        ${key==='stroke'?`<option value="gradient" ${gradient?'selected':''}>Gradient border</option>`:''}
-        <option value="none" ${none ? 'selected' : ''}>No ${label.toLowerCase()}</option>
-      </select><input type="color" data-shape-color="${key}" value="${hex}" aria-label="${label} color" ${item.locked || none || gradient ? 'disabled' : ''}></div>
-      ${slider(`${label} transparency`, key + 'Opacity', percent((item[key + 'Opacity'] ?? 1) * (gradient ? 1 : alpha)), item.locked || none)}
-    </fieldset>`;
+    const mode = gradient ? 'gradient' : none ? 'none' : 'solid';
+    return `<fieldset class="shape-paint-modes" aria-label="${label} style">${[['none', 'No'], ['solid', 'Solid'], ['gradient', 'Gradient']].map(([value, title]) => `<label><input type="radio" name="shape-${key}-mode" data-shape-paint="${key}" value="${value}" ${value === mode ? 'checked' : ''} ${item.locked ? 'disabled' : ''}><span>${title} ${label.toLowerCase()}</span></label>`).join('')}</fieldset>
+      ${gradient ? gradientEditorMarkup(item, key + 'Gradient') + ((item[key + 'Opacity'] ?? 1) < 1 ? slider(`Overall ${label.toLowerCase()} transparency`, key + 'Opacity', percent(item[key + 'Opacity']), item.locked) : '') : none ? '' : `<label class="format-option"><span>Color</span><input type="color" data-shape-color="${key}" value="${hex}" aria-label="${label} color" ${item.locked ? 'disabled' : ''}></label>${slider(`${label} transparency`, key + 'Opacity', percent((item[key + 'Opacity'] ?? 1) * alpha), item.locked)}`}`;
   };
-  return `<section class="shape-style" aria-label="Shape appearance">
-    ${item.type === 'image' || isLineShape(item) || item.type === 'shape' && item.paths.every(path => path.fillMode === 'none') ? '' : item.fillGradient ? slider('Fill transparency', 'fillOpacity', percent(item.fillOpacity ?? 1), item.locked) : paint('fill', 'Fill')}
-    ${paint('stroke', 'Border')}
-    <div class="field-row"><label class="field"><span>Line width / px</span><input type="number" data-property="strokeWidth" value="${item.strokeWidth??0}" min="0" max="1000" step="0.5"></label>
+  const line = paint('stroke', 'Line') + `<div class="field-row"><label class="field"><span>Width / px</span><input type="number" data-property="strokeWidth" value="${item.strokeWidth??0}" min="0" max="1000" step="0.5"></label>
     <label class="field"><span>Line style</span><select data-property="strokeDash" aria-label="Line style">
       ${[['solid', 'Solid'], ['dash', 'Dashed'], ['dot', 'Dotted']].map(([key, label]) => `<option value="${key}" ${(item.strokeDash ?? 'solid') === key ? 'selected' : ''}>${label}</option>`).join('')}
-    </select></label></div>
-    <p class="hint">0% is opaque; 100% is transparent.${isLineShape(item) ? ' Border settings control the line and arrowheads.' : ' Fill and border can be adjusted separately. Hold Shift while resizing a corner to keep proportions.'}</p>
-  </section>`;
+    </select></label></div>`;
+  const hasFill = item.type !== 'image' && !isLineShape(item) && !(item.type === 'shape' && item.paths.every(path => path.fillMode === 'none'));
+  return `<section class="shape-style" aria-label="Shape appearance">${hasFill ? formatSection('fill', 'Fill', paint('fill', 'Fill')) : ''}${formatSection('line', 'Line', line, !hasFill)}</section>`;
 }
 
-export function bindShapeEditor(item, box, { begin, preview, commit, change }) {
+export function bindShapeEditor(item, box, bindings) {
+  const { begin, preview, commit, change } = bindings;
+  bindGradientEditors(item, box, bindings);
   box.querySelectorAll('[data-transparency]').forEach(input => {
     const key = input.dataset.transparency;
     const paintKey = key === 'fillOpacity' && !item.fillGradient ? 'fill' : key === 'strokeOpacity' && !item.strokeGradient ? 'stroke' : null;
@@ -64,21 +60,17 @@ export function bindShapeEditor(item, box, { begin, preview, commit, change }) {
   });
   box.querySelectorAll('[data-shape-paint]').forEach(input => {
     input.onchange = () => {
-      if (item.locked) return;
+      if (item.locked || !input.checked) return;
       const key = input.dataset.shapePaint;
       change(() => {
-        if(item.type==='image' && key==='stroke' && input.value!=='none' && !(item.strokeWidth>0))item.strokeWidth=2;
-        if(input.value==='gradient'){
-          item.strokeGradient ||= {angle:0,stops:[{offset:0,color:'#4472c4'},{offset:1,color:'#ffffff'}]};
-          item.stroke='#4472c4';return;
-        }
-        delete item[key+'Gradient'];
-        if (input.value === 'none') {
-          paints.set(item, { ...paints.get(item), [key]: item[key] });
-          item[key] = 'none';
-        } else {
-          item[key] = paints.get(item)?.[key] ?? (key === 'fill' ? '#ffffff' : '#252735');
-        }
+        if(key==='stroke' && input.value!=='none' && !(item.strokeWidth>0))item.strokeWidth=2;
+        const cache = { ...paints.get(item) };
+        if (item[key+'Gradient']) cache[key+'Gradient'] = structuredClone(item[key+'Gradient']);
+        else if (!transparent(item[key])) cache[key] = item[key];
+        paints.set(item, cache);
+        if(input.value==='gradient') item[key+'Gradient'] = structuredClone(cache[key+'Gradient'] ?? defaultGradient());
+        else delete item[key+'Gradient'];
+        item[key] = input.value === 'none' ? 'none' : cache[key] ?? (key === 'fill' ? '#4472c4' : '#252735');
       });
     };
   });

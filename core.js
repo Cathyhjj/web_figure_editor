@@ -205,6 +205,7 @@ function validateProjectInternal(input, assetCache) {
       canonical.strokeWidth = number(item.strokeWidth, 'item.strokeWidth', 0, 1000, 2);
       canonical.fillOpacity = number(item.fillOpacity, 'item.fillOpacity', 0, 1, 1);
       canonical.strokeOpacity = number(item.strokeOpacity, 'item.strokeOpacity', 0, 1, 1);
+      if(item.fillGradient !== undefined && !isLineShape(item))canonical.fillGradient=validateGradient(item.fillGradient);
       if(item.strokeGradient !== undefined)canonical.strokeGradient=validateGradient(item.strokeGradient);
       canonical.strokeDash = choice(item.strokeDash, 'item.strokeDash', ['solid', 'dash', 'dot'], 'solid');
       if (isLineShape(item) && item.connector !== undefined) {
@@ -264,7 +265,7 @@ function manifest(project) {
 
 export function sourceManifest(project) { return manifest(validateProject(project)); }
 
-function svgFromCanonical(project) {
+function svgFromCanonical(project, { gradientRotation } = {}) {
   requireHTMLSnapshots(project);
   const { width, height, background } = project.canvas;
   const assets = new Map(project.assets.map(a => [a.id, a]));
@@ -280,6 +281,7 @@ function svgFromCanonical(project) {
   ];
   for (const item of project.items) {
     if (item.hidden) continue;
+    const paintItem=gradientRotation===undefined ? item : {...item,gradientRotation};
     const { width: w, height: h } = item;
     lines.push(`<g id="${xml(item.id)}" transform="translate(${n(item.x)} ${n(item.y)}) rotate(${n(item.rotation)} ${n(w / 2)} ${n(h / 2)})" opacity="${n(item.opacity)}">`);
     const contentStart = lines.length;
@@ -293,7 +295,7 @@ function svgFromCanonical(project) {
       if (item.crop) lines.push(`<svg width="${n(w)}" height="${n(h)}" viewBox="${c.x} ${c.y} ${c.width} ${c.height}" preserveAspectRatio="none" overflow="hidden">`);
       lines.push(`<image x="0" y="0" width="${item.crop ? '1' : n(w)}" height="${item.crop ? '1' : n(h)}" preserveAspectRatio="none" href="${xml(posterSource(assets.get(item.assetId)))}"/>`);
       if (item.crop) lines.push('</svg>');
-      if(item.type==='image')lines.push(imageBorderSVG(item,`picture-border-${project.id}-${item.id}`));
+      if(item.type==='image')lines.push(imageBorderSVG(paintItem,`picture-border-${project.id}-${item.id}`));
     } else if (item.type === 'text') {
       const textX = item.align === 'center' ? w / 2 : item.align === 'right' ? w : 0;
       const anchor = item.align === 'center' ? 'middle' : item.align === 'right' ? 'end' : 'start';
@@ -301,9 +303,9 @@ function svgFromCanonical(project) {
       item.text.split('\n').forEach((line, index) => lines.push(`<tspan x="${n(textX)}" y="${n(item.fontSize * (1 + index * 1.2))}">${xml(line)}</tspan>`));
       lines.push('</text>');
     } else if (item.type === 'shape') {
-      lines.push(vectorShapeSVG(item, `shape-${project.id}-${item.id}`));
+      lines.push(vectorShapeSVG(paintItem, `shape-${project.id}-${item.id}`));
     } else {
-      lines.push(presetShapeSVG(item, `preset-${project.id}-${item.id}`));
+      lines.push(presetShapeSVG(paintItem, `preset-${project.id}-${item.id}`));
     }
     if (!isMediaItem(item) && item.shadow) {
       const content = lines.splice(contentStart).join('\n');
@@ -356,15 +358,16 @@ async function withPNGResolution(blob, dpi) {
 }
 
 /** Render once at physical DPI; release the canvas and SVG URL after the consumer finishes. */
-export async function withRasterCanvas(input, dpi, consume, format = 'PNG') {
+export async function withRasterCanvas(input, dpi, consume, format = 'PNG', { gradientRotation } = {}) {
   const project = validateProject(input);
   number(dpi, 'export DPI', 1, 2400);
+  if(gradientRotation!==undefined)number(gradientRotation, 'gradient rotation', -36000, 36000);
   const width = Math.max(1, Math.round(project.canvas.width * dpi / 96));
   const height = Math.max(1, Math.round(project.canvas.height * dpi / 96));
   if (width > 32767 || height > 32767 || width * height > 100000000) throw new Error(`${format} export exceeds 100 megapixels or 32767 pixels per side. Reduce canvas size or DPI.`);
   if (typeof document === 'undefined' || typeof Image === 'undefined') throw new Error(`${format} export requires a browser.`);
   if (document.fonts?.ready) await document.fonts.ready;
-  const svgBlob = new Blob([svgFromCanonical(project)], { type: 'image/svg+xml;charset=utf-8' });
+  const svgBlob = new Blob([svgFromCanonical(project,{gradientRotation})], { type: 'image/svg+xml;charset=utf-8' });
   const url = URL.createObjectURL(svgBlob);
   let canvas;
   try {

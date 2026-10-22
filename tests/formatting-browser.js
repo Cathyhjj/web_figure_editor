@@ -71,7 +71,7 @@ function fixture() {
     { id: 'format-picture', name: 'Synthetic picture', type: 'image', assetId: 'format-png', x: 280, y: 40, width: 160, height: 120 },
     { id: 'format-vector', name: 'Imported gradient', type: 'shape', x: 40, y: 240, width: 180, height: 120, fill: '#4472c4', stroke: '#224466', strokeWidth: 2,
       paths: [{ fillMode: 'norm', stroke: true, commands: [['M', 0, 0], ['L', 1, 0], ['L', 1, 1], ['L', 0, 1], ['Z']] }],
-      fillGradient: { angle: 90, stops: [{ offset: 0, color: '#4472c4' }, { offset: 1, color: '#ffffff' }] } },
+      fillGradient: { angle: 90, stops: [{ offset: 0, color: '#4472c47f' }, { offset: 1, color: '#ffffff' }] } },
   ];
   return validateDeck(deck);
 }
@@ -160,9 +160,9 @@ run.onclick = async () => {
     await openFormat('format-rect');
     check('Format Shape opens the docked formatting panel with a selected Fill and Line tab', formatOpen() && shown(panel()) && panel().dataset.windowState === 'docked' && /Format Shape/.test(panel().textContent) && find('[data-format-tab="paint"]').getAttribute('aria-selected') === 'true');
     key(find('[data-format-tab="paint"]'), 'ArrowRight');
-    const sizeByKeyboard = find('[data-format-tab="size"]').getAttribute('aria-selected') === 'true';
+    const effectsByKeyboard = find('[data-format-tab="effects"]').getAttribute('aria-selected') === 'true';
     key(doc.activeElement, 'ArrowLeft');
-    check('Arrow keys navigate formatting tabs without nudging the selected object', sizeByKeyboard && find('[data-format-tab="paint"]').getAttribute('aria-selected') === 'true' && item('format-rect').getAttribute('transform') === transform);
+    check('Arrow keys navigate formatting tabs without nudging the selected object', effectsByKeyboard && find('[data-format-tab="paint"]').getAttribute('aria-selected') === 'true' && item('format-rect').getAttribute('transform') === transform);
     const saveShortcuts = [];
     const interceptSave = event => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
@@ -197,15 +197,54 @@ run.onclick = async () => {
     check('Locked object formatting and destructive context actions are disabled', [...get('inspector').querySelectorAll('[data-property],[data-transparency],[data-shape-color],[data-shape-paint]')].every(node => node.disabled) && action('delete').disabled && action('duplicate').disabled);
     key(action('format'), 'Escape'); get('object-locked').click();
 
+    tab('paint');
+    check('Fill shows exactly the three requested PowerPoint fill modes and a separate Line section', doc.querySelectorAll('[data-shape-paint="fill"]').length === 3 && Boolean(doc.querySelector('[data-format-section="fill"]')) && Boolean(doc.querySelector('[data-format-section="line"]')) && !/Picture or texture fill|Pattern fill|Slide background fill/.test(get('inspector').textContent));
+    find('[data-shape-paint="fill"][value="gradient"]').click();
+    check('Native rectangle can create an editable gradient without converting its geometry', Boolean(item('format-rect').querySelector('rect[fill^="url("]')) && item('format-rect').querySelectorAll('linearGradient stop').length === 2);
+    set('[data-gradient-editor="fillGradient"] [data-gradient-action="type"]', 'radial');
+    set('[data-gradient-editor="fillGradient"] [data-gradient-action="direction"]', '0,0');
+    check('Radial type disables Angle and Direction changes the actual gradient focus', find('[data-gradient-field="angle"]').disabled && Number(item('format-rect').querySelector('radialGradient')?.getAttribute('fx')) < 0 && Number(item('format-rect').querySelector('radialGradient')?.getAttribute('fy')) < 0);
+    find('[data-gradient-action="rotate"]').click();
+    tab('size'); set('[data-property="rotation"]', '35'); tab('paint');
+    check('Rotate with shape can keep gradient orientation fixed as the rectangle rotates', item('format-rect').querySelector('radialGradient').getAttribute('gradientTransform').includes('rotate(-35'));
+    tab('size'); set('[data-property="rotation"]', '0'); tab('paint');
+    find('[data-shape-paint="fill"][value="none"]').click();
+    check('No fill removes the gradient and paint while retaining the outline', !item('format-rect').querySelector('radialGradient') && Boolean(item('format-rect').querySelector('rect[fill="none"][stroke="#252735"]')));
+    find('[data-shape-paint="fill"][value="solid"]').click();
+    check('Switching back to Solid fill restores the earlier color and independent transparency', Boolean(item('format-rect').querySelector('rect[fill="#1268cc"][fill-opacity="0.55"]')));
+
     await openFormat('format-vector'); tab('paint');
-    check('Imported PowerPoint vector opens Format Shape and retains editable gradient stops', find('[data-shape="mode"]').value === 'gradient' && doc.querySelectorAll('[data-shape="stopColor"]').length === 2 && /Format Shape/.test(panel().textContent));
-    set('[data-shape="stopColor"][data-stop="0"]', '#00aa66');
+    check('Imported PowerPoint vector opens Format Shape and retains editable gradient stops', find('[data-shape-paint="fill"]:checked').value === 'gradient' && doc.querySelectorAll('[data-gradient-stop]').length === 2 && /Format Shape/.test(panel().textContent));
+    const originalGradient = item('format-vector').innerHTML;
+    find('[data-gradient-field="transparency"][type="number"]').focus();
+    find('[data-gradient-field="color"]').focus();
+    check('Focusing an untouched transparency control preserves the exact imported alpha', item('format-vector').innerHTML === originalGradient);
+    set('[data-gradient-field="color"]', '#00aa66');
     check('Editing an imported gradient updates its SVG stop without flattening its path', Boolean(item('format-vector').querySelector('linearGradient stop[stop-color^="#00aa66"]')) && Boolean(item('format-vector').querySelector('path')) && !item('format-vector').querySelector('image'));
+    check('Two-stop gradients cannot remove a required endpoint', find('[data-gradient-action="remove"]').disabled);
+    find('[data-gradient-action="add"]').click();
+    set('[data-gradient-field="color"]', '#cc5500');
+    set('[data-gradient-field="offset"]', '80');
+    set('[data-gradient-field="transparency"][type="number"]', '36');
+    set('[data-gradient-field="brightness"][type="number"]', '50');
+    check('Selected stop has independent color, position, transparency and brightness with live preview', doc.querySelectorAll('[data-gradient-stop]').length === 3 && find('[data-gradient-field="transparency"][type="range"]').value === '36' && find('[data-gradient-field="brightness"][type="range"]').value === '50' && Boolean(item('format-vector').querySelector('stop[offset="0.8"]')) && item('format-vector').querySelector('stop[offset="0.8"]').getAttribute('stop-color') !== '#cc5500a3');
+    const beforeStopKeyboard = item('format-vector').getAttribute('transform');
+    key(find('.gradient-stop.is-selected'), 'ArrowLeft', { shiftKey: true });
+    check('Keyboard moves the selected gradient stop without moving its shape', find('[data-gradient-field="offset"]').value === '70' && item('format-vector').getAttribute('transform') === beforeStopKeyboard);
+    find('[data-gradient-action="remove"]').click();
+    check('Removing the selected stop preserves the original endpoints', item('format-vector').querySelectorAll('stop').length === 2 && Boolean(item('format-vector').querySelector('stop[stop-color^="#00aa66"]')));
+    get('undo').click();
+    check('Undo restores the removed gradient stop with its brightness and transparency', item('format-vector').querySelectorAll('stop').length === 3);
+    get('redo').click(); select('format-vector');
+    set('[data-gradient-action="type"]', 'radial');
+    set('[data-gradient-action="direction"]', '1,1');
+    find('[data-gradient-action="rotate"]').click();
+    check('Imported vector retains its native paths with an editable radial gradient', Number(item('format-vector').querySelector('radialGradient')?.getAttribute('fx')) > 180 && Number(item('format-vector').querySelector('radialGradient')?.getAttribute('fy')) > 120 && Boolean(item('format-vector').querySelector('path')));
 
     rightClick('format-picture');
     check('Picture context menu selects the picture and offers Format Picture and Crop', selected()?.dataset.item === 'format-picture' && /Format Picture/.test(action('format').textContent) && !action('crop').disabled);
     action('format').click(); await settle(win); tab('picture');
-    check('Format Picture provides picture controls and no shape paint controls', formatOpen() && /Format Picture/.test(panel().textContent) && shown(get('crop-image')) && !doc.querySelector('[data-shape-color]'));
+    check('Format Picture provides picture controls and no shape fill controls', formatOpen() && /Format Picture/.test(panel().textContent) && shown(get('crop-image')) && !doc.querySelector('[data-shape-paint="fill"]'));
     const restoreSVG = get('edit-svg'), pictureBeforeSVG = item('format-picture').innerHTML;
     const svgEntryShown = shown(restoreSVG) && restoreSVG.textContent === 'Restore editable SVG' && !restoreSVG.disabled;
     restoreSVG?.click();
@@ -275,6 +314,7 @@ run.onclick = async () => {
     }, 'formatted project to be persisted');
     const persisted = await readDraft(win), savedItems = persisted.slides[0].items;
     check('Saved draft contains shape paint, vector gradient, picture effects, and crop', savedItems.find(entry => entry.id === 'format-rect').fill === '#1268cc' && savedItems.find(entry => entry.id === 'format-rect').fillOpacity === .55 && savedItems.find(entry => entry.id === 'format-picture').shadow.color === '#0066aa' && savedItems.find(entry => entry.id === 'format-picture').opacity === .8);
+    check('Saved draft retains radial type, direction and fixed orientation', savedItems.find(entry => entry.id === 'format-vector').fillGradient.type === 'radial' && savedItems.find(entry => entry.id === 'format-vector').fillGradient.center.x === 1 && savedItems.find(entry => entry.id === 'format-vector').fillGradient.rotateWithShape === false);
     frame = await loadEditor(1400); win = frame.contentWindow; doc = frame.contentDocument;
     await openFormat('format-picture'); tab('effects');
     check('Reload restores real formatted vectors and editable picture effects/crop', Boolean(item('format-rect').querySelector('rect[fill="#1268cc"][fill-opacity="0.55"]')) && Boolean(item('format-vector').querySelector('stop[stop-color^="#00aa66"]')) && Boolean(item('format-picture').querySelector('svg[overflow="hidden"]')) && find('[data-shadow-property="color"]').value === '#0066aa' && get('shadow-enabled').checked);

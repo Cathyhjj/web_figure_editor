@@ -294,18 +294,65 @@ class Converter:
     def stroke_gradient(self, node, geometry, name):
         if node is None:
             return None
-        stops=[{'offset':max(0,min(1,num(st,'pos')/100000)),'color':self.color(st)} for st in sorted(children(node,'a:gsLst/a:gs'),key=lambda s:num(s,'pos'))]
-        if not 2 <= len(stops) <= 16:
+        try:
+            return self.fill_gradient(node,geometry,name,border=True)
+        except ValueError:
             self.warn('Unsupported border gradient stops; the first color is used.', name)
             return None
-        angle=num(find(node,'a:lin'),'ang')/60000
+
+    def fill_gradient_stop(self, node):
+        # Keep the final PowerPoint brightness transform editable. Earlier color
+        # transforms are still resolved by color(), and alpha stays in the color.
+        source = copy.deepcopy(node)
+        color = next((child for child in source if tag(child) in ('srgbClr','schemeClr','sysClr','prstClr')),None)
+        brightness = 0
+        if color is not None:
+            transforms = [child for child in color if tag(child) != 'alpha']
+            if transforms and tag(transforms[-1]) == 'lumMod':
+                modulation = num(transforms[-1],'val')
+                if 0 <= modulation <= 100000:
+                    brightness = modulation / 1000 - 100
+                    color.remove(transforms[-1])
+            elif len(transforms) >= 2 and [tag(child) for child in transforms[-2:]] == ['lumMod','lumOff']:
+                modulation, offset = (num(child,'val') for child in transforms[-2:])
+                if 0 <= offset <= 100000 and abs(modulation + offset - 100000) < .001:
+                    brightness = offset / 1000
+                    for child in transforms[-2:]:
+                        color.remove(child)
+        return {'offset':max(0,min(1,num(node,'pos')/100000)),'color':self.color(source),
+                **({'brightness':brightness} if brightness else {})}
+
+    def fill_gradient(self, node, geometry, name, border=False):
+        stops = [self.fill_gradient_stop(stop) for stop in sorted(children(node,'a:gsLst/a:gs'),key=lambda stop:num(stop,'pos'))]
+        if not 2 <= len(stops) <= 16:
+            raise ValueError('Unsupported gradient stops')
+        linear, path = find(node,'a:lin'), find(node,'a:path')
+        angle = num(linear,'ang')/60000
         if geometry['_flipX']:angle=180-angle
         if geometry['_flipY']:angle=-angle
-        if find(node,'a:lin') is None:
-            self.warn('Nonlinear border gradient is approximated as a linear gradient.',name)
-        if node.get('rotWithShape') in ('0','false') or find(node,'a:lin') is not None and find(node,'a:lin').get('scaled') in ('0','false'):
-            self.warn('Fixed-orientation or unscaled border gradient direction is approximated.',name)
-        return {'angle':angle%360,'stops':stops}
+        result = {'angle':angle%360,'stops':stops}
+        if node.get('rotWithShape') in ('0','false'):
+            result['rotateWithShape'] = False
+        if path is not None and path.get('path') == 'circle':
+            rect = find(path,'a:fillToRect')
+            if rect is None:
+                center_x = center_y = .5
+            else:
+                left, top, right, bottom = (num(rect,key)/100000 for key in ('l','t','r','b'))
+                center_x, center_y = (left+1-right)/2, (top+1-bottom)/2
+                if abs(left+right-1) > .00001 or abs(top+bottom-1) > .00001:
+                    self.warn('Radial gradient focus rectangle is approximated by its center.',name)
+                if not (0 <= center_x <= 1 and 0 <= center_y <= 1):
+                    self.warn('Out-of-bounds radial gradient center is clamped.',name)
+                center_x, center_y = max(0,min(1,center_x)), max(0,min(1,center_y))
+            if geometry['_flipX']:center_x=1-center_x
+            if geometry['_flipY']:center_y=1-center_y
+            result.update(type='radial',center={'x':center_x,'y':center_y})
+        elif linear is None:
+            self.warn('Nonlinear '+('border ' if border else '')+'gradient is approximated as a linear gradient.',name)
+        elif linear.get('scaled') in ('0','false'):
+            self.warn('Unscaled '+('border' if border else 'fill')+' gradient direction is approximated.',name)
+        return result
 
     def run_style(self, nodes, scale):
         props = {}
@@ -599,13 +646,7 @@ class Converter:
                         item=self.base(name,g,'shape')
                         item.update(paths=paths,fill=fill,stroke=stroke,strokeWidth=width,strokeDash=stroke_dash)
                         if gradient is not None:
-                            stops=[{'offset':max(0,min(1,num(st,'pos')/100000)),'color':self.color(st)} for st in sorted(children(gradient,'a:gsLst/a:gs'),key=lambda s:num(s,'pos'))]
-                            if not 2<=len(stops)<=16:raise ValueError('Unsupported gradient stops')
-                            angle=num(find(gradient,'a:lin'),'ang')/60000
-                            if g['_flipX']:angle=180-angle
-                            if g['_flipY']:angle=-angle
-                            item['fillGradient']={'angle':angle%360,'stops':stops}
-                            if find(gradient,'a:lin') is None:self.warn('Nonlinear gradient is approximated as a linear gradient.',name)
+                            item['fillGradient']=self.fill_gradient(gradient,g,name)
                         self.items.append(item)
                     except (ValueError,ZeroDivisionError):
                         self.warn('Unsupported shape geometry or gradient was omitted; its text is retained.',name)
@@ -614,7 +655,20 @@ class Converter:
                     paint = copy.deepcopy(stroke_gradient)
                     if imported['type'] in ('line','arrow','doubleArrow') and 'connector' not in imported:
                         # Geometry normalization/arrow direction already rotates this line.
-                        paint['angle'] = (paint['angle'] - imported['rotation'] + g['rotation']) % 360
+                        delta = imported['rotation'] - g['rotation']
+                        if paint.get('rotateWithShape') is False:
+                            if abs(delta % 360) > .00001:
+                                self.warn('Fixed-orientation border gradient coordinates on a normalized line are approximated.',name)
+                        else:
+                            paint['angle'] = (paint['angle'] - delta) % 360
+                            if paint.get('type') == 'radial':
+                                # Express the original focus in the new line coordinate
+                                # frame, including its stroke-sized zero-area dimension.
+                                cx,cy = paint['center']['x']-.5, paint['center']['y']-.5
+                                x,y = cx*max(g['_rawWidth'],width,.01), cy*max(g['_rawHeight'],width,.01)
+                                cs,sn = math.cos(math.radians(delta)), math.sin(math.radians(delta))
+                                paint['center'] = {'x':max(0,min(1,.5+(x*cs+y*sn)/max(imported['width'],width,.01))),
+                                                   'y':max(0,min(1,.5+(-x*sn+y*cs)/max(imported['height'],width,.01)))}
                         if g['_rawWidth'] and g['_rawHeight']:
                             self.warn('Diagonal line border gradient projection is approximated.',name)
                     imported['strokeGradient'] = paint

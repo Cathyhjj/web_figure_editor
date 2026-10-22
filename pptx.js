@@ -44,6 +44,7 @@ function preflightSize(deck) {
       if (item.hidden) continue;
       xmlBytes += 2600 + item.name.length * 6;
       if(item.strokeGradient)xmlBytes += 240 + item.strokeGradient.stops.length * 160;
+      if(item.fillGradient)xmlBytes += 240 + item.fillGradient.stops.length * 160;
       if (item.type === 'text') {
         // Count without split(): hostile newline-heavy text must not allocate XML first.
         let paragraphs = 1;
@@ -56,7 +57,6 @@ function preflightSize(deck) {
           xmlBytes += 160 + path.commands.length * 240;
           checkBudget(xmlBytes + mediaBytes);
         }
-        if (item.fillGradient) xmlBytes += 240 + item.fillGradient.stops.length * 160;
       } else if (isMediaItem(item)) {
         const asset = assets.get(item.assetId);
         xmlBytes += asset.name.length * 6;
@@ -122,7 +122,8 @@ function line(item, scale) {
     let angle=gradient.angle;
     if(item.connectorFlipY)angle=-angle;
     if(item.connectorFlipX)angle=180-angle;
-    gradient={...gradient,angle};
+    const center=gradient.center??{x:.5,y:.5};
+    gradient={...gradient,angle,...(gradient.type==='radial' ? {center:{x:item.connectorFlipX?1-center.x:center.x,y:item.connectorFlipY?1-center.y:center.y}} : {})};
   }
   return `<a:ln w="${width}" cap="flat" cmpd="sng" algn="ctr">${gradient ? gradientFill(gradient, item.opacity * (item.strokeOpacity ?? 1)) : fill(item.stroke, item.opacity * (item.strokeOpacity ?? 1))}<a:prstDash val="${dash}"/>${isLineShape(item) ? '<a:round/>' : '<a:miter lim="800000"/>'}${ends}</a:ln>`;
 }
@@ -148,16 +149,20 @@ function gradientFill(gradient, opacity) {
   const angle = Math.round(((gradient.angle % 360 + 360) % 360) * 60000) % 21600000;
   const stops = gradient.stops.map(stop => {
     const { hex, alpha } = color(stop.color), amount = Math.round(alpha * opacity * 100000);
-    return `<a:gs pos="${Math.round(stop.offset * 100000)}"><a:srgbClr val="${hex}">${amount === 100000 ? '' : `<a:alpha val="${amount}"/>`}</a:srgbClr></a:gs>`;
+    const brightness=stop.brightness??0;
+    const luminance=brightness ? `<a:lumMod val="${Math.round((100-Math.abs(brightness))*1000)}"/>${brightness>0 ? `<a:lumOff val="${Math.round(brightness*1000)}"/>` : ''}` : '';
+    return `<a:gs pos="${Math.round(stop.offset * 100000)}"><a:srgbClr val="${hex}">${amount === 100000 ? '' : `<a:alpha val="${amount}"/>`}${luminance}</a:srgbClr></a:gs>`;
   }).join('');
-  return `<a:gradFill rotWithShape="1"><a:gsLst>${stops}</a:gsLst><a:lin ang="${angle}" scaled="1"/><a:tileRect/></a:gradFill>`;
+  const center=gradient.center??{x:.5,y:.5};
+  const shade=gradient.type==='radial' ? `<a:path path="circle"><a:fillToRect l="${Math.round(center.x*100000)}" t="${Math.round(center.y*100000)}" r="${Math.round((1-center.x)*100000)}" b="${Math.round((1-center.y)*100000)}"/></a:path>` : `<a:lin ang="${angle}" scaled="1"/>`;
+  return `<a:gradFill rotWithShape="${gradient.rotateWithShape===false ? 0 : 1}"><a:gsLst>${stops}</a:gsLst>${shade}<a:tileRect/></a:gradFill>`;
 }
 function shape(item, id, layout) {
   const adjustments = item.type === 'roundRect' ? `<a:avLst><a:gd name="adj" fmla="val ${Math.round((item.cornerRadius ?? 1 / 6) * 100000)}"/></a:avLst>` : '<a:avLst/>';
   const geometry = item.type === 'shape' ? customGeometry(item.paths)
     : `<a:prstGeom prst="${item.connector === 'elbow' ? 'bentConnector3' : item.connector === 'curved' ? 'curvedConnector3' : isLineShape(item) ? 'line' : item.type}">${adjustments}</a:prstGeom>`;
   const fillOpacity = item.opacity * (item.fillOpacity ?? 1);
-  const paint = isLineShape(item) ? '<a:noFill/>' : item.type === 'shape' && item.fillGradient
+  const paint = isLineShape(item) ? '<a:noFill/>' : item.fillGradient
     ? gradientFill(item.fillGradient, fillOpacity) : fill(item.fill, fillOpacity);
   return `<p:sp>${nonVisual(id, item.name)}<p:spPr>${transform(item, layout)}${geometry}${paint}${line(item, layout.scale)}${imageShadow(item, layout)}</p:spPr></p:sp>`;
 }

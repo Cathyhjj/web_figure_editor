@@ -8,7 +8,7 @@ const delay=()=>new Promise(r=>setTimeout(r,120));
 document.querySelector('#run').onclick=async()=>{
  results.replaceChildren();document.querySelector('iframe')?.remove();window.pptxPasteChecks={finished:false};
  try{
-  if(!['18767','18768'].includes(location.port))throw new Error('Use an isolated test port.');
+  if(!['18767','18768','18769'].includes(location.port))throw new Error('Use an isolated test port.');
   const deck=createDeck(),page=deck.slides[0];page.name='Paste fixture';
   const canvas=document.createElement('canvas');canvas.width=40;canvas.height=20;const ctx=canvas.getContext('2d');ctx.fillStyle='#ed7335';ctx.fillRect(0,0,40,20);
   deck.assets=[{id:'picture',name:'panel.png',mime:'image/png',dataUrl:canvas.toDataURL(),width:40,height:20}];
@@ -28,8 +28,10 @@ document.querySelector('#run').onclick=async()=>{
   check('Office package inserts a new slide with separate text, picture and shape',doc.querySelectorAll('.layer-select').length===4&&doc.querySelector('#status').textContent.includes('2 shapes'));
   const layer=name=>[...doc.querySelectorAll('.layer-select')].find(el=>el.textContent.includes(name));
   layer('Gradient arrow').click();
-  check('Imported arrow is vector with editable gradient stops',doc.querySelectorAll('[data-shape="stopColor"]').length===3&&doc.querySelector('#stage path[fill^="url"]').getAttribute('d').includes('L'));
-  const color=doc.querySelector('[data-shape="stopColor"]');color.value='#ff0000';color.dispatchEvent(new win.Event('change'));
+  const gradientEditor='[data-gradient-editor="fillGradient"]';
+  check('Imported arrow is vector with editable gradient stops',doc.querySelectorAll(`${gradientEditor} [data-gradient-stop]`).length===3&&doc.querySelectorAll(`${gradientEditor} [data-gradient-field="color"]`).length===1&&doc.querySelector('#stage path[fill^="url"]').getAttribute('d').includes('L'));
+  doc.querySelector(`${gradientEditor} [data-gradient-stop="0"]`).click();
+  const color=doc.querySelector(`${gradientEditor} [data-gradient-field="color"]`);color.value='#ff0000';color.dispatchEvent(new win.Event('change'));
   layer('Editable title').click();const text=doc.querySelector('#text-content');text.value='Edited paste title';text.dispatchEvent(new win.Event('input'));text.dispatchEvent(new win.Event('blur'));
   layer('Editable picture').click();const width=doc.querySelector('[data-property="width"]');width.value='250';width.dispatchEvent(new win.Event('change'));
   let saved;
@@ -41,7 +43,7 @@ document.querySelector('#run').onclick=async()=>{
   check('Undo edits then removes the complete pasted slide',doc.querySelectorAll('.slide-card').length===1);
   doc.querySelector('#redo').click();check('Redo restores all object types',doc.querySelectorAll('.layer-select').length===4);
   win.showOpenFilePicker=async()=>[{getFile:async()=>new File([JSON.stringify(saved)],'pasted.figure.json')}];doc.querySelector('#open-project').click();await wait(()=>!doc.querySelector('#open-project').disabled);
-  layer('Gradient arrow').click();check('Reopening retains editable gradient geometry',doc.querySelector('[data-shape="stopColor"]').value==='#ff0000');
+  layer('Gradient arrow').click();doc.querySelector(`${gradientEditor} [data-gradient-stop="0"]`).click();check('Reopening retains editable gradient geometry',doc.querySelector(`${gradientEditor} [data-gradient-field="color"]`).value==='#ff0000');
   const before=doc.querySelectorAll('.slide-card').length;
   send({[SLIDES_CLIPBOARD_MIME]:encodeSlides(createSlidesClipboard(deck,[page.id])),'ppt/slides':'bad'});
   check('Figure Editor slide clipboard takes precedence over Office data',doc.querySelectorAll('.slide-card').length===before+1);

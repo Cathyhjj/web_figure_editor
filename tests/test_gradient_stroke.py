@@ -58,15 +58,21 @@ class GradientStrokeTests(unittest.TestCase):
         self.assertEqual(converted(shape('rect',200,100,style=style,paint='<a:noFill/>'),extra)['items'],[])
 
     def test_nonlinear_gradient_reports_approximation_without_dropping_border(self):
-        result=converted(shape(paint=gradient().replace('<a:lin ang="0" scaled="1"/>','<a:path path="circle"/>')))
+        result=converted(shape(paint=gradient().replace('<a:lin ang="0" scaled="1"/>','<a:path path="rect"/>')))
         self.assertIn('strokeGradient',result['items'][0])
         self.assertTrue(any('Nonlinear border gradient' in warning for warning in result['warnings']))
 
     def test_unrepresented_gradient_coordinates_have_an_explicit_warning(self):
-        for paint in [gradient().replace('<a:gradFill>','<a:gradFill rotWithShape="0">'),gradient().replace('scaled="1"','scaled="0"')]:
+        for paint in [gradient().replace('scaled="1"','scaled="0"')]:
             result=converted(shape('rect',200,100,paint=paint))
             self.assertIn('strokeGradient',result['items'][0])
             self.assertTrue(any('direction is approximated' in warning for warning in result['warnings']))
+
+    def test_fixed_orientation_is_preserved_without_an_approximation(self):
+        paint=gradient().replace('<a:gradFill>','<a:gradFill rotWithShape="0">')
+        result=converted(shape('rect',200,100,paint=paint))
+        self.assertIs(result['items'][0]['strokeGradient']['rotateWithShape'],False)
+        self.assertFalse(any('gradient' in warning.lower() for warning in result['warnings']))
 
 
 if __name__=='__main__':

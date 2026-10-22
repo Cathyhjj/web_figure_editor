@@ -17,7 +17,7 @@ const item=(id,type,x,y,width,height,angle=0)=>({id,name:id,type,x,y,width,heigh
 document.querySelector('#run').onclick=async()=>{
  const button=document.querySelector('#run');button.disabled=true;document.querySelector('#results').replaceChildren();document.querySelector('iframe')?.remove();
  try {
-  if(location.port!=='18768')throw Error('Use isolated test port 18768');
+  if(!['18768','18769'].includes(location.port))throw Error('Use isolated test port 18768 or 18769');
   const source=createDeck();source.slides[0].canvas={width:500,height:300,background:'transparent'};
   source.slides[0].items=[item('Horizontal','line',40,40,240,0),item('Vertical','line',350,30,0,180,90),item('Border','rect',40,110,240,100),item('Arrow','arrow',40,250,240,0)];
   source.slides[0].items[3].strokeGradient.stops.forEach(stop=>{stop.color='#ff000080';});
@@ -40,25 +40,28 @@ document.querySelector('#run').onclick=async()=>{
   const win=frame.contentWindow,doc=frame.contentDocument;await wait(()=>doc.querySelector('#open-project')&&!doc.querySelector('#open-project').disabled);win.confirm=()=>true;
   const open=async value=>{win.showOpenFilePicker=async()=>[{name:'gradient.figure.json',getFile:async()=>new File([JSON.stringify(value)],'gradient.figure.json',{type:'application/json'})}];doc.querySelector('#open-project').click();await wait(()=>!doc.querySelector('#open-project').disabled&&[...doc.querySelectorAll('.layer-select')].some(el=>el.textContent.includes('Horizontal')));};
   await open(deck);
-  const choose=name=>[...doc.querySelectorAll('.layer-select')].find(el=>el.textContent.trim().endsWith(name)).click();
+  const choose=name=>{[...doc.querySelectorAll('.layer-select')].find(el=>el.textContent.trim().endsWith(name)).click();const line=doc.querySelector('[data-format-section="line"]');if(line)line.open=true;};
+  const editor='[data-gradient-editor="strokeGradient"]';
+  const chooseStop=index=>doc.querySelector(`${editor} [data-gradient-stop="${index}"]`).click();
+  const paint=value=>doc.querySelector(`[data-shape-paint="stroke"][value="${value}"]`).click();
   choose('Horizontal');
-  check('Border inspector exposes gradient mode, angle and editable stops',doc.querySelector('[data-shape-paint="stroke"]').value==='gradient'&&doc.querySelectorAll('[data-gradient-field="color"]').length===2);
+  check('Border inspector exposes gradient mode, angle and editable stops',doc.querySelector('[data-shape-paint="stroke"]:checked').value==='gradient'&&doc.querySelector(`${editor} [data-gradient-field="angle"]`)&&doc.querySelectorAll(`${editor} [data-gradient-stop]`).length===2&&doc.querySelectorAll(`${editor} [data-gradient-field="color"]`).length===1);
   const update=(field,value)=>{const input=doc.querySelector(field);input.value=value;input.dispatchEvent(new win.Event('change',{bubbles:true}));};
-  update('[data-gradient-field="color"][data-stop="0"]','#00ff00');
+  chooseStop(0);update(`${editor} [data-gradient-field="color"]`,'#00ff00');
   const originalID=deck.slides[0].items.find(i=>i.name==='Horizontal').id;
   const stopColor=id=>doc.querySelector(`#stage [data-item="${id}"] stop`).getAttribute('stop-color');
   check('Changing a border gradient stop updates the actual canvas',stopColor(originalID).startsWith('#00ff00'));
-  doc.querySelector('#duplicate').click();choose('Horizontal copy');update('[data-gradient-field="color"][data-stop="0"]','#ff8800');
+  doc.querySelector('#duplicate').click();choose('Horizontal copy');chooseStop(0);update(`${editor} [data-gradient-field="color"]`,'#ff8800');
   check('Editing a duplicate leaves the original gradient unchanged',stopColor(originalID).startsWith('#00ff00'));
   doc.querySelector('#undo').click();check('Undo restores the duplicate gradient independently',[...doc.querySelectorAll('#stage linearGradient stop:first-child')].filter(el=>el.getAttribute('stop-color').startsWith('#00ff00')).length===2);
-  choose('Border');update('[data-shape-paint="stroke"]','none');
+  choose('Border');paint('none');
   check('No Border removes the gradient paint server',!doc.querySelector(`#stage [data-item="${deck.slides[0].items.find(i=>i.name==='Border').id}"] linearGradient`));
-  doc.querySelector('#undo').click();choose('Border');update('[data-shape-paint="stroke"]','solid');
-  check('Solid Border clears the former gradient',!doc.querySelector('[data-gradient-field="angle"]'));doc.querySelector('#undo').click();
+  doc.querySelector('#undo').click();choose('Border');paint('solid');
+  check('Solid Border clears the former gradient',!doc.querySelector(editor));doc.querySelector('#undo').click();
   let saved;win.showSaveFilePicker=async()=>({name:'gradient.figure.json',createWritable:async()=>({write:async blob=>{saved=JSON.parse(await blob.text());},close:async()=>{}})});
   doc.querySelector('#save-project-as').click();await wait(()=>saved);
   check('Saved project retains each native gradient and independent stops',saved.slides[0].items.filter(i=>i.strokeGradient).length===5);
-  await open(saved);choose('Horizontal');check('Reopening restores the edited gradient',doc.querySelector('[data-gradient-field="color"][data-stop="0"]').value==='#00ff00');
+  await open(saved);choose('Horizontal');chooseStop(0);check('Reopening restores the edited gradient',doc.querySelector(`${editor} [data-gradient-field="color"]`).value==='#00ff00');
   p=projectFor(saved);const png=await exportPNG(p,144);check('PNG export renders gradient strokes',png.size>1000);
   const pdf=await exportPDF(p,144);check('PDF export renders all gradient strokes',pdf.size>1000);
   for(const extra of [{strokeWidth:0},{strokeOpacity:0},{strokeWidth:.5}]){const tiny={...p,items:[{...p.items.find(i=>i.name==='Horizontal'),...extra}]};check(`PDF supports gradient line ${JSON.stringify(extra)}`,(await exportPDF(tiny,144)).size>300);}

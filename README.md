@@ -52,11 +52,11 @@ python3 server.py
 
 右键点击画布或 Layers 中的形状、图片，选择 **Format Shape… / Format Picture…**，可打开类似 PowerPoint 的右侧格式面板。面板按 **Fill & Line / Picture / Effects / Size & Properties** 分类，支持折叠分组；关闭按钮恢复常规布局。隐藏或浮动的属性面板会重新停靠，窄窗口下显示为右侧抽屉。右键菜单也提供复制副本、前移、后移、删除和图片裁剪；锁定对象只允许查看格式。选中对象后可用 **Shift + F10** 打开菜单，方向键选择，**Esc** 关闭。
 
-选中形状后，**Format Shape → Fill & Line** 中可以分别调整 **Fill / Border** 的颜色、透明度、**No fill / No border**，以及线宽和 **Solid / Dashed / Dotted**。透明度同时提供滑块和百分比输入：**0% 完全不透明，100% 完全透明**；**Object Transparency** 控制整个对象。直线和箭头共用边框样式，虚线箭头的尖端保持实线。旧项目的透明度值继续保留；样式支持撤销、重做、复制、保存和重新打开。
+选中形状后，**Format Shape → Fill & Line** 提供独立的 **Fill / Line** 折叠区。Fill 使用 **No fill / Solid fill / Gradient fill** 单选项；Line 提供对应的线条模式、线宽和 **Solid / Dashed / Dotted**。透明度同时提供滑块和百分比输入：**0% 完全不透明，100% 完全透明**；**Object Transparency** 控制整个对象。直线和箭头共用线条样式，虚线箭头的尖端保持实线。旧项目的透明度值继续保留；样式支持撤销、重做、复制、保存和重新打开。
 
 这些形状在 SVG、PDF 和 HTML 报告中保留矢量，在 PPTX 中保留原生可编辑形状；PNG 和复制为图片保留透明度。PPTX 导入支持矢量预设/自定义路径，以及直线、肘形和曲线开放式箭头（连接线弯折位置使用默认中点）。PowerPoint 的原生箭头尖端和虚线间距可能与浏览器略有差异，整体透明度与半透明边框重叠处也可能因渲染器不同而略有差异。
 
-新增预设形状可在 **Format Shape → Fill & Line → Fill → Gradient** 使用线性渐变填充；形状、直线和箭头可在 **Border → Gradient border** 使用渐变边框。可调整方向及各色标的颜色、位置和透明度，支持复制、撤销、保存和重新打开。PPTX 导入/导出保留原生可编辑渐变，SVG 与 HTML 报告保持矢量；PDF 按所选 DPI 单独渲染渐变对象，其余文字和实色形状保留矢量。非线性渐变、固定方向或不缩放的描边渐变，以及部分斜线渐变投影会近似转换，并在 **Import notes** 提示。
+矩形、圆角矩形、椭圆及预设/导入的矢量形状均支持 **Gradient fill**。渐变控件包括预设、**Linear / Radial** 类型、方向、线性渐变角度、2–16 个可增删/拖动的色标，以及所选色标的颜色、位置、透明度、亮度和 **Rotate with shape**。色标支持左右方向键微调，Shift 加快，Home/End 移至两端；双击色带可插入色标。**Line → Gradient line** 使用同一套控件。图片或纹理、图案、幻灯片背景填充不在此面板提供。PPTX 导入/导出保留原生可编辑的线性/径向渐变、亮度和旋转设置；SVG 与 HTML 报告保持矢量，PDF 按所选 DPI 单独渲染渐变对象。浏览器径向渐变尚未经过 PowerPoint 原生像素比对；非圆形路径渐变、区域焦点、不缩放方向及部分斜线投影仍会近似转换，并在 **Import notes** 提示。
 
 形状菜单的数据由 `python3 scripts/build_shape_catalog.py` 从仓库内固定版本的 DrawingML 定义生成，`--check` 可检查生成结果。出处和许可证见 `resources/NOTICE-preset-shapes.txt`；生成器只在副本中修正三个环形箭头定义已知的多余操作数，不更改导入器的严格校验或上游资源。
 
@@ -64,7 +64,7 @@ python3 server.py
 
 阴影随项目、自动草稿、复制和副本保存；PNG、SVG、PDF、HTML 报告和复制为图片均保留效果，PPT 导出保留为可继续调整的原生阴影。不同渲染器的模糊边缘和半透明图片叠加效果可能略有差异。与其他内容一样，整页导出会裁掉画布外的部分。
 
-PPTX 导入现在保留图片、原生形状、连接线和文字的外阴影，包括颜色、透明度、模糊、距离、大小、对齐和固定方向。形状也可在 **Format Shape → Effects → Shadow** 调整。带整组阴影的组合以可编辑 SVG 保存子图形与内部效果，外层阴影保持原生可调；不会把组阴影重复加到每个孩子。图片自身的实色或渐变描边可在 **Format Picture → Picture → Picture Border** 编辑，并随 PNG/SVG/PDF/PPTX 导出保留。非均匀缩放、倾斜阴影及其他未支持效果会提示近似或省略；缺失的原始图片无法恢复其轮廓和阴影。
+PPTX 导入现在保留图片、原生形状、连接线和文字的外阴影，包括颜色、透明度、模糊、距离、大小、对齐和固定方向。形状也可在 **Format Shape → Effects → Shadow** 调整。带整组阴影的组合以可编辑 SVG 保存子图形与内部效果，外层阴影保持原生可调；不会把组阴影重复加到每个孩子。图片自身的实色或渐变描边可在 **Format Picture → Picture → Line** 编辑，并随 PNG/SVG/PDF/PPTX 导出保留。非均匀缩放、倾斜阴影及其他未支持效果会提示近似或省略；缺失的原始图片无法恢复其轮廓和阴影。
 
 ## 多页组图与面板
 

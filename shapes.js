@@ -57,10 +57,12 @@ export const pathData = commands => commands.map(([op, ...values]) => [op, ...va
 export function shapeSVG(item, id = `preset-${item.id||'shape'}`) {
   id=String(id).replace(/[^a-zA-Z0-9_-]/g,'-');
   const gradient=item.strokeGradient,strokePaint=gradient?`url(#${id}-stroke-gradient)`:item.stroke;
-  const defs=gradient?`<defs>${gradientSVG(item,gradient,`${id}-stroke-gradient`,'norm',true)}</defs>`:'';
+  const fillGradient=!isLineShape(item)&&item.fillGradient;
+  const definitions=(gradient?gradientSVG(item,gradient,`${id}-stroke-gradient`,'norm',true):'')+(fillGradient?gradientSVG(item,fillGradient,`${id}-fill-gradient`):'');
+  const defs=definitions?`<defs>${definitions}</defs>`:'';
   const dash = strokeDashArray(item);
   const stroke = `stroke="${strokePaint}" stroke-width="${n(item.strokeWidth)}" stroke-opacity="${n(item.strokeOpacity ?? 1)}" stroke-linejoin="${isLineShape(item) ? 'round' : 'miter'}"`;
-  const fill = `fill="${isLineShape(item) ? 'none' : item.fill}" fill-opacity="${n(item.fillOpacity ?? 1)}"`;
+  const fill = `fill="${isLineShape(item) ? 'none' : fillGradient ? `url(#${id}-fill-gradient)` : item.fill}" fill-opacity="${n(item.fillOpacity ?? 1)}"`;
   let geometry;
   if (item.type === 'rect' || item.type === 'roundRect') {
     const r = item.type === 'roundRect' ? Math.min(item.width, item.height) * (item.cornerRadius ?? 1 / 6) : 0;

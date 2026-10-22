@@ -30,3 +30,48 @@
 
 /* Closing a floating formatting pane must override its floating display rule. */
 .panel-window[hidden]{display:none!important}
+
+/* PowerPoint-style paint controls: one fill choice and one selected gradient stop. */
+.format-tabs{gap:5px;padding-bottom:0;margin-bottom:10px}
+.format-tabs [role="tab"]{flex:0 0 58px;position:relative;min-height:49px;padding:9px;border:1px solid transparent;border-bottom:0;border-radius:4px 4px 0 0}
+.format-tabs [role="tab"] svg{width:28px;height:28px}
+.format-tabs [role="tab"][aria-selected="true"]{border-color:var(--drx-border);background:var(--drx-surface-subtle);color:var(--drx-text)}
+.format-tabs [role="tab"]>span{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.format-section>summary{padding:10px 7px;font-size:13px;font-weight:500;background:var(--drx-surface-subtle)}
+.format-section-body{padding:12px 3px 14px}
+.format-inspector .shape-style{margin:0;padding:0}
+.shape-paint-modes{display:flex;flex-direction:column;gap:6px;border:0;padding:0 0 14px;margin:0 0 12px;border-bottom:1px solid var(--drx-border);min-width:0}
+#inspector .shape-paint-modes label{display:flex;align-items:center;gap:9px;font-size:13px;line-height:1.8;cursor:pointer}
+#inspector .shape-paint-modes input[type="radio"]{width:17px;min-width:17px;height:17px;min-height:17px;padding:0;margin:0;accent-color:var(--drx-accent);cursor:pointer}
+#inspector .format-option{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:11px 0;font-size:12px;min-height:30px}
+.format-option>span:first-child{flex-shrink:0}
+#inspector .format-option select{width:56%;min-height:30px;padding:4px 20px 4px 7px;font-size:12px}
+.format-option:has(input:disabled)>span:first-child{color:var(--drx-text-muted);opacity:.6}
+.format-number{position:relative;display:block;width:75px;min-width:0}
+#inspector .format-number input{padding:4px 27px 4px 7px;font-size:12px;min-height:31px;height:31px}
+.format-number>span{position:absolute;right:22px;top:50%;transform:translateY(-50%);font-size:11px;pointer-events:none;color:var(--drx-text-muted)}
+.format-number input::-webkit-inner-spin-button{opacity:1;position:absolute;right:1px;height:24px}
+.gradient-stops-heading{display:flex;align-items:center;justify-content:space-between;margin:15px 0 10px;font-size:12px}
+.gradient-stops-heading>div{display:flex;border:1px solid var(--drx-border);border-radius:6px;background:var(--drx-surface-subtle);overflow:hidden}
+.gradient-stops-heading button{width:30px;height:28px;font-size:19px;line-height:22px;border:0;border-radius:0;padding:0;background:transparent;color:var(--drx-text)}
+.gradient-stops-heading button+button{border-left:1px solid var(--drx-border)}
+.gradient-stops-heading button:hover:not(:disabled){background:var(--drx-accent-soft)}
+.gradient-stops-heading button:disabled{opacity:.35;cursor:default}
+.gradient-track{height:53px;position:relative;margin:0 9px 10px;touch-action:none}
+.gradient-preview{height:31px;position:relative;border:1px solid #aaa;box-shadow:inset 0 0 0 2px white;background-color:white}
+.gradient-track::before{content:'';position:absolute;inset:0 0 22px;background:repeating-conic-gradient(#ddd 0 25%,white 0 50%) 0 0/10px 10px}
+.gradient-preview{background-color:transparent}
+.gradient-preview svg{display:block;width:100%;height:100%}
+.gradient-stop{position:absolute;top:28px;transform:translateX(-50%);width:19px;height:25px;padding:4px 2px 2px;background:#fff;border:1px solid #a9a9a9;border-radius:1px;clip-path:polygon(50% 0,100% 30%,100% 100%,0 100%,0 30%);cursor:ew-resize;touch-action:none}
+.gradient-stop span{display:block;width:100%;height:100%;background:var(--stop-color);clip-path:polygon(50% 0,100% 25%,100% 100%,0 100%,0 25%)}
+.gradient-stop.is-selected{background:var(--drx-accent);border-color:var(--drx-accent);z-index:2}
+.gradient-stop.is-selected span{border:2px solid white}
+.gradient-stop:focus-visible{outline:none;background:#123dd1;border-color:#123dd1;box-shadow:0 0 0 3px #123dd1}
+.gradient-stop:disabled{cursor:default;opacity:.5}
+.gradient-slider{display:grid;grid-template-columns:80px minmax(35px,1fr) 75px;gap:8px;align-items:center;margin:11px 0}
+#inspector .gradient-slider>label{font-size:12px;line-height:1.2}
+#inspector .gradient-slider input[type="range"]{width:100%;height:22px;min-height:22px;padding:0;border:0;background:transparent;accent-color:var(--drx-accent)}
+#inspector .format-checkbox{display:flex;align-items:center;gap:9px;margin:15px 0 1px;font-size:12px}
+#inspector .format-checkbox input{width:16px;height:16px;margin:0}
+.gradient-editor input:disabled,.gradient-editor select:disabled{opacity:.45}
+@media(pointer:coarse){.gradient-stops-heading button{min-width:36px;min-height:36px}.gradient-stop{width:24px;height:30px}.gradient-track{height:60px}}

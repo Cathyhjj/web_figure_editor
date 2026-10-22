@@ -1,6 +1,5 @@
 import { openSVGEditor, editableSVGAsset } from './svg-editor.js';
 import { shapeSVG as vectorShapeSVG, cloneShape } from './shape.js';
-import { vectorShapeEditor, bindVectorShapeEditor } from './vector-shape-editor.js';
 import { initShapeGallery } from './shape-catalog.js';
 import { initShapeDrawing } from './shape-drawing.js';
 import { isMediaItem, posterSource } from './video.js';
@@ -400,7 +399,6 @@ function renderInspector(){
  if(i.type==='video'){const a=assetById(i.assetId);box.innerHTML+=`<div class="image-crop-actions"><button id="preview-video" class="button">▶ Preview video</button></div><p class="hint">MP4 · ${a.width} × ${a.height} px · ${a.duration.toFixed(1)} s<br>Embedded in PowerPoint; click the video during Slide Show to play. H.264 video with AAC audio is recommended.<br>PNG, SVG, PDF, and HTML reports use the poster frame.</p>`;}
  if(i.type==='image'&&editableSVGAsset(assetById(i.assetId)))box.innerHTML+=`<button id="edit-svg" class="button" ${i.locked?'disabled':''}>${assetById(i.assetId).mime==='image/svg+xml'?'Edit SVG elements':'Restore editable SVG'}</button>`;
  if(!['video','html'].includes(i.type))box.innerHTML+=shadowEditorMarkup(i);
- box.innerHTML+=vectorShapeEditor(i);
  box.innerHTML+=shapeEditorMarkup(i);
  box.innerHTML+=`<label class="field inline"><input id="object-locked" type="checkbox" ${i.locked?'checked':''}> Lock object</label>`;
  if(canFormat(i)){
@@ -408,8 +406,8 @@ function renderInspector(){
   box.innerHTML=formatInspectorMarkup(i,{
    geometry:formatSection('size','Size',`<div class="field-row">${field('Width / px','width',round(i.width),'number',`min="${isLineShape(i)?0:1}" step="1"`)}${field('Height / px','height',round(i.height),'number',`min="${isLineShape(i)?0:1}" step="1"`)}</div>${field('Rotation / °','rotation',round(i.rotation))}`)+formatSection('position','Position',`<div class="field-row">${field('Horizontal / px','x',round(i.x),'number','step="1"')}${field('Vertical / px','y',round(i.y),'number','step="1"')}</div>`),
    opacity:opacityEditorMarkup(i),
-   appearance:formatSection('fill-line','Fill & Line',vectorShapeEditor(i)+shapeEditorMarkup(i)),
-   picture:crop?crop.outerHTML+crop.nextElementSibling.outerHTML+(box.querySelector('#edit-svg')?.outerHTML||'')+formatSection('picture-border','Picture Border',shapeEditorMarkup(i)+vectorShapeEditor(i)):'',
+   appearance:shapeEditorMarkup(i),
+   picture:crop?crop.outerHTML+crop.nextElementSibling.outerHTML+(box.querySelector('#edit-svg')?.outerHTML||'')+shapeEditorMarkup(i):'',
    effects:shadowEditorMarkup(i),
    properties:field('Name','name',i.name,'text')+`<label class="field inline"><input id="object-locked" type="checkbox" ${i.locked?'checked':''}> Lock object</label>`,
   });
@@ -456,7 +454,6 @@ function renderInspector(){
  };
  bindShadowEditor(i,box,styleBindings);
  bindShapeEditor(i,box,styleBindings);
- bindVectorShapeEditor(i,box,change);
  $('object-locked').onchange=e=>change(()=>i.locked=e.target.checked);
  const text=$('text-content');if(text){text.disabled=i.locked;text.oninput=()=>{if(!pendingText)pendingText=snapshot();i.text=text.value.slice(0,20000);i.height=Math.max(i.fontSize*1.2*i.text.split('\n').length,i.height);changed();renderStage();};text.onblur=()=>{flushText();renderLayers();renderToolbar();};}
 }

@@ -252,7 +252,7 @@ export async function exportPDF(input, dpi = 300) {
     // Raster patches use unrotated local axes; preserve fixed world shadow direction.
     const localShadow = item.shadow?.rotateWithShape === false ? {shadow:{...item.shadow,angle:((item.shadow.angle-item.rotation)%360+360)%360,rotateWithShape:true}} : {};
     let drawing;
-    if (item.type !== 'image' && (item.shadow?.enabled || item.strokeGradient || item.type === 'shape' && item.fillGradient)) {
+    if (item.type !== 'image' && (item.shadow?.enabled || item.strokeGradient || item.fillGradient)) {
       const bounds = shadowBounds(item);
       if (bounds.width <= 0 || bounds.height <= 0) continue;
       // The raster canvas requires at least 1 CSS px; keep thin strokes centered.
@@ -260,7 +260,7 @@ export async function exportPDF(input, dpi = 300) {
       if (bounds.height < 1) { bounds.y -= (1-bounds.height)/2; bounds.height = 1; }
       checkPixels(Math.max(1, Math.round(bounds.width * dpi / 96)), Math.max(1, Math.round(bounds.height * dpi / 96)));
       const local = { ...project, canvas: { width: bounds.width, height: bounds.height, background: 'transparent' }, assets: [], items: [{ ...item, ...localShadow, x: -bounds.x, y: -bounds.y, rotation: 0, opacity: 1 }] };
-      const name = await withRasterCanvas(local, dpi, async (canvas, context) => embedPixels(pdf, context.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height), 'PDF gradient shape');
+      const name = await withRasterCanvas(local, dpi, async (canvas, context) => embedPixels(pdf, context.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height), 'PDF gradient shape', {gradientRotation:item.rotation});
       drawing = { bounds: [bounds.x, bounds.y, bounds.x + bounds.width, bounds.y + bounds.height], content: `q ${n(bounds.width)} 0 0 ${n(-bounds.height)} ${n(bounds.x)} ${n(bounds.y + bounds.height)} cm /${name} Do Q\n` };
     }
     else if (item.type === 'text') drawing = outlines.has(item.id) ? textShape(pdf, item, outlines.get(item.id)) : null;
@@ -271,7 +271,7 @@ export async function exportPDF(input, dpi = 300) {
         const bounds = shadowBounds(item);
         checkPixels(Math.max(1, Math.round(bounds.width * dpi / 96)), Math.max(1, Math.round(bounds.height * dpi / 96)));
         const local = { ...project, canvas: { width: bounds.width, height: bounds.height, background: 'transparent' }, assets: [asset], items: [{ ...item, ...localShadow, x: -bounds.x, y: -bounds.y, rotation: 0, opacity: 1 }] };
-        const name = await withRasterCanvas(local, dpi, async (canvas, context) => embedPixels(pdf, context.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height), 'PDF shadow');
+        const name = await withRasterCanvas(local, dpi, async (canvas, context) => embedPixels(pdf, context.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height), 'PDF shadow', {gradientRotation:item.rotation});
         drawing = { bounds: [bounds.x, bounds.y, bounds.x + bounds.width, bounds.y + bounds.height], content: `q ${n(bounds.width)} 0 0 ${n(-bounds.height)} ${n(bounds.x)} ${n(bounds.y + bounds.height)} cm /${name} Do Q\n` };
       } else {
         if (!images.has(asset.id)) images.set(asset.id, await embedAsset(pdf, asset));

@@ -19,17 +19,24 @@ export function validateShape(item) {
 }
 export function validateGradient(g) {
   if (!g || !finite(g.angle,-36000,36000) || !Array.isArray(g.stops) || g.stops.length < 2 || g.stops.length > 16) invalid();
+  if (g.type !== undefined && !['linear','radial'].includes(g.type)) invalid();
+  if (g.center !== undefined && (!g.center || !finite(g.center.x,0,1) || !finite(g.center.y,0,1))) invalid();
+  if (g.rotateWithShape !== undefined && typeof g.rotateWithShape !== 'boolean') invalid();
   let previous=-1;
   const stops=g.stops.map(s=>{
     if(!s || !finite(s.offset,0,1) || s.offset<previous || !colorOK(s.color))invalid();
-    previous=s.offset;return {offset:s.offset,color:s.color};
+    if(s.brightness !== undefined && !finite(s.brightness,-100,100))invalid();
+    previous=s.offset;return {offset:s.offset,color:s.color,...(s.brightness !== undefined ? {brightness:s.brightness} : {})};
   });
-  return {angle:g.angle,stops};
+  // Keep legacy gradients byte-for-byte compatible; defaults are interpreted by paint code.
+  return {angle:g.angle,stops,...(g.type !== undefined ? {type:g.type} : {}),
+    ...(g.center !== undefined ? {center:{x:g.center.x,y:g.center.y}} : {}),
+    ...(g.rotateWithShape !== undefined ? {rotateWithShape:g.rotateWithShape} : {})};
 }
 export function cloneShape(item) {
   return {
     ...(item.type==='shape' ? {paths:item.paths.map(p=>({...p,commands:p.commands.map(c=>[...c])}))} : {}),
-    ...Object.fromEntries(['fillGradient','strokeGradient'].filter(key=>item[key]).map(key=>[key,{...item[key],stops:item[key].stops.map(s=>({...s}))}])),
+    ...Object.fromEntries(['fillGradient','strokeGradient'].filter(key=>item[key]).map(key=>[key,{...item[key],...(item[key].center ? {center:{...item[key].center}} : {}),stops:item[key].stops.map(s=>({...s}))}])),
   };
 }
 
@@ -41,6 +48,17 @@ export function shadeColor(value, mode='norm') {
   if (factor === undefined) return c;
   const channels = [1,3,5].map(i=>parseInt(c.slice(i,i+2),16));
   return '#'+channels.map(v=>Math.round(mode.startsWith('darken') ? v*factor : v+(255-v)*factor).toString(16).padStart(2,'0')).join('')+c.slice(7);
+}
+/** PowerPoint brightness adjusts HSL luminance, leaving hue, saturation and alpha intact. */
+export function gradientStopColor(stop) {
+  const c=shadeColor(stop.color),amount=(stop.brightness??0)/100;
+  if (!amount) return c;
+  const rgb=[1,3,5].map(i=>parseInt(c.slice(i,i+2),16)/255);
+  const hi=Math.max(...rgb),lo=Math.min(...rgb),l=(hi+lo)/2,chroma=hi-lo;
+  const lightness=amount>0 ? l+(1-l)*amount : l*(1+amount);
+  const saturation=chroma===0 ? 0 : chroma/(1-Math.abs(2*l-1));
+  const nextChroma=(1-Math.abs(2*lightness-1))*saturation;
+  return '#'+rgb.map(v=>Math.round(Math.max(0,Math.min(1,chroma===0 ? lightness : lightness+(v-l)*nextChroma/chroma))*255).toString(16).padStart(2,'0')).join('')+c.slice(7);
 }
 export function shapeBounds(item) {
   let l=0,t=0,r=item.width,b=item.height;
@@ -55,10 +73,19 @@ const n = v => Number(v.toFixed(6));
 /** User-space paint servers also work on horizontal and vertical zero-area lines. */
 export function gradientSVG(item,g,id,mode='norm',stroke=false) {
   id=String(id).replace(/[^a-zA-Z0-9_-]/g,'-');
-  const a=g.angle*Math.PI/180,dx=Math.cos(a),dy=Math.sin(a),norm=Math.max(Math.abs(dx),Math.abs(dy));
   const w=Math.max(item.width,stroke?item.strokeWidth:0,.01),h=Math.max(item.height,stroke?item.strokeWidth:0,.01);
-  return `<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${n(item.width/2-dx/norm*w/2)}" y1="${n(item.height/2-dy/norm*h/2)}" x2="${n(item.width/2+dx/norm*w/2)}" y2="${n(item.height/2+dy/norm*h/2)}">`+
-    g.stops.map(s=>`<stop offset="${n(s.offset)}" stop-color="${shadeColor(s.color,mode)}"/>`).join('')+'</linearGradient>';
+  const stops=g.stops.map(s=>`<stop offset="${n(s.offset)}" stop-color="${shadeColor(gradientStopColor(s),mode)}"/>`).join('');
+  // PDF raster patches keep geometry local, but must retain the original slide orientation.
+  const rotation=g.rotateWithShape===false ? -(item.gradientRotation??item.rotation??0) : 0;
+  const rotate=rotation ? `rotate(${n(rotation)} ${n(item.width/2)} ${n(item.height/2)})` : '';
+  if (g.type==='radial') {
+    // DrawingML circle gradients use a circumscribing circle; fillToRect is
+    // relative to its square bounds, rather than stretching a circle to an ellipse.
+    const center=g.center??{x:.5,y:.5},radius=Math.hypot(w,h)/2,cx=item.width/2,cy=item.height/2;
+    return `<radialGradient id="${id}" gradientUnits="userSpaceOnUse" cx="${n(cx)}" cy="${n(cy)}" r="${n(radius)}" fx="${n(cx+radius*(2*center.x-1))}" fy="${n(cy+radius*(2*center.y-1))}"${rotate ? ` gradientTransform="${rotate}"` : ''}>${stops}</radialGradient>`;
+  }
+  const a=g.angle*Math.PI/180,dx=Math.cos(a),dy=Math.sin(a),norm=Math.max(Math.abs(dx),Math.abs(dy));
+  return `<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${n(item.width/2-dx/norm*w/2)}" y1="${n(item.height/2-dy/norm*h/2)}" x2="${n(item.width/2+dx/norm*w/2)}" y2="${n(item.height/2+dy/norm*h/2)}"${rotate ? ` gradientTransform="${rotate}"` : ''}>${stops}</linearGradient>`;
 }
 export function shapeSVG(item, id) {
   // IDs come from project IDs, but also constrain callers to inert identifiers.

@@ -185,3 +185,8 @@
 !/tests/test_native_shadow.py
 !/tests/native-shadow.html
 !/tests/native-shadow-browser.js
+
+# PowerPoint-style gradient fill controls and fidelity checks.
+!/gradient-editor.js
+!/tests/gradient-fill.test.mjs
+!/tests/test_gradient_fill.py
