@@ -247,7 +247,7 @@ class Locator:
             return None
 
     def indexed_sources(self, asset):
-        """Find bounded filename/path candidates without reading their contents."""
+        """Find indexed candidates; None means the result exceeded safe bounds."""
         name = asset["name"]
         if "/" in name or "\\" in name or Path(name).suffix.lower() not in IMAGE_EXTENSIONS:
             return []
@@ -258,7 +258,7 @@ class Locator:
             return []
         # Never establish uniqueness from truncated results or an arbitrary subset.
         if len(result.stdout) > 128 * 1024:
-            return []
+            return None
         expected = PurePosixPath(asset.get("relativePath") or name).parts
         normalized = lambda parts: tuple(unicodedata.normalize("NFC", part) for part in parts)
         expected = normalized(expected)
@@ -273,11 +273,35 @@ class Locator:
             if image is not None:
                 candidates.add(image)
                 if len(candidates) > 16:
-                    return []
+                    return None
         return sorted(candidates)
+
+    def direct_sources(self, asset):
+        """Check exact paths in common import folders, without walking or reading files.
+
+        New downloads can be absent from Spotlight, and browsers do not expose
+        the absolute path of an imported File. Keep this fallback bounded to
+        the supplied filename or folder-relative path in a few local roots.
+        """
+        name = asset["name"]
+        if "/" in name or "\\" in name or Path(name).suffix.lower() not in IMAGE_EXTENSIONS:
+            return []
+        relative = relative_path(asset.get("relativePath") or name)
+        if unicodedata.normalize("NFC", relative.name) != unicodedata.normalize("NFC", name):
+            return []
+        home = Path.home()
+        roots = (home, *(home / folder for folder in ("Downloads", "Desktop", "Documents", "Pictures")))
+        return sorted({image for root in roots if (image := self.image_file(root / relative)) is not None})
 
     def discover_source(self, asset):
         candidates = self.indexed_sources(asset)
+        if candidates is None:
+            return None
+        # Include direct matches even when Spotlight found a candidate; an
+        # unindexed copy must not make us assume that indexed result is unique.
+        candidates = sorted(set(candidates).union(self.direct_sources(asset)))
+        if len(candidates) > 16:
+            return None
         # Locate reveals the source's current file, including edits made since
         # import. A unique exact filename/path match need not have old bytes.
         if len(candidates) == 1:

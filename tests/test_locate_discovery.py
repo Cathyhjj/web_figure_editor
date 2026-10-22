@@ -132,6 +132,69 @@ class LocateDiscoveryTests(unittest.TestCase):
             self.assertEqual(self.locator.discover_source(asset), image)
         fingerprint.assert_not_called()
 
+    def test_unindexed_downloaded_html_is_revealed_and_remembered(self):
+        name = "Rhenium-methyl-dimer-IBO-50-interactive (2).html"
+        image = self.make_image("Downloads/" + name, b"<!doctype html><canvas></canvas>")
+        asset = {"id": "downloaded-html", "name": name,
+                 "fingerprint": hashlib.sha256(image.read_bytes()).hexdigest()}
+        with mock.patch.object(self.locator, "matches_fingerprint") as fingerprint:
+            self.assertEqual(self.locator.locate(asset), {"status": "revealed"})
+        fingerprint.assert_not_called()
+        self.assertEqual(self.run.call_args.args[0], ["/usr/bin/open", "-R", str(image)])
+        self.assertIn(str(image), self.locator.locations.values())
+
+    def test_unindexed_folder_import_keeps_its_relative_path(self):
+        image = self.make_image("Desktop/Study/panel.png")
+        self.make_image("Downloads/OtherStudy/panel.png")
+        self.assertEqual(self.locator.discover_source(self.asset), image)
+
+    def test_direct_lookup_does_not_walk_unrelated_subfolders(self):
+        self.make_image("Downloads/Unrelated/Study/panel.png")
+        self.assertIsNone(self.locator.discover_source(self.asset))
+
+    def test_direct_lookup_still_works_when_spotlight_is_unavailable(self):
+        image = self.make_image("Downloads/Study/panel.png")
+        self.run.side_effect = subprocess.TimeoutExpired("mdfind", 3)
+        self.assertEqual(self.locator.discover_source(self.asset), image)
+
+    def test_indexed_and_unindexed_identical_copies_remain_ambiguous(self):
+        indexed = self.make_image("project/Study/panel.png")
+        self.make_image("Downloads/Study/panel.png")
+        self.indexed(indexed)
+        with self.file_flags(), self.assertRaises(server.LocateError) as raised:
+            self.locator.discover_source(self.asset)
+        self.assertEqual(raised.exception.status, 409)
+
+    def test_indexed_and_direct_result_for_same_file_is_deduplicated(self):
+        image = self.make_image("Downloads/Study/panel.png")
+        self.indexed(image)
+        with mock.patch.object(self.locator, "matches_fingerprint") as fingerprint:
+            self.assertEqual(self.locator.discover_source(self.asset), image)
+        fingerprint.assert_not_called()
+
+    def test_direct_copies_use_fingerprint_disambiguation(self):
+        self.make_image("Downloads/Study/panel.png", b"unrelated image")
+        image = self.make_image("Desktop/Study/panel.png")
+        with self.file_flags():
+            self.assertEqual(self.locator.discover_source(self.asset), image)
+
+    def test_direct_cloud_candidates_are_not_read_or_guessed(self):
+        self.make_image("Downloads/Study/panel.png")
+        self.make_image("Desktop/Study/panel.png")
+        flag = getattr(stat, "SF_DATALESS", 0x40000000)
+        with self.file_flags(flag), mock.patch.object(server.stat, "SF_DATALESS", flag, create=True), \
+                mock.patch.object(Path, "open", side_effect=AssertionError("Cloud content must not be read")), \
+                self.assertRaises(server.LocateError) as raised:
+            self.locator.discover_source(self.asset)
+        self.assertEqual(raised.exception.status, 409)
+
+    def test_excess_index_results_do_not_allow_direct_subset_to_appear_unique(self):
+        self.make_image("Downloads/Study/panel.png")
+        self.run.return_value = subprocess.CompletedProcess([], 0, stdout="x" * (128 * 1024 + 1))
+        with mock.patch.object(self.locator, "matches_fingerprint") as fingerprint:
+            self.assertIsNone(self.locator.discover_source(self.asset))
+        fingerprint.assert_not_called()
+
     def test_unique_fingerprint_disambiguates_different_local_copies(self):
         first = self.make_image("first/Study/panel.png", b"unrelated same-name image")
         second = self.make_image("second/Study/panel.png")

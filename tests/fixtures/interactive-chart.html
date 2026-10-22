@@ -9,6 +9,11 @@
 </svg><div id="tooltip" role="status">Peak: x = 440, y = 190</div><button id="zoom-chart">Zoom in</button>
 <script>
 let zoom=1;
+// Expose animation progress and document identity for the editor lifecycle regression.
+window.animationFrames=0;
+document.body.dataset.runId=Date.now()+'-'+Math.random();
+function animate(){window.animationFrames++;requestAnimationFrame(animate);}
+requestAnimationFrame(animate);
 function update(){document.getElementById('series').setAttribute('transform',`translate(440 350) scale(${zoom}) translate(-440 -350)`);document.getElementById('zoom-level').textContent='Zoom: '+zoom.toFixed(1);}
 document.getElementById('zoom-chart').onclick=()=>{zoom+=.2;update();};
 document.querySelector('svg').addEventListener('wheel',event=>{event.preventDefault();zoom=Math.max(.2,zoom+(event.deltaY<0?.1:-.1));update();},{passive:false});
