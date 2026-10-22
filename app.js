@@ -461,7 +461,11 @@ async function importResult(result,position,target,{libraryOnly=false}={}){
    page.items.push(i);if(page.id===project.activeSlideId)selected=new Set([i.id]);
   }});
   if(!applied)return;
-  status(`Imported ${result.assets.length} asset${result.assets.length===1?'':'s'} into ${libraryOnly?'Assets':page.name}.${libraryOnly?' Click Place to add an asset to the canvas.':' Portable copies are included.'}${skipped}${errors?' '+errors:''}`,!!errors);
+  const linked=result.assets.filter(a=>a.sourceKind==='linked'),sessionLinks=linked.filter(a=>a.linkPersistence==='session').length;
+  const unlinked=result.assets.filter(a=>a.sourceOrigin==='file'&&a.sourceKind!=='linked').length;
+  const links=linked.length?` ${linked.length} original file${linked.length===1?'':'s'} linked; use Refresh after editing the original.${sessionLinks?' Session links need relinking after reloading.':''}`:'';
+  const copies=unlinked?` ${unlinked} file${unlinked===1?' was':'s were'} imported as copies because this browser could not keep a file link. Use Locate to select the original.`:'';
+  status(`Imported ${result.assets.length} asset${result.assets.length===1?'':'s'} into ${libraryOnly?'Assets':page.name}.${libraryOnly?' Click Place to add an asset to the canvas.':' Portable copies are included.'}${links}${copies}${skipped}${errors?' '+errors:''}`,!!errors);
   if(!libraryOnly&&page.id===project.activeSlideId&&chosen()[0]?.type==='html')openHTMLChart(chosen()[0]);
  }else if(errors)status(errors+skipped,true);
  else if('skipped' in result)status('No supported media found. Choose a folder containing PNG, JPG, WebP, SVG, MP4, or HTML files.'+skipped);

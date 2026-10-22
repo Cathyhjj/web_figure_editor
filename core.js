@@ -136,6 +136,7 @@ function validateProjectInternal(input, assetCache) {
       if (asset.width > 4096 || asset.height > 4096 || asset.width * asset.height > 4_000_000) fail('HTML chart viewport is too large.');
     }
     for (const key of ['relativePath', 'fingerprint']) if (a[key] !== undefined) asset[key] = string(a[key], `asset.${key}`, 2000);
+    if (a.sourceOrigin !== undefined) asset.sourceOrigin = choice(a.sourceOrigin, 'asset.sourceOrigin', ['file', 'clipboard']);
     if (a.linkToken !== undefined) asset.linkToken = id(a.linkToken, 'asset.linkToken', 200);
     if (a.linkPersistence !== undefined) asset.linkPersistence = choice(a.linkPersistence, 'asset.linkPersistence', ['browser', 'session']);
     if (a.rasterized !== undefined) asset.rasterized = boolean(a.rasterized, 'asset.rasterized');
@@ -232,6 +233,7 @@ function manifest(project) {
     sources: project.assets.map(a => ({
       id: a.id, name: a.name, mime: a.mime, width: a.width, height: a.height, size: a.size, lastModified: a.lastModified,
       sourceKind: a.sourceKind, embeddedCopy: true, ...(a.relativePath !== undefined ? { relativePath: a.relativePath } : {}),
+      ...(a.sourceOrigin !== undefined ? { sourceOrigin: a.sourceOrigin } : {}),
       ...(a.fingerprint !== undefined ? { fingerprint: a.fingerprint } : {}),
       ...(a.linkToken !== undefined ? { linkToken: a.linkToken, linkTokenScope: 'Browser-local reference; file handle is not embedded.' } : {}),
       ...(a.linkPersistence !== undefined ? { linkPersistence: a.linkPersistence } : {}),

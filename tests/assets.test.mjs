@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { importFiles, importFolderFiles, importDroppedFiles, pickFolder, replaceAsset, refreshAsset, assetLinkStatus, pickImages, linkAsset, MAX_FILE_BYTES } from '../assets.js';
+import { createProject, serializeProject, validateProject } from '../core.js';
 
 // Image decode itself is covered by browser checks. This stand-in keeps IO/permission tests deterministic.
 globalThis.Image = class {
@@ -18,6 +19,7 @@ test('imports portable original PNG bytes and records source metadata', async ()
   assert.equal(assets[0].mime, 'image/png');
   assert.equal(assets[0].name, 'panel.png');
   assert.equal(assets[0].sourceKind, 'copy');
+  assert.equal(assets[0].sourceOrigin, 'file');
   assert.equal(assets[0].lastModified, 123);
   assert.equal(assets[0].dataUrl, `data:image/png;base64,${Buffer.from(pngBytes).toString('base64')}`);
   assert.equal(await assetLinkStatus(assets[0]), 'Embedded project copy');
@@ -244,7 +246,36 @@ test('drop handles support nested directories and linked images, with plain File
   const plain = await importDroppedFiles({ files: [png('loose.png'), textFile()] });
   assert.equal(plain.assets[0].name, 'loose.png');
   assert.equal(plain.assets[0].relativePath, undefined);
+  const project = createProject();
+  project.assets = plain.assets;
+  const reopened = validateProject(JSON.parse(serializeProject(project))).assets[0];
+  assert.equal(reopened.sourceOrigin, 'file');
   assert.equal(plain.errors[0].name, 'notes.txt');
+});
+
+test('legacy dropped entries retain session links and reread original bytes on Refresh', async () => {
+  let current = png('original.png'), reads = 0, missing = false;
+  const entry = { name: current.name, isFile: true, file(resolve, reject) {
+    reads++;
+    if (missing) reject(new DOMException('Missing', 'NotFoundError')); else resolve(current);
+  } };
+  const result = await importDroppedFiles({ items: [{ kind: 'file', webkitGetAsEntry: () => entry }] });
+  const original = result.assets[0];
+  assert.deepEqual(result.errors, []);
+  assert.equal(original.sourceKind, 'linked');
+  assert.equal(original.linkPersistence, 'session');
+  assert.match(await assetLinkStatus(original), /Local file linked \(this session only\)/);
+  current = Object.assign(new Blob([pngBytes, new Uint8Array([1])], { type: 'image/png' }), { name: 'original.png', lastModified: 456 });
+  const refreshed = await refreshAsset(JSON.parse(JSON.stringify(original)));
+  assert.equal(reads, 2);
+  assert.equal(refreshed.id, original.id);
+  assert.equal(refreshed.linkToken, original.linkToken);
+  assert.equal(refreshed.linkPersistence, 'session');
+  assert.notEqual(refreshed.dataUrl, original.dataUrl);
+  assert.equal(refreshed.lastModified, 456);
+  missing = true;
+  await assert.rejects(refreshAsset(refreshed), /moved or deleted/);
+  assert.equal(refreshed.lastModified, 456, 'A failed read leaves the embedded source unchanged');
 });
 
 test('one decoded-image budget applies across every subfolder in a recursive import', async () => {

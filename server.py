@@ -209,9 +209,18 @@ class Locator:
         if not self.lock.acquire(blocking=False):
             raise LocateError(409, "A Locate request is already open. Finish it before trying again.")
         try:
-            key = hashlib.sha256(json.dumps(asset, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+            legacy_key = hashlib.sha256(json.dumps(asset, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+            # Refresh changes image bytes, while its immutable link token still
+            # identifies the same source. Relink/undo use their own token.
+            identity = {"id": asset["id"], "linkToken": asset["linkToken"]} if asset.get("linkToken") else asset
+            key = hashlib.sha256(json.dumps(identity, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
             remembered = self.locations.get(key)
             image = self.image_file(remembered) if remembered else None
+            migrated = False
+            if image is None and key != legacy_key:
+                remembered = self.locations.get(legacy_key)
+                image = self.image_file(remembered) if remembered else None
+                migrated = image is not None
             if image is None:
                 image = self.source_path(asset)
             discovered = False
@@ -224,7 +233,7 @@ class Locator:
                 subprocess.run(["/usr/bin/open", "-R", str(image)], capture_output=True, check=True, timeout=10)
             except (OSError, subprocess.SubprocessError):
                 raise LocateError(500, "Finder could not reveal the image. Try Locate again.")
-            if discovered:
+            if migrated or discovered:
                 self.remember(key, image)
             return {"status": "revealed"}
         finally:

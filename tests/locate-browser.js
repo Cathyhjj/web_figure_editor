@@ -48,13 +48,13 @@ async function loadEditor() {
   return iframe;
 }
 
-async function makePNG() {
+async function makePNG(color = '#9d347d', width = 4, height = 3) {
   const canvas = document.createElement('canvas');
-  canvas.width = 4;
-  canvas.height = 3;
+  canvas.width = width;
+  canvas.height = height;
   const context = canvas.getContext('2d');
-  context.fillStyle = '#9d347d';
-  context.fillRect(0, 0, 4, 3);
+  context.fillStyle = color;
+  context.fillRect(0, 0, width, height);
   return new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not generate PNG fixture.')), 'image/png'));
 }
 
@@ -66,8 +66,8 @@ runButton.onclick = async () => {
   window.locateChecks = { finished: false, checks };
   let restore = () => {};
   try {
-    if (location.port !== '18766' || !['127.0.0.1', 'localhost'].includes(location.hostname)) {
-      throw new Error('Use a separate localhost server on port 18766 to protect the normal editor draft.');
+    if (!['18766','18768','18770'].includes(location.port) || !['127.0.0.1', 'localhost'].includes(location.hostname)) {
+      throw new Error('Use a separate localhost server on port 18766, 18768, or 18770 to protect the normal editor draft.');
     }
     const iframe = await loadEditor();
     const win = iframe.contentWindow;
@@ -166,6 +166,83 @@ runButton.onclick = async () => {
     await clickLocate();
     check('A failed local connection restores Locate and explains the failure', !targetButton.disabled && get('status').textContent.includes('Could not reach Finder') && get('status').classList.contains('error'));
     check('Cancellation and failures preserve selection, objects, and embedded image bytes', selection() === selected && await save() === snapshot);
+
+    reply = async () => json({ status: 'revealed' });
+    const library = doc.querySelector('.library-panel');
+    const drop = dataTransfer => library.ondrop({ dataTransfer, preventDefault() {}, stopPropagation() {} });
+    const cardNamed = name => cards().find(card => card.querySelector('.asset-name')?.textContent === name);
+    const clickAction = async (name, action) => {
+      const card = cardNamed(name);
+      const button = card?.querySelector(`[data-action="${action}"]`);
+      if (!button) throw new Error(`${name} has no ${action} action.`);
+      await card.onclick({ target: button });
+    };
+
+    const looseName = 'dropped-original.png';
+    const plainDrop = new win.DataTransfer();
+    plainDrop.items.add(new win.File([png], looseName, { type: 'image/png', lastModified: 456 }));
+    // Supply a genuine FileList without handle/entry APIs to exercise that fallback.
+    const looseStart = calls.length;
+    await drop({ files: plainDrop.files });
+    const looseBefore = await save();
+    const looseAsset = JSON.parse(looseBefore).assets.find(asset => asset.name === looseName);
+    check('A plain single-file drop keeps file provenance without inventing a source path',
+      looseAsset?.sourceOrigin === 'file' && looseAsset.sourceKind === 'copy' && !looseAsset.relativePath);
+    await clickAction(looseName, 'locate');
+    const looseCalls = calls.slice(looseStart);
+    check('Locate on a plain drop requests its original directly and never saves a clipboard copy',
+      JSON.stringify(looseCalls.map(call => call.url)) === JSON.stringify(['/api/local', '/api/locate'])
+      && JSON.parse(looseCalls[1].options.body).asset.id === looseAsset.id
+      && !looseCalls.some(call => call.url === '/api/clipboard-image')
+      && !get('status').classList.contains('error'));
+    check('Locating a plain drop preserves its embedded image and existing layout', await save() === looseBefore);
+
+    const sessionName = 'session-original.png';
+    let currentFile = new win.File([png], sessionName, { type: 'image/png', lastModified: 789 });
+    let entryReads = 0;
+    const entry = { name: sessionName, isFile: true, isDirectory: false,
+      file(resolve) { entryReads++; resolve(currentFile); } };
+    await drop({ files: [currentFile], items: [{ kind: 'file', getAsFile: () => currentFile, webkitGetAsEntry: () => entry }] });
+    const sessionCard = cardNamed(sessionName);
+    check('A legacy file-entry drop exposes a session link and Refresh action',
+      sessionCard?.querySelector('.asset-meta')?.textContent.includes('Session link + copy')
+      && !!sessionCard?.querySelector('[data-action="refresh"]'));
+    await clickAction(sessionName, 'place');
+    const sessionBefore = JSON.parse(await save());
+    const sourceBefore = sessionBefore.assets.find(asset => asset.name === sessionName);
+    const layoutBefore = JSON.stringify(sessionBefore.slides);
+    check('The session-linked source is saved with its token and a placed canvas object',
+      sourceBefore?.sourceKind === 'linked' && sourceBefore.linkPersistence === 'session'
+      && typeof sourceBefore.linkToken === 'string' && !!sourceBefore.linkToken
+      && sessionBefore.slides.some(slide => slide.items.some(item => item.assetId === sourceBefore.id)));
+
+    const updatedPNG = await makePNG('#168f7b', 8, 5);
+    currentFile = new win.File([updatedPNG], sessionName, { type: 'image/png', lastModified: 790 });
+    await clickAction(sessionName, 'refresh');
+    const sessionAfter = JSON.parse(await save());
+    const sourceAfter = sessionAfter.assets.find(asset => asset.id === sourceBefore.id);
+    check('Refresh re-reads the retained entry and updates saved image bytes and dimensions',
+      entryReads === 2 && sourceAfter.dataUrl !== sourceBefore.dataUrl
+      && sourceAfter.fingerprint !== sourceBefore.fingerprint && sourceAfter.width === 8 && sourceAfter.height === 5
+      && cardNamed(sessionName).querySelector('.asset-thumb').getAttribute('src') === sourceAfter.dataUrl
+      && !get('status').classList.contains('error'));
+    check('Refresh preserves the session link token and all placed object geometry',
+      sourceAfter.linkToken === sourceBefore.linkToken && sourceAfter.linkPersistence === 'session'
+      && JSON.stringify(sessionAfter.slides) === layoutBefore);
+
+    const sessionStart = calls.length;
+    await clickAction(sessionName, 'locate');
+    const sessionCalls = calls.slice(sessionStart);
+    const sessionLocate = sessionCalls.find(call => call.url === '/api/locate');
+    const sessionSent = sessionLocate && JSON.parse(sessionLocate.options.body).asset;
+    check('Locate after Refresh sends the same source token with the updated fingerprint',
+      sessionSent?.linkToken === sourceBefore.linkToken && sessionSent?.fingerprint === sourceAfter.fingerprint
+      && JSON.stringify(sessionCalls.map(call => call.url)) === JSON.stringify(['/api/local', '/api/locate']));
+    const originalProject = JSON.parse(snapshot);
+    check('Drop and Refresh regressions leave the original fixture assets and objects unchanged',
+      originalProject.assets.every(asset => JSON.stringify(sessionAfter.assets.find(current => current.id === asset.id)) === JSON.stringify(asset))
+      && originalProject.slides.every(slide => slide.items.every(item =>
+        JSON.stringify(sessionAfter.slides.find(current => current.id === slide.id)?.items.find(current => current.id === item.id)) === JSON.stringify(item))));
   } catch (error) {
     check(error.stack || error.message, false);
   } finally {

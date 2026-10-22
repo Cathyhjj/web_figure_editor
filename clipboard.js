@@ -111,7 +111,7 @@ function sameImage(left, right) {
 function reusablePortableAsset(existing, source) {
   return existing.sourceKind === 'copy' && existing.linkToken === undefined && existing.linkPersistence === undefined
     && sameImage(existing, source)
-    && ['name', 'relativePath', 'fingerprint', 'lastModified'].every(key => existing[key] === source[key]);
+    && ['name', 'relativePath', 'fingerprint', 'lastModified', 'sourceOrigin'].every(key => existing[key] === source[key]);
 }
 
 function freshId(used) {

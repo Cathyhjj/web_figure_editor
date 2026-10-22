@@ -159,6 +159,67 @@ class LocalServerTests(unittest.TestCase):
         self.assertEqual(self.locate(asset)[0], 404)
         self.run.assert_not_called()
 
+    def test_linked_location_survives_refresh_and_keeps_relink_and_undo_separate(self):
+        asset = {"id": "linked", "name": "panel.png", "linkToken": "original-link",
+                 "fingerprint": hashlib.sha256(self.image.read_bytes()).hexdigest()}
+        self.discover.return_value = [self.image.resolve()]
+        self.assertEqual(self.locate(asset)[0], 200)
+        self.image.write_bytes(b"updated original image")
+        refreshed = {**asset, "fingerprint": hashlib.sha256(self.image.read_bytes()).hexdigest()}
+        self.local.locator = server.Locator(self.root)
+        self.run.reset_mock()
+        self.discover.return_value = []
+        self.assertEqual(self.locate(refreshed)[0], 200)
+        self.run.assert_called_once_with(["/usr/bin/open", "-R", str(self.image.resolve())],
+                                         capture_output=True, check=True, timeout=10)
+
+        replacement = self.root / "replacement.png"
+        replacement.write_bytes(b"different linked image")
+        relinked = {**refreshed, "linkToken": "replacement-link"}
+        self.run.reset_mock()
+        self.discover.return_value = [replacement.resolve()]
+        self.assertEqual(self.locate(relinked)[0], 200)
+        self.run.assert_called_once_with(["/usr/bin/open", "-R", str(replacement.resolve())],
+                                         capture_output=True, check=True, timeout=10)
+
+        self.local.locator = server.Locator(self.root)
+        self.discover.return_value = []
+        for restored, path in ((asset, self.image), (relinked, replacement)):
+            with self.subTest(link_token=restored["linkToken"]):
+                self.run.reset_mock()
+                self.assertEqual(self.locate(restored)[0], 200)
+                self.run.assert_called_once_with(["/usr/bin/open", "-R", str(path.resolve())],
+                                                 capture_output=True, check=True, timeout=10)
+
+    def test_legacy_linked_location_migrates_before_later_refresh(self):
+        asset = {"id": "legacy", "name": "panel.png", "linkToken": "legacy-link",
+                 "fingerprint": hashlib.sha256(self.image.read_bytes()).hexdigest()}
+        legacy_key = hashlib.sha256(json.dumps(asset, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        self.local.locator.remember(legacy_key, self.image)
+        self.local.locator = server.Locator(self.root)
+        self.assertEqual(self.locate(asset)[0], 200)
+        self.run.assert_called_once_with(["/usr/bin/open", "-R", str(self.image.resolve())],
+                                         capture_output=True, check=True, timeout=10)
+
+        self.local.locator = server.Locator(self.root)
+        self.image.write_bytes(b"refreshed legacy image")
+        self.run.reset_mock()
+        refreshed = {**asset, "fingerprint": hashlib.sha256(self.image.read_bytes()).hexdigest()}
+        self.assertEqual(self.locate(refreshed)[0], 200)
+        self.run.assert_called_once_with(["/usr/bin/open", "-R", str(self.image.resolve())],
+                                         capture_output=True, check=True, timeout=10)
+
+    def test_copy_location_remains_bound_to_its_complete_source_metadata(self):
+        asset = {"id": "copy", "name": "panel.png",
+                 "fingerprint": hashlib.sha256(self.image.read_bytes()).hexdigest()}
+        self.discover.return_value = [self.image.resolve()]
+        self.assertEqual(self.locate(asset)[0], 200)
+        self.local.locator = server.Locator(self.root)
+        self.run.reset_mock()
+        self.discover.return_value = []
+        self.assertEqual(self.locate({**asset, "fingerprint": "0" * 64})[0], 404)
+        self.run.assert_not_called()
+
     def test_missing_and_ambiguous_sources_return_errors_without_native_dialog(self):
         asset = {"id": "unknown", "name": "unknown.png"}
         self.assertEqual(self.locate(asset)[0], 404)

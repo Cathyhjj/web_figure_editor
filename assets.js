@@ -10,6 +10,7 @@ const SVG_MAX_SIDE = 8_192;
 const DB_NAME = 'figure-editor-local-assets-v1';
 const STORE_NAME = 'handles';
 const memoryHandles = new Map();
+const sessionHandles = new WeakSet();
 let databasePromise;
 
 const pickerOptions = {
@@ -82,6 +83,8 @@ function getAssetHandle(asset) {
 
 async function setHandle(key, handle) {
   memoryHandles.set(key, handle);
+  // Legacy dropped entries can be read again, but cannot be serialized to IndexedDB.
+  if (sessionHandles.has(handle)) return false;
   const db = await getDatabase();
   if (!db) return false;
   return new Promise((resolve) => {
@@ -280,7 +283,7 @@ async function buildAsset(file, id = newId(), relativePath = file?.webkitRelativ
   const asset = {
     id, name: file.name || 'image', mime, dataUrl: originalDataUrl,
     width: 0, height: 0, size: bytes.length,
-    lastModified: Number(file.lastModified) || 0, sourceKind: 'copy',
+    lastModified: Number(file.lastModified) || 0, sourceKind: 'copy', sourceOrigin: 'file',
   };
   if (relativePath) asset.relativePath = relativePath;
   const digest = await fingerprint(buffer);
@@ -398,8 +401,10 @@ async function* walkEntry(entry, relativePath, filter = true, depth = 0) {
   try {
     if (depth > 64) throw new Error('The folder is nested too deeply. Select a folder closer to these images.');
     if (entry.isFile) {
-      const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
-      yield { file, relativePath, filter };
+      const handle = { kind: 'file', name: entry.name,
+        getFile: () => new Promise((resolve, reject) => entry.file(resolve, reject)) };
+      sessionHandles.add(handle);
+      yield { file: await handle.getFile(), handle, relativePath, filter };
     } else if (entry.isDirectory) {
       const reader = entry.createReader();
       // Chromium returns directory entries in batches, so one readEntries call is insufficient.
@@ -547,7 +552,8 @@ export async function assetLinkStatus(asset) {
   const handle = await getAssetHandle(asset);
   if (!handle) return asset?.sourceKind === 'linked' ? 'Link unavailable. Relink the file; the embedded copy is preserved.' : 'Embedded project copy';
   try {
-    const permission = typeof handle.queryPermission === 'function' ? await handle.queryPermission({ mode: 'read' }) : 'prompt';
+    const permission = sessionHandles.has(handle) ? 'granted'
+      : typeof handle.queryPermission === 'function' ? await handle.queryPermission({ mode: 'read' }) : 'prompt';
     const scope = asset?.linkPersistence === 'session' ? 'this session only' : 'this browser';
     return permission === 'granted' ? `Local file linked (${scope})` : `File handle saved; permission required to refresh (${scope})`;
   } catch { return 'Link unavailable. Relink the file; the embedded copy is preserved.'; }
