@@ -172,3 +172,11 @@
 # Managed local originals from pasted images.
 !/local-source.js
 /local-assets/
+
+# Native PowerPoint slide paste.
+!/pptx-clipboard.js
+!/pptx_clipboard.py
+!/scripts/pptx_clipboard.swift
+!/tests/test_pptx_clipboard.py
+!/tests/pptx-paste.html
+!/tests/pptx-paste-browser.js

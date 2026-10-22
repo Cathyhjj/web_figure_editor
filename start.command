@@ -62,6 +62,7 @@ def has_local_backend():
             and isinstance(identity.get("locate"), bool)
             and identity.get("saveClipboardImage") is True
             and identity.get("pptxImport") is True
+            and identity.get("pptxPaste") is True
             and isinstance(identity.get("token"), str)
             and bool(identity["token"])
         )

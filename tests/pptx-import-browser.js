@@ -18,7 +18,7 @@ async function fixture(){
 run.onclick=async()=>{
  run.disabled=true;results.replaceChildren();window.pptxImportChecks={finished:false,checks:[]};document.querySelector('iframe')?.remove();
  try{
-  if(!['18766','18767','18768'].includes(location.port)||!['127.0.0.1','localhost'].includes(location.hostname))throw new Error('Use a separate local test port.');
+  if(!['18766','18767','18768','18770'].includes(location.port)||!['127.0.0.1','localhost'].includes(location.hostname))throw new Error('Use a separate local test port.');
   const frame=document.createElement('iframe');frame.title='PPTX import test editor';frame.src='../index.html';document.body.append(frame);await new Promise(resolve=>frame.onload=resolve);
   const win=frame.contentWindow,doc=frame.contentDocument;await wait(()=>!doc.querySelector('#import-pptx').disabled);
   win.confirm=()=>true;doc.querySelector('#new-project').click();

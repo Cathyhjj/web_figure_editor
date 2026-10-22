@@ -86,7 +86,8 @@ class LocalServerTests(unittest.TestCase):
         data = json.loads(raw)
         self.assertEqual(status, 200)
         self.assertEqual(data, {"app": "figure-editor-local", "version": 1, "locate": True,
-                            "saveClipboardImage": True, "pdfTextOutlines": False, "pptxImport": True,
+                            "saveClipboardImage": True, "pdfTextOutlines": False, "pptxImport": True, "pptxPaste": True,
+                            "pptxClipboard": server.clipboard_available(), "pptxClipboardReady": server.clipboard_ready(),
                             "token": self.local.token})
         self.assertEqual(self.request(path="/")[1], b"Figure Editor")
         self.assertEqual(self.request(path="/tests/browser.html")[1], b"Browser tests")
@@ -453,8 +454,8 @@ class StartupCapabilityTests(unittest.TestCase):
         response.status = 200
         namespace = {"urllib": urllib, "opener": opener, "json": json, "url": "http://127.0.0.1:8766/"}
         exec(compile(ast.Module(body=[check], type_ignores=[]), "start.command", "exec"), namespace)
-        identity = {"app": "figure-editor-local", "version": 1, "locate": True, "token": "test", "pptxImport": True, "saveClipboardImage": True}
-        for name in ("pptxImport","saveClipboardImage"):
+        identity = {"app": "figure-editor-local", "version": 1, "locate": True, "token": "test", "pptxImport": True, "pptxPaste": True, "saveClipboardImage": True}
+        for name in ("pptxImport","pptxPaste","saveClipboardImage"):
             for capability, expected in ((None, False), (False, False), ("true", False), (True, True)):
                 with self.subTest(name=name,capability=capability):
                     response.read.return_value = json.dumps({**identity, name: capability}).encode()

@@ -178,7 +178,7 @@ export async function preparePPTXSlide(converted, signal) {
   return { deck, preview: projectToSVG(project), warnings };
 }
 
-async function localAPI() {
+export async function localAPI() {
   if (location.protocol !== 'http:' || !['localhost','127.0.0.1'].includes(location.hostname)) throw new Error(launchHint);
   let local;
   try {

@@ -76,6 +76,16 @@ class PptxImportTests(unittest.TestCase):
         self.assertEqual(shape['fillGradient']['stops'][0]['color'],'#ff000080')
         self.assertEqual(result['media'],[])
 
+    def test_mac_clipboard_root_resolves_and_requires_one_slide(self):
+        source=fixture([slide(text_shape()+picture())])
+        output=io.BytesIO()
+        with zipfile.ZipFile(io.BytesIO(base64.b64decode(source['data']))) as old, zipfile.ZipFile(output,'w') as new:
+            for name in old.namelist():new.writestr(name.replace('ppt/','clipboard/',1),old.read(name))
+            new.writestr('_rels/.rels',relations([('document','officeDocument','clipboard/presentation.xml','')]))
+        result=import_pptx({'data':base64.b64encode(output.getvalue()).decode()},single_slide=True)
+        self.assertEqual([item['type'] for item in result['items']],['textBlock','image'])
+        with self.assertRaisesRegex(PptxImportError,'exactly one'):import_pptx(fixture(),single_slide=True)
+
     def test_inspect_follows_presentation_order_and_does_not_return_images(self):
         data=fixture()
         result=import_pptx(data)

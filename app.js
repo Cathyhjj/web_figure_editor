@@ -17,6 +17,7 @@ import { hasSavedLocalSource, needsLocalSource, saveClipboardAsset, savePastedSo
 import { generateHTMLReport } from './report.js';
 import { exportPPTX, pptxLayout } from './pptx.js';
 import { initPPTXImport } from './pptx-import.js';
+import { POWERPOINT_MIME, initPowerPointPaste } from './pptx-clipboard.js';
 import { exportPDF } from './pdf.js';
 import { initWindows } from './windows.js';
 import { initSlideDrag } from './slide-drag.js';
@@ -474,15 +475,18 @@ function selectAsset(a){
 }
 function placeAsset(a){change(()=>{const maxW=slide().canvas.width*.43,maxH=slide().canvas.height*.65,scale=Math.min(1,maxW/a.width,maxH/a.height);const offset=slide().items.length%6*18;const i={...base(a.mime==='text/html'?'html':a.mime==='video/mp4'?'video':'image',60+offset,60+offset,a.width*scale,a.height*scale),assetId:a.id,name:a.name};slide().items.push(i);selected=new Set([i.id]);});status(`Added ${a.name} to the canvas.`);if(a.mime==='text/html')openHTMLChart(chosen()[0]);}
 const importTarget=()=>({project,slideId:project.activeSlideId});
-initPPTXImport({
- captureTarget:importTarget,
- targetIsCurrent:target=>target.project===project&&target.slideId===project.activeSlideId&&(!fileOperation||autosaveWriting),
- insert:(deck,warnings)=>{
+function insertPowerPointSlide(deck,warnings){
   const applied=change(()=>{const pages=pasteSlides(project,deck);selectedSlideIds=new Set(pages.map(page=>page.id));slideSelectionAnchor=pages[0].id;selected.clear();lastPaste=null;});
-  if(applied){fit();focusCurrentSlide();status(`Imported ${slide().name}. Images and text are independently editable. Use Undo to remove this slide.${warnings.some(w=>/omitted|not retained/i.test(w))?' Some PowerPoint features were not retained; see the import preview notes.':''}`);}
+  if(applied){fit();focusCurrentSlide();status(`Imported ${slide().name}. Text, images and shapes are independently editable. Use Undo to remove this slide.${warnings.some(w=>/omitted|not retained/i.test(w))?' Some PowerPoint features were not retained; see the import preview notes.':''}`);}
   else throw new Error($('status').textContent);
   return applied;
- }
+}
+const targetIsCurrent=target=>target.project===project&&target.slideId===project.activeSlideId&&(!fileOperation||autosaveWriting);
+initPPTXImport({captureTarget:importTarget,targetIsCurrent,insert:insertPowerPointSlide});
+const powerpointPaste=initPowerPointPaste({
+ captureTarget:()=>({...importTarget(),revision:editRevision}),
+ targetIsCurrent:target=>targetIsCurrent(target)&&target.revision===editRevision,
+ insert:insertPowerPointSlide,status,
 });
 async function importResult(result,position,target,{libraryOnly=false}={}){
  if(!result)return;
@@ -750,7 +754,7 @@ $('autosave-toggle').onchange=e=>{
  scheduleAutosave();renderAutosave();
 };
 function renderFileActions(){
- for(const id of ['save-project','save-project-as','open-project','open-recent-project','new-project','demo-project','import-pptx'])$(id).disabled=fileOperation;
+ for(const id of ['save-project','save-project-as','open-project','open-recent-project','new-project','demo-project','import-pptx','paste-powerpoint'])$(id).disabled=fileOperation;
  const destination=projectFileHandle?`Save to ${projectFileName}`:typeof globalThis.showSaveFilePicker==='function'?'Choose where to save this project':'Download project copy (direct saving is unavailable in this browser)';
  $('save-project').title=destination+' (⌘ / Ctrl + S)'+(projectFilePersistent?'':' · File access is remembered for this session only');
  $('save-project').setAttribute('aria-busy',String(fileOperation));
@@ -1011,12 +1015,15 @@ document.addEventListener('paste',async e=>{
    if(applied){lastPaste={text,project,slideId:project.activeSlideId,count};$('workspace').focus({preventScroll:true});status(`Pasted ${selected.size} object${selected.size===1?'':'s'} into ${slide().name}.`);}
    return;
   }
+  const officeText=data.getData(POWERPOINT_MIME);
+  if(officeText){e.preventDefault();await powerpointPaste.paste({officeText});return;}
   // Capture File objects synchronously: clipboard access ends with this event.
   const files=[...data.files];
   if(!files.length)for(const item of data.items||[]){if(item.kind==='file'){const file=item.getAsFile();if(file)files.push(file);}}
   const images=files.filter(file=>file.type.startsWith('image/')||/\.(png|jpe?g|webp|svg)$/i.test(file.name));
   if(!images.length)return;
   e.preventDefault();const target=importTarget();lastPaste=null;$('workspace').focus({preventScroll:true});
+  if(images.length===1&&await powerpointPaste.paste({previewFile:images[0]}))return;
   status('Pasting clipboard images…');
   await importResult(await savePastedSources(await importFiles(images)),undefined,target);
  }catch(error){e.preventDefault();status('Could not paste: '+error.message,true);}

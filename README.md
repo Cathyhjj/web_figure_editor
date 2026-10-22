@@ -186,6 +186,16 @@ PNG、SVG、PDF、HTML 报告、页面缩略图和跨应用复制均显示裁切
 
 本地的 `examples/`、`evidence/`、`chat_history.md`、`.local-backups/` 和用户保存的图稿不纳入 Git。已有的论文示例、PPTX、原始图片、派生图片、来源清单与报告保留在本机。通过 **Open** 可以直接打开保存在其他位置的 `.figure.json`，无须复制到仓库。
 
+### 从 PowerPoint 直接粘贴整页
+
+在 PowerPoint 左侧选择**一张幻灯片缩略图**，按 **⌘C**。回到本机 Figure Editor，点击顶部 **Paste PowerPoint**，会在当前页后插入新 slide；文字、图片、支持的形状分别可编辑。支持撤销、重做、保存和重新打开。形状可调整位置、大小、旋转、填充及线条；混合格式文字可能拆成多个文字对象。**Paste notes** 会列出近似转换及未保留内容。
+
+在画布或 Slides 面板按 **⌘V** 时，浏览器若提供 Office 的 `ppt/slides` 数据会直接转换；若只提供 PNG，则在本机辅助程序就绪且 PNG 字节指纹完全匹配时读取同一份 PowerPoint 数据。若只粘贴成图片，可撤销后用 **Paste PowerPoint**。普通截图仍按图片粘贴，Figure Editor 自身对象和 slide 的剪贴板优先。
+
+系统剪贴板入口需要 macOS、本地服务和 Apple Command Line Tools。服务启动只预编译读取工具，不读取剪贴板；仅用户触发粘贴时读取 allowlist 内的 Office 数据，不上传或修改剪贴板。网页静态托管及其他系统可使用 **Import PPTX**。一次只能复制一页；多页复制会提示使用 PPTX 选页导入。新版本需重启本地服务并刷新编辑器。
+
+支持常见预设形状和有界自定义路径，复杂图表、SmartArt、OLE、部分连接线箭头、阴影和文字特效仍有限制，字体和浏览器文字测量也可能带来细微排版差异。导出 PPTX 时形状路径保持可编辑。
+
 ### 从 PowerPoint 导入一页
 
 点击顶部 **Import PPTX**，选择 `.pptx` 文件，然后在 **Choose a slide** 中选择页码。窗口显示转换后的预览、独立对象数量和 **Import notes**；点击 **Insert as new slide**，在当前页之后插入该页，自动切换到新页。一次 Undo 可撤销整页导入，Redo 可恢复；导入不会替换现有页面或改写原 PPTX。
@@ -268,3 +278,5 @@ Slide 拖动回归：`node --test tests/slide-order.test.mjs`；独立测试地�
 渐变描边检查：在隔离端口运行 `python3 server.py --port 18768`，打开 `http://127.0.0.1:18768/tests/gradient-stroke.html`，点击 **Run gradient stroke checks**。合成样例覆盖 PPTX 导入、零宽/零高线段的实际像素、半透明箭头、边框编辑/复制/撤销、保存重开及 PNG/PDF/PPTX 导出。
 
 SVG 编辑检查：在隔离测试端口运行 `python3 server.py --port 18768`，打开 `http://127.0.0.1:18768/tests/svg-editor.html`，点击 **Run SVG editing checks**。测试只使用合成数据，验证原貌像素比较、内部编辑、撤销、保存重开、旧 SVG 恢复及 PPTX 矢量往返。
+
+PowerPoint 粘贴验证：在隔离测试服务中打开 `tests/pptx-paste.html`，验证 Office 数据导入、独立对象编辑、保存重开、撤销重做、取消，以及普通 PNG 回退。测试使用合成 PPTX，不读取系统剪贴板。

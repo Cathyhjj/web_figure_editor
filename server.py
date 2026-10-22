@@ -23,6 +23,7 @@ from urllib.parse import unquote, urlsplit
 from xml.parsers import expat
 from pdf_text import MAX_PDF_TEXT_BODY, PdfTextError, PdfTextOutliner
 from pptx_import import MAX_PPTX_BODY, PptxImportError, import_pptx
+from pptx_clipboard import clipboard_available, clipboard_ready, start_clipboard_helper, read_powerpoint_clipboard
 
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".tif", ".tiff", ".bmp", ".avif", ".heic", ".heif", ".ico", ".mp4", ".html", ".htm"}
@@ -422,6 +423,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                                          "locate": sys.platform == "darwin", "saveClipboardImage": True,
                                          "pdfTextOutlines": self.server.pdf_text.available,
                                          "pptxImport": True,
+                                         "pptxPaste": True, "pptxClipboard": clipboard_available(),
+                                         "pptxClipboardReady": clipboard_ready(),
                                          "token": self.server.token})
             elif path.startswith("/api/"):
                 self.json_response(404, {"error": "Unknown local API."})
@@ -452,11 +455,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         try:
             self.trusted_request(require_origin=True)
             path = urlsplit(self.path).path
-            if path not in {"/api/locate", "/api/clipboard-image", "/api/pdf-text", "/api/pptx-import"}:
+            if path not in {"/api/locate", "/api/clipboard-image", "/api/pdf-text", "/api/pptx-import", "/api/pptx-paste", "/api/pptx-clipboard"}:
                 raise LocateError(404, "Unknown local API.")
             clipboard = path == "/api/clipboard-image"
             pdf_text = path == "/api/pdf-text"
-            pptx = path == "/api/pptx-import"
+            pptx = path in {"/api/pptx-import", "/api/pptx-paste"}
             label = "PPTX import" if pptx else "PDF text" if pdf_text else "clipboard image" if clipboard else "Locate"
             limit = MAX_PPTX_BODY if pptx else MAX_PDF_TEXT_BODY if pdf_text else MAX_CLIPBOARD_BODY if clipboard else MAX_BODY
             tokens = self.headers.get_all("X-Figure-Token", [])
@@ -475,7 +478,23 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 data = json.loads(body)
             except (OSError, ValueError, RecursionError):
                 raise LocateError(400, "The " + label + " request is not valid JSON.")
-            if pptx:
+            if path == "/api/pptx-clipboard":
+                if not isinstance(data,dict) or set(data)-{'previewSha256'}:
+                    raise LocateError(400, "Send an optional clipboard image fingerprint.")
+                digest=data.get('previewSha256')
+                if 'previewSha256' in data and (not isinstance(digest,str) or not re.fullmatch(r'[a-f0-9]{64}',digest)):
+                    raise LocateError(400, "The clipboard image fingerprint is invalid.")
+                try:
+                    raw=read_powerpoint_clipboard(digest)
+                except ValueError as error:
+                    self.json_response(422,{'error':str(error),'nativeUnavailable':True})
+                    return
+                result={'available':False} if raw is None else import_pptx({'name':'PowerPoint clipboard.pptx','data':base64.b64encode(raw).decode()},single_slide=True)
+            elif path == "/api/pptx-paste":
+                if not isinstance(data,dict) or set(data)!={'data'}:
+                    raise LocateError(400,"Send an embedded PowerPoint slide package.")
+                result=import_pptx({'name':'PowerPoint clipboard.pptx','data':data['data']},single_slide=True)
+            elif pptx:
                 result = import_pptx(data)
             elif pdf_text:
                 result = self.server.pdf_text.outline(data)
@@ -500,6 +519,8 @@ def create_server(root, port=8766):
     server.locator = Locator(root)
     server.clipboard_images = ClipboardImages(root)
     server.pdf_text = PdfTextOutliner(root)
+    if (root / 'scripts' / 'pptx_clipboard.swift').is_file():
+        start_clipboard_helper()
     return server
 
 

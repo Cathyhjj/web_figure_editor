@@ -144,9 +144,10 @@ class Package:
 
 
 class Converter:
-    def __init__(self, package, presentation, name, source_hash):
+    def __init__(self, package, presentation, name, source_hash, presentation_path='ppt/presentation.xml'):
         self.pkg, self.presentation, self.name = package, presentation, name
         self.source_hash = source_hash
+        self.presentation_path = presentation_path
         self.warnings, self.items, self.media = [], [], {}
         self.colors = {'dk1': '000000', 'lt1': 'FFFFFF', 'dk2': '44546A', 'lt2': 'E7E6E6',
                        'accent1': '4472C4', 'accent2': 'ED7D31', 'accent3': 'A5A5A5',
@@ -562,7 +563,7 @@ class Converter:
         slide=self.pkg.xml(path)
         lp=self.pkg.related(path,'slideLayout');mp=self.pkg.related(lp,'slideMaster') if lp else None
         self.layout=self.pkg.xml(lp) if lp else None;self.master=self.pkg.xml(mp) if mp else None
-        tp=self.pkg.related(mp,'theme') if mp else self.pkg.related('ppt/presentation.xml','theme')
+        tp=self.pkg.related(mp,'theme') if mp else self.pkg.related(self.presentation_path,'theme')
         if tp:
             self.theme=self.pkg.xml(tp)
             for c in children(self.theme,'a:themeElements/a:clrScheme/*'):
@@ -598,7 +599,7 @@ class Converter:
                 'source':{'name':self.name,'sha256':self.source_hash,'slide':number}}
 
 
-def import_pptx(payload):
+def import_pptx(payload, *, single_slide=False):
     if not isinstance(payload,dict) or set(payload)-{'name','data','slide'} or not isinstance(payload.get('data'),str):
         raise PptxImportError(400,'Send a PPTX filename, base64 data, and optional slide number.')
     name=payload.get('name','presentation.pptx')
@@ -610,22 +611,24 @@ def import_pptx(payload):
     if not raw or len(raw)>MAX_PPTX_BYTES:raise PptxImportError(413,'Choose a nonempty PPTX file of 100 MB or less.')
     pkg=Package(raw)
     try:
-        presentation=pkg.xml('ppt/presentation.xml');rels=pkg.relationships('ppt/presentation.xml')
+        presentation_path=pkg.related('','officeDocument') or 'ppt/presentation.xml'
+        presentation=pkg.xml(presentation_path);rels=pkg.relationships(presentation_path)
         ids=children(presentation,'p:sldIdLst/p:sldId')
         if not ids or len(ids)>500:raise PptxImportError(413,'Choose a presentation with 1–500 slides.')
+        if single_slide and len(ids)!=1:raise PptxImportError(422,'Copy exactly one slide in PowerPoint, or use Import PPTX to choose a page.')
         paths=[rels.get(el.get(RID+'id'),(None,''))[0] for el in ids]
         if any(not p for p in paths):raise PptxImportError(422,'A slide relationship is missing.')
         source_hash=hashlib.sha256(raw).hexdigest()
-        if 'slide' not in payload:
+        if 'slide' not in payload and not single_slide:
             slides=[]
             for n,path in enumerate(paths,1):
                 root=pkg.xml(path)
                 texts=[t.text or '' for t in children(root,'.//a:t')]
                 slides.append({'number':n,'title':' '.join(texts)[:100] or f'Slide {n}'})
             return {'slides':slides,'source':{'name':name,'sha256':source_hash}}
-        number=payload['slide']
+        number=1 if single_slide else payload['slide']
         if type(number) is not int or not 1<=number<=len(paths):raise PptxImportError(400,'Select a slide number from this presentation.')
-        return Converter(pkg,presentation,name,source_hash).convert(paths[number-1],number)
+        return Converter(pkg,presentation,name,source_hash,presentation_path).convert(paths[number-1],number)
     except (ValueError,OverflowError,KeyError,RecursionError) as error:
         raise PptxImportError(422,'The PPTX contains unsupported or malformed slide properties.') from error
     finally:
