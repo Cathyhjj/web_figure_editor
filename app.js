@@ -3,6 +3,8 @@ import { createChartFrame } from './html-chart.js';
 import { uid, projectToSVG, exportPNG, downloadBlob } from './core.js';
 import { createDeck, validateDeck, cloneDeck, currentSlide, slideProject, deckSourceManifest, addSlide } from './deck.js';
 import { pickProjectFile, readProjectFile, writeProjectFile } from './project-files.js';
+import { createRecentProjects, openRecentProject } from './recent-projects.js';
+import { initRecentProjectMenu } from './recent-project-menu.js';
 import { importFiles, pickImages, importFolderFiles, pickFolder, importDroppedFiles, linkAsset, refreshAsset, replaceAsset } from './assets.js?v=locate-1';
 import { buildAssetTree } from './asset-tree.js';
 import { locateAsset } from './locate.js';
@@ -46,6 +48,8 @@ let readingSlideClipboard = false;
 let libraryImports = 0;
 let activeHTMLChart = null;
 let libraryImportNotice = { hidden: true, text: '', error: false };
+const recentProjects = createRecentProjects();
+const recentMenu = initRecentProjectMenu({ history: recentProjects, isBusy: () => fileOperation, open: reopenRecentProject, browse: () => $('open-project').click() });
 const clone = cloneDeck;
 const slide = () => currentSlide(project);
 const escapeHTML = s => String(s ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -597,11 +601,11 @@ $('autosave-toggle').onchange=e=>{
  scheduleAutosave();renderAutosave();
 };
 function renderFileActions(){
- for(const id of ['save-project','save-project-as','open-project','new-project','demo-project','import-pptx'])$(id).disabled=fileOperation;
+ for(const id of ['save-project','save-project-as','open-project','open-recent-project','new-project','demo-project','import-pptx'])$(id).disabled=fileOperation;
  const destination=projectFileHandle?`Save to ${projectFileName}`:typeof globalThis.showSaveFilePicker==='function'?'Choose where to save this project':'Download project copy (direct saving is unavailable in this browser)';
  $('save-project').title=destination+' (⌘ / Ctrl + S)'+(projectFilePersistent?'':' · File access is remembered for this session only');
  $('save-project').setAttribute('aria-busy',String(fileOperation));
- renderAutosave();
+ recentMenu.renderBusy();renderAutosave();
 }
 async function saveProject(saveAs=false,{automatic=false}={}){
  if(fileOperation)return;
@@ -618,6 +622,7 @@ async function saveProject(saveAs=false,{automatic=false}={}){
   dirty=result.downloaded||revision!==editRevision||Boolean(gesture?.moved&&gesture.mode!=='select');
   autosaveError=null;if(!result.downloaded)lastFileSave=new Date();
   if(!automatic)status(result.downloaded?'Project download started. This browser cannot save back to the original file. Use Chrome or Edge for direct Save.':`Saved to ${projectFileName}.${!dirty?'':autosaveEnabled?' Newer changes will save automatically.':' Newer changes are still unsaved; use Save again.'}`);
+  await recentProjects.remember({...result,projectName:savedProject.name});recentMenu.render();
   await saveDraft();
  }catch(error){
   if(epoch!==projectEpoch)return;
@@ -646,6 +651,7 @@ $('open-project').onclick=async()=>{
   const opened=await pickProjectFile();
   if(dirty&&!confirm('Opening a project will replace the current local draft. Continue?'))return;
   replaceProject(opened.project,opened);status(`Opened ${opened.name}. Save will update this file.`);
+  await recentProjects.remember({...opened,projectName:opened.project.name});recentMenu.render();
  }catch(error){
   if(error.name==='SecurityError'){$('project-input').click();}
   else if(error.name!=='AbortError')status('Could not open project: '+error.message,true);
@@ -659,9 +665,24 @@ $('project-input').onchange=async e=>{
   const opened=await readProjectFile(file);
   if(dirty&&!confirm('Opening a project will replace the current local draft. Continue?'))return;
   replaceProject(opened,{name:file.name});status('Editable project opened. Save will ask for a location when supported; otherwise it downloads a copy.');
+  await recentProjects.remember({name:file.name,projectName:opened.name});recentMenu.render();
  }catch(error){status('Could not open project: '+error.message,true);}
  finally{e.target.value='';fileOperation=false;renderFileActions();}
 };
+async function reopenRecentProject(entry){
+ if(fileOperation)return;
+ if(!entry.handle){recentMenu.close();$('open-project').click();return;}
+ fileOperation=true;renderFileActions();recentMenu.message('Opening '+entry.name+'…');
+ try{
+  const opened=await openRecentProject(entry);
+  if(dirty&&!confirm('Opening a project will replace the current local draft. Continue?')){recentMenu.message('Open canceled. Your current project is unchanged.');return;}
+  replaceProject(opened.project,opened);recentMenu.close();status(`Opened ${opened.name}. Save will update this file.`);
+  await recentProjects.remember({...opened,projectName:opened.project.name});recentMenu.render();
+ }catch(error){
+  const detail=error.name==='NotFoundError'?'The file was moved or deleted. Use Browse… to choose its current location.':error.name==='NotAllowedError'?'File access was not granted. Try again or use Browse… to choose the file.':error.message;
+  recentMenu.message(error.name==='AbortError'?'Open canceled. Your current project is unchanged.':'Could not open '+entry.name+': '+detail,error.name!=='AbortError');
+ }finally{fileOperation=false;renderFileActions();scheduleAutosave();}
+}
 $('source-manifest').onclick=()=>downloadBlob(new Blob([JSON.stringify(deckSourceManifest(project),null,2)],{type:'application/json'}),filename()+'.sources.json');
 let exporting=false;
 function exportInfo(){
@@ -707,7 +728,7 @@ $('export-submit').onclick=async()=>{
  }catch(e){$('export-info').textContent='Export failed: '+e.message;status('Export failed: '+e.message,true);}finally{exporting=false;button.disabled=false;button.textContent='Export file';$('export-format').disabled=$('export-cancel').disabled=false;$('export-dpi').disabled=!['png','pdf'].includes($('export-format').value);}
 };
 const editingInput = target => /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName)||target?.isContentEditable;
-const nativeClipboard = e => e.defaultPrevented||editingInput(e.target)||$('export-dialog').open||cropEditor.open||$('video-dialog').open;
+const nativeClipboard = e => e.defaultPrevented||editingInput(e.target)||$('export-dialog').open||cropEditor.open||$('video-dialog').open||$('recent-projects-dialog').open;
 function slideClipboardTarget(target){
  const focused=target===document||target===document.body?document.activeElement:target;
  return !!focused?.closest?.('#slides-panel');
@@ -854,7 +875,7 @@ document.addEventListener('paste',async e=>{
 document.addEventListener('keydown',e=>{
  if(e.defaultPrevented)return;
  if(e.key==='Escape'&&activeHTMLChart){e.preventDefault();closeHTMLChart();$('workspace').focus({preventScroll:true});return;}
- if(cropEditor.open||$('video-dialog').open)return;
+ if(cropEditor.open||$('video-dialog').open||$('recent-projects-dialog').open)return;
  if(gesture?.mode==='select'){if(e.key==='Escape')finishMarquee(true);e.preventDefault();return;}
  const input=editingInput(e.target),mod=e.metaKey||e.ctrlKey;
  if(mod&&e.key.toLowerCase()==='s'){e.preventDefault();if(!e.repeat)$(e.shiftKey?'save-project-as':'save-project').click();return;}
@@ -923,6 +944,6 @@ $('demo-project').onclick=async()=>{
  try{const {makeDemo}=await import('./demo.js');const example=await makeDemo();if(revision!==editRevision&&dirty&&!confirm('Replace the current draft with the example?'))return;replaceProject(example);status('Example loaded. Use Save to choose its file location.');}catch(e){status(e.message,true);}
  finally{fileOperation=false;renderFileActions();}
 };
-render();initWindows({onLayoutChange:fit});requestAnimationFrame(fit);await loadDraft();fileOperation=false;renderFileActions();scheduleAutosave();
+render();initWindows({onLayoutChange:fit});requestAnimationFrame(fit);await Promise.all([loadDraft(),recentProjects.load()]);recentMenu.render();fileOperation=false;renderFileActions();scheduleAutosave();
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){if(dirty)void saveDraft();if(!fileOperation&&!gesture)void saveProject(false,{automatic:true});}});
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});

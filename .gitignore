@@ -25,6 +25,8 @@
 !/selection.js
 !/deck.js
 !/project-files.js
+!/recent-projects.js
+!/recent-project-menu.js
 !/demo.js
 !/report.js
 !/pptx.js
@@ -82,6 +84,7 @@
 !/tests/windows-browser.js
 !/tests/project-save.html
 !/tests/project-save-browser.js
+!/tests/recent-projects-browser.mjs
 !/scripts/
 /scripts/*
 !/scripts/extract_pptx_example.py

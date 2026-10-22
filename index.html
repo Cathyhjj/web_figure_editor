@@ -46,6 +46,7 @@
     <nav class="file-actions" aria-label="Project actions">
       <button id="new-project" class="button quiet"><svg><use href="#i-plus"/></svg><span>New project</span></button>
       <button id="open-project" class="button quiet"><svg><use href="#i-folder"/></svg><span>Open</span></button>
+      <button id="open-recent-project" class="button quiet" aria-haspopup="dialog" aria-controls="recent-projects-dialog"><span>Open recent project</span></button>
       <button id="import-pptx" class="button quiet" title="Choose a PowerPoint slide to import"><span>Import PPTX</span></button>
       <button id="save-project" class="button" title="Save (⌘ / Ctrl + S)"><svg><use href="#i-save"/></svg><span>Save</span></button>
       <button id="save-project-as" class="button quiet" title="Save a copy to a new file (⌘ / Ctrl + Shift + S)"><svg><use href="#i-save"/></svg><span>Save As…</span></button>
@@ -175,6 +176,12 @@
   <input id="folder-input" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml,video/mp4,.mp4,text/html,.html,.htm" webkitdirectory multiple hidden>
   <input id="project-input" type="file" accept=".json,.figure.json" hidden>
   <input id="relink-input" type="file" accept="image/png,image/jpeg,image/webp,image/svg+xml,video/mp4,.mp4,text/html,.html,.htm" hidden>
+
+  <dialog id="recent-projects-dialog" aria-labelledby="recent-projects-title" aria-describedby="recent-projects-note">
+    <div class="dialog-header"><span class="eyebrow">YOUR WORKSPACE</span><h2 id="recent-projects-title">Open recent project</h2><p id="recent-projects-note">Your 10 most recent projects in this browser.</p></div>
+    <div class="dialog-body"><p id="recent-projects-empty" class="hint">No recent projects yet. Open or save a project to add it here.</p><ul id="recent-projects-list" aria-label="Recent projects"></ul><p id="recent-projects-status" role="status" aria-live="polite"></p></div>
+    <div class="dialog-actions"><button id="recent-projects-clear" class="button quiet" title="Remove the list only; project files and the current draft are kept">Clear history</button><span class="recent-action-spacer"></span><button id="recent-projects-browse" class="button">Browse…</button><button id="recent-projects-close" class="button primary">Close</button></div>
+  </dialog>
 
   <dialog id="export-dialog" aria-labelledby="export-title">
     <div class="dialog-header"><span class="eyebrow">READY FOR YOUR PAPER</span><h2 id="export-title">Export current slide</h2><p id="export-slide-name">Current slide: Slide 1</p></div>

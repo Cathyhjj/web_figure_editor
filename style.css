@@ -293,3 +293,26 @@ dialog{border:1px solid var(--drx-border);border-radius:15px;padding:0;width:min
 .transparency-value>span{position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:10px;color:var(--drx-text-muted);pointer-events:none}
 #inspector .transparency-value input::-webkit-inner-spin-button{appearance:none}
 #inspector .shape-style input:disabled,#inspector .shape-style select:disabled,#inspector .transparency-control input:disabled{opacity:.45;cursor:default}
+
+/* Recently used project files. */
+#recent-projects-dialog{width:min(600px,calc(100vw - 32px));max-height:calc(100dvh - 40px)}
+#recent-projects-dialog[open]{display:flex;flex-direction:column}
+#recent-projects-dialog .dialog-header,#recent-projects-dialog .dialog-actions{flex-shrink:0}
+#recent-projects-dialog .dialog-body{overflow:auto;min-height:0}
+#recent-projects-list{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:6px}
+#recent-projects-list li{display:flex;align-items:center;gap:8px;border:1px solid var(--drx-border);border-radius:8px;padding-right:8px}
+.recent-project-open{display:flex;flex:1;min-width:0;flex-direction:column;gap:5px;text-align:left;white-space:normal;padding:12px 14px;border:0;border-radius:7px;background:transparent}
+.recent-project-open:hover{background:var(--drx-surface-subtle)}
+.recent-project-open strong,.recent-project-open span{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.recent-project-open strong{font-size:13px;font-weight:600}
+.recent-project-open span{font-size:12px}
+.recent-project-open small,#recent-projects-status{font-size:11px;line-height:1.5;color:var(--drx-text-muted)}
+#recent-projects-status:not(:empty){margin-top:14px}
+#recent-projects-status.error{color:var(--drx-danger)}
+.recent-action-spacer{flex:1}
+#recent-projects-dialog .dialog-actions{gap:8px;flex-wrap:wrap}
+
+/* Keep the added project action visible at intermediate window widths. */
+.file-actions{flex-wrap:wrap;min-width:0}
+@media(min-width:951px){.app-header{min-height:76px;padding-block:10px}}
+@media(min-width:1051px){.drx-ui{grid-template-rows:auto 54px minmax(0,1fr) 30px}}

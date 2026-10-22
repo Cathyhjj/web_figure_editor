@@ -80,6 +80,7 @@ python3 server.py
 
 **Save** 保存的 `.figure.json` 包含全部 slides、当前页、对象、样式和一份共享的内嵌素材库，可以搬到另一台电脑重新打开。文件名、原始尺寸、格式、关联状态等来源信息保留在项目中；**Download source list** 下载整个项目的 `.sources.json`，包含跨页素材使用记录。
 
+- **Open recent project**：列出本浏览器最近打开或保存的 10 个项目，点击读取原文件的最新内容；切换前仍会提醒尚未保存的修改。列表刷新后保留，需要时浏览器会重新请求读取权限。不能保留文件访问的条目显示 **Choose file again**，点击后重新选取文件。可逐项移除或 **Clear history**，只清除记录，不删除文件或当前草稿。
 - **Save / ⌘或Ctrl+S**：通过 **Open** 选择的已有项目保存回原文件。新项目首次保存时选择文件名和位置，以后的 Save 使用同一文件；修改项目名称不会自动更换文件。
 - **Save As… / ⌘或Ctrl+Shift+S**：每次选择新的保存位置，成功后后续 Save 使用新文件。取消或保存失败会保留原保存目标和当前修改。
 - **AutoSave**：默认开启，顶部可关闭，设置会保留在当前浏览器中。停止编辑约 1.5 秒后，自动更新已授权写入的项目文件；首次使用先点 **Save** 选择位置。状态显示 **Saving… / Saved to file / Saved locally**；鼠标拖动完成后才写文件，保存期间新增的编辑会继续自动保存。Save As 成功后，AutoSave 也使用新的文件。
@@ -222,6 +223,8 @@ Locate 的浏览器检查使用同一独立测试端口的 `/tests/locate.html`�
 保存项目的浏览器检查使用 `/tests/project-save.html`，验证 Open 后 Save 回原文件、首次选址、Save As 切换目标、快捷键、取消与失败恢复、保存期间编辑，以及刷新后的文件关联。选择器使用测试句柄模拟，持久化检查只写浏览器测试来源的私有文件，不触碰用户项目。
 
 AutoSave 专项检查使用同一独立端口 `18766` 的 `/tests/autosave.html`，点击 **Run autosave checks**。验证连续输入合并保存、拖动与撤销/重做、权限失效、写入失败、保存期间继续编辑、开关持久化、切换项目与 Save As 目标，以及真实浏览器私有文件的自动写入和刷新恢复；只使用合成项目和测试端口草稿。
+
+最近项目检查：在独立端口 `18766` 启动服务后运行 `node tests/recent-projects-browser.mjs`（需要 Playwright 与 Chrome，可用 `PLAYWRIGHT_MODULE` 指定模块路径）。验证列表顺序、刷新恢复、读取最新文件、未保存修改提示、Save As、文件丢失、清空/移除记录和文件选择回退；使用隔离浏览器中的合成项目。
 
 复制粘贴的浏览器检查使用 `/tests/clipboard.html`，通过合成剪贴板事件、模拟系统写入与 PNG 解码验证同页/跨页粘贴、撤销重做、外部图片导入、文本输入保护和图像输出；**Run Clipboard checks** 不修改系统剪贴板。单独点击 **Copy test selection to system clipboard** 会把测试素材写入系统剪贴板，可切换到其他应用粘贴验证；也可在测试画布实际按 Cmd/Ctrl+C、Cmd/Ctrl+V 检查。
 
