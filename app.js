@@ -296,20 +296,12 @@ function renderAssets(){
  if(!project.assets.length){const p=document.createElement('p');p.className='hint';p.textContent='Drop images, HTML charts, MP4 videos, or folders here to preview them. Folder structure is kept. Files are processed locally.';list.append(p);}
  function assetCard(a){
   const card=document.createElement('div');card.className='asset-card';card.dataset.asset=a.id;card.draggable=false;
-  card.innerHTML=`<button class="asset-preview" data-action="place" title="Add to canvas" aria-label="Place ${escapeHTML(a.name)} on canvas"><img draggable="false" loading="lazy" decoding="async" class="asset-thumb" alt="${escapeHTML(a.name)}" src="${posterSource(a)}"></button><div class="asset-name" title="${escapeHTML(a.relativePath||a.name)}">${escapeHTML(a.name)}</div><div class="asset-meta">${a.width} × ${a.height}${a.mime==='text/html'?' · Interactive HTML':''}${a.mime==='video/mp4'?` · MP4 · ${a.duration.toFixed(1)} s`:''} · ${a.sourceKind==='linked'?(a.linkPersistence==='session'?'Session link + copy':'Local link + copy'):'Portable copy'}${a.originalMime==='image/svg+xml'?' · Rasterized SVG':''}</div><div class="asset-actions"><button data-action="place">Place</button><button data-action="relink">Link</button>${a.sourceKind==='linked'?'<button data-action="refresh">Refresh</button>':''}</div>`;
+  card.innerHTML=`<button class="asset-preview" data-action="select" title="Select existing object · Use Place to add a copy" aria-label="Select existing ${escapeHTML(a.name)} in project"><img draggable="false" loading="lazy" decoding="async" class="asset-thumb" alt="${escapeHTML(a.name)}" src="${posterSource(a)}"></button><div class="asset-name" title="${escapeHTML(a.relativePath||a.name)}">${escapeHTML(a.name)}</div><div class="asset-meta">${a.width} × ${a.height}${a.mime==='text/html'?' · Interactive HTML':''}${a.mime==='video/mp4'?` · MP4 · ${a.duration.toFixed(1)} s`:''} · ${a.sourceKind==='linked'?(a.linkPersistence==='session'?'Session link + copy':'Local link + copy'):'Portable copy'}${a.originalMime==='image/svg+xml'?' · Rasterized SVG':''}</div><div class="asset-actions"><button data-action="place">Place</button><button data-action="relink">Link</button>${a.sourceKind==='linked'?'<button data-action="refresh">Refresh</button>':''}</div>`;
   card.setAttribute('role','group');
   const selectionLabel=document.createElement('div');selectionLabel.className='asset-selection-label';selectionLabel.textContent='Selected on canvas';card.append(selectionLabel);
   const locateButton=document.createElement('button');locateButton.type='button';locateButton.dataset.action='locate';locateButton.textContent='Locate';locateButton.title='Show source image in Finder';locateButton.setAttribute('aria-label',`Show ${a.name} in Finder`);locateButton.disabled=locatingAsset;card.querySelector('.asset-actions').insertBefore(locateButton,card.querySelector('[data-action="refresh"]'));
   if(a.mime==='video/mp4'){const preview=document.createElement('button');preview.dataset.action='preview';preview.textContent='Preview';card.querySelector('.asset-actions').append(preview);}
-  let suppressClick=false;
-  card.onpointerdown=e=>{
-   if(e.button!==0||e.target.closest('.asset-actions'))return;
-   const start={x:e.clientX,y:e.clientY};let moved=false;
-   const move=ev=>{if(Math.hypot(ev.clientX-start.x,ev.clientY-start.y)>5){moved=true;document.body.style.cursor='copy';}};
-   const end=ev=>{document.removeEventListener('pointermove',move);document.removeEventListener('pointerup',end);document.body.style.cursor='';if(!moved)return;suppressClick=true;const r=$('workspace').getBoundingClientRect();if(ev.clientX>=r.left&&ev.clientX<=r.right&&ev.clientY>=r.top&&ev.clientY<=r.bottom){const p=point(ev);placeAsset(a,{x:Math.max(0,p.x),y:Math.max(0,p.y)});}setTimeout(()=>suppressClick=false,0);};
-   document.addEventListener('pointermove',move);document.addEventListener('pointerup',end,{once:true});
-  };
-  card.onclick=async e=>{if(suppressClick)return;const action=e.target.closest('[data-action]')?.dataset.action;if(action==='preview')previewVideo(a);if(action==='place')placeAsset(a);if(action==='relink')await relink(a);if(action==='refresh')await refresh(a);if(action==='locate')await locate(a);};return card;
+  card.onclick=async e=>{const action=e.target.closest('[data-action]')?.dataset.action;if(action==='preview')previewVideo(a);else if(action==='place')placeAsset(a);else if(action==='relink')await relink(a);else if(action==='refresh')await refresh(a);else if(action==='locate')await locate(a);else selectAsset(a);};return card;
  }
  function appendFolderContents(node,container){
   for(const folder of node.folders){
@@ -427,7 +419,23 @@ function render(){
  $('project-name').value=project.name;$('canvas-width').value=slide().canvas.width;$('canvas-height').value=slide().canvas.height;$('canvas-background').value=slide().canvas.background;
 }
 function point(event){const p=new DOMPoint(event.clientX,event.clientY).matrixTransform($('stage').getScreenCTM().inverse());return{x:p.x,y:p.y};}
-function placeAsset(a,position){change(()=>{const maxW=slide().canvas.width*.43,maxH=slide().canvas.height*.65,scale=Math.min(1,maxW/a.width,maxH/a.height);const offset=slide().items.length%6*18;const i={...base(a.mime==='text/html'?'html':a.mime==='video/mp4'?'video':'image',position?.x??60+offset,position?.y??60+offset,a.width*scale,a.height*scale),assetId:a.id,name:a.name};slide().items.push(i);selected=new Set([i.id]);});status(`Added ${a.name} to the canvas.`);if(a.mime==='text/html')openHTMLChart(chosen()[0]);}
+function selectAsset(a){
+ flushText();
+ const matches=page=>page.items.filter(i=>isMediaItem(i)&&i.assetId===a.id);
+ const page=matches(slide()).length?slide():project.slides.find(page=>matches(page).length);
+ if(!page){status(`${a.name} is not placed in this project. Click Place to add it to the current slide.`);return;}
+ const switched=page.id!==project.activeSlideId;
+ if(switched)selectSlide(page.id);
+ const items=matches(page);
+ // Keep an already selected copy; otherwise prefer the topmost visible copy.
+ const item=items.find(i=>selected.has(i.id))||[...items].reverse().find(i=>!i.hidden)||items.at(-1);
+ selected=new Set([item.id]);lastTap=null;lastPointerItem=null;
+ $('workspace').focus({preventScroll:true});
+ renderStage();renderLayers();renderInspector();renderToolbar();syncAssetSelection(a.id);
+ if(switched)$('asset-list').querySelector(`[data-asset="${CSS.escape(a.id)}"] .asset-preview`)?.focus({preventScroll:true});
+ status(`Selected ${item.name} on ${page.name}.${item.hidden?' This object is hidden; use Layers to show it.':''}${item.locked?' This object is locked.':''}`);
+}
+function placeAsset(a){change(()=>{const maxW=slide().canvas.width*.43,maxH=slide().canvas.height*.65,scale=Math.min(1,maxW/a.width,maxH/a.height);const offset=slide().items.length%6*18;const i={...base(a.mime==='text/html'?'html':a.mime==='video/mp4'?'video':'image',60+offset,60+offset,a.width*scale,a.height*scale),assetId:a.id,name:a.name};slide().items.push(i);selected=new Set([i.id]);});status(`Added ${a.name} to the canvas.`);if(a.mime==='text/html')openHTMLChart(chosen()[0]);}
 const importTarget=()=>({project,slideId:project.activeSlideId});
 initPPTXImport({
  captureTarget:importTarget,
@@ -453,7 +461,7 @@ async function importResult(result,position,target,{libraryOnly=false}={}){
    page.items.push(i);if(page.id===project.activeSlideId)selected=new Set([i.id]);
   }});
   if(!applied)return;
-  status(`Imported ${result.assets.length} asset${result.assets.length===1?'':'s'} into ${libraryOnly?'Assets':page.name}.${libraryOnly?' Choose a preview or Place to add it to the canvas.':' Portable copies are included.'}${skipped}${errors?' '+errors:''}`,!!errors);
+  status(`Imported ${result.assets.length} asset${result.assets.length===1?'':'s'} into ${libraryOnly?'Assets':page.name}.${libraryOnly?' Click Place to add an asset to the canvas.':' Portable copies are included.'}${skipped}${errors?' '+errors:''}`,!!errors);
   if(!libraryOnly&&page.id===project.activeSlideId&&chosen()[0]?.type==='html')openHTMLChart(chosen()[0]);
  }else if(errors)status(errors+skipped,true);
  else if('skipped' in result)status('No supported media found. Choose a folder containing PNG, JPG, WebP, SVG, MP4, or HTML files.'+skipped);
@@ -503,7 +511,7 @@ $('workspace').ondragover=e=>{e.preventDefault();e.dataTransfer.dropEffect='copy
 $('workspace').ondragleave=e=>{if(!$('workspace').contains(e.relatedTarget))$('workspace').classList.remove('drag-over');};
 $('workspace').ondrop=async e=>{
  e.preventDefault();$('workspace').classList.remove('drag-over');const target=importTarget(),p=point(e);p.x=Math.max(0,p.x);p.y=Math.max(0,p.y);
- const assetId=e.dataTransfer.getData('application/x-figure-asset');if(assetId){const a=assetById(assetId);if(a)placeAsset(a,p);return;}
+ const assetId=e.dataTransfer.getData('application/x-figure-asset');if(assetId){status('Click Place on the asset to add it to the canvas.');return;}
  try{await importResult(await importDroppedFiles(e.dataTransfer),p,target);}catch(error){status(error.message,true);}
 };
 const libraryDropZone=document.querySelector('.library-panel');
