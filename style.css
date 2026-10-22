@@ -132,11 +132,11 @@ dialog{border:1px solid var(--drx-border);border-radius:15px;padding:0;width:min
 /* Movable panels retain their original controls and restore to the same docks. */
 .window-sr-only{position:fixed;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;pointer-events:none}
 .editor-layout.windows-ready{--slides-dock-width:164px;--assets-dock-width:200px;--properties-dock-width:268px;grid-template-columns:var(--slides-dock-width) minmax(0,1fr) var(--assets-dock-width) var(--properties-dock-width)}
-.editor-layout.window-slides-floating{--slides-dock-width:0px!important}
-.editor-layout.window-assets-floating{--assets-dock-width:0px!important}
-.editor-layout.window-all-properties-floating{--properties-dock-width:0px!important}
-.editor-layout.window-all-properties-floating>.properties-panel{display:none}
-.editor-layout.window-layers-floating>.properties-panel{grid-template-rows:minmax(0,1fr)}
+.editor-layout.window-slides-empty{--slides-dock-width:0px!important}
+.editor-layout.window-assets-empty{--assets-dock-width:0px!important}
+.editor-layout.window-properties-empty{--properties-dock-width:0px!important}
+.editor-layout.window-properties-empty>.properties-panel{display:none}
+.editor-layout.window-layers-empty>.properties-panel,.editor-layout.window-settings-empty>.properties-panel{grid-template-rows:minmax(0,1fr)}
 .panel-window>.window-header{height:44px;min-height:44px;padding:0 10px;margin:0!important;display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--drx-border);background:#fff;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none;flex-shrink:0;position:relative}
 .window-header h2{font-size:11px;font-weight:600;letter-spacing:.1px;line-height:1.2;display:flex;align-items:center;gap:6px;flex:1;min-width:0}
 .window-header h2 svg{width:14px;height:14px}
@@ -205,11 +205,23 @@ dialog{border:1px solid var(--drx-border);border-radius:15px;padding:0;width:min
 .layout-tools+.toolbar-tip{margin-left:0}
 @media(min-width:1600px){.editor-layout.windows-ready{--slides-dock-width:172px;--assets-dock-width:212px;--properties-dock-width:280px}}
 @media(min-width:1051px) and (max-width:1279px){.editor-layout.windows-ready{--slides-dock-width:144px;--assets-dock-width:180px;--properties-dock-width:244px}.slides-panel.panel-window>.window-header{padding-inline:7px;gap:4px}.slides-panel.panel-window #slide-position{font-size:9px}}
-@media(max-width:1050px){.editor-layout.windows-ready{--slides-dock-width:144px;--assets-dock-width:200px;grid-template-columns:var(--slides-dock-width) minmax(0,1fr) var(--assets-dock-width)}.editor-layout.window-layers-floating>.properties-panel{grid-template-columns:minmax(0,1fr)}.panel-window[data-window="canvas"],.panel-window[data-window="objects"]{align-self:start}}
+@media(max-width:1050px){.editor-layout.windows-ready{--slides-dock-width:144px;--assets-dock-width:200px;grid-template-columns:var(--slides-dock-width) minmax(0,1fr) var(--assets-dock-width)}.editor-layout.window-layers-empty>.properties-panel,.editor-layout.window-settings-empty>.properties-panel{grid-template-columns:minmax(0,1fr)}.editor-layout.window-single-setting .property-scroll{grid-template-columns:minmax(0,1fr)}.panel-window[data-window="canvas"],.panel-window[data-window="objects"]{align-self:start}}
 @media(max-width:760px){.slides-panel.panel-window>.window-body{display:flex;flex-direction:column}.slides-panel.panel-window .slide-actions{width:auto;align-self:flex-end;min-width:190px}.slides-panel.panel-window .slide-list{flex-shrink:0;min-height:120px}.slides-panel.panel-window>.window-header{height:44px;min-height:44px;grid-column:1;grid-row:1}.window-toggle{min-height:30px;padding-inline:8px}.panel-window.is-floating>.window-header{height:44px;min-height:44px}.window-resize{width:28px;height:28px}.panel-window[data-window="canvas"]>.window-body,.panel-window[data-window="objects"]>.window-body{padding-inline:16px}.layout-tools{margin-left:0}.panel-window.is-floating[data-window="slides"] .slide-list{min-height:0}.panel-window.is-floating .library-footer{padding-block:10px}.panel-window.is-floating[data-window="assets"] .privacy-indicator{font-size:9px}}
 @media(pointer:coarse){.window-toggle{min-height:32px}.panel-window>.window-header{min-height:48px;height:48px}.window-resize{width:30px;height:30px}}
 @media(prefers-reduced-motion:reduce){.panel-window{scroll-behavior:auto}}
 @media(forced-colors:active){.panel-window.is-floating{border:2px solid CanvasText!important}.window-grip{background:CanvasText}.window-toggle,.window-resize{border:1px solid ButtonText;color:ButtonText;background:ButtonFace}}
+
+/* The native popover keeps View above floating panels and supports Escape/outside click. */
+.panel-window[hidden]{display:none!important}
+.view-menu{position:fixed;inset:auto;margin:0;padding:8px;border:1px solid var(--drx-border);border-radius:10px;background:var(--drx-surface);color:var(--drx-text);box-shadow:0 12px 36px #2c173526;overflow:auto}
+.view-menu h2{padding:8px 10px;font-size:10px;font-weight:600;color:var(--drx-text-muted);letter-spacing:.6px;text-transform:uppercase}
+#view-panel-options{display:flex;flex-direction:column}
+#view-panel-options label{display:flex;align-items:center;gap:10px;min-height:36px;padding:8px 10px;border-radius:5px;font-size:12px;cursor:pointer}
+#view-panel-options label:hover,#view-panel-options label:focus-within{background:var(--drx-accent-soft)}
+#view-panel-options input{width:15px;height:15px;margin:0;accent-color:var(--drx-accent);cursor:pointer}
+.view-menu #show-all-panels{width:100%;justify-content:flex-start;margin-top:6px;border-top:1px solid var(--drx-border);border-radius:0;padding:10px;font-size:12px;color:var(--drx-accent)}
+#view-toggle:has(+.view-menu:popover-open){color:var(--drx-accent);background:var(--drx-accent-soft)}
+@media(pointer:coarse){#view-panel-options label{min-height:44px}}
 
 /* Directory imports share the portable asset library and its existing previews. */
 .folder-upload-button{margin-top:8px;border-style:solid;background:#fff}
@@ -324,6 +336,11 @@ dialog{border:1px solid var(--drx-border);border-radius:15px;padding:0;width:min
 #recent-projects-dialog .dialog-actions{gap:8px;flex-wrap:wrap}
 
 /* Keep the added project action visible at intermediate window widths. */
+.file-actions{flex-wrap:wrap;min-width:0}
+@media(min-width:951px){.app-header{min-height:76px;padding-block:10px}}
+@media(min-width:1051px){.drx-ui{grid-template-rows:auto 54px minmax(0,1fr) 30px}}
+
+/* Keep project and View actions reachable at intermediate widths. */
 .file-actions{flex-wrap:wrap;min-width:0}
 @media(min-width:951px){.app-header{min-height:76px;padding-block:10px}}
 @media(min-width:1051px){.drx-ui{grid-template-rows:auto 54px minmax(0,1fr) 30px}}

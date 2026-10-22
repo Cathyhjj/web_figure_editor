@@ -206,8 +206,35 @@ run.onclick = async () => {
     doc = iframe.contentDocument;
     check('Dock dimensions survive reloading the editor', close(rect(panel('assets')).width, expectedReload.assets) && close(rect(panel('slides')).width, expectedReload.slides) && close(rect(panel('canvas')).width, expectedReload.properties) && close(rect(panel('canvas')).height, expectedReload.canvasHeight));
 
+    const visibility = key => doc.querySelector(`#view-panel-options input[data-panel="${key}"]`);
+    const setVisible = async (key, visible) => { const input=visibility(key);input.checked=visible;input.dispatchEvent(new win.Event('change',{bubbles:true}));await settle(win); };
+    const panelKeys=['slides','assets','layers','canvas','objects'];
+    check('View provides one checked visibility control for each existing panel',panelKeys.every(key=>visibility(key)?.checked)&&doc.querySelectorAll('#view-panel-options input').length===5);
+    const assetElement=panel('assets'),beforeHiddenWidth=rect(assetElement).width,workspaceWidth=rect(doc.querySelector('.canvas-area')).width;
+    await setVisible('assets',false);
+    check('Hiding Assets releases its dock column and persists visibility',assetElement.hidden&&!visibility('assets').checked&&rect(doc.querySelector('.canvas-area')).width>workspaceWidth+100&&JSON.parse(localStorage.getItem(STORAGE_KEY)).panels.assets.visible===false);
+    await setVisible('assets',true);
+    check('Showing Assets retains the same controls and its customized dock width',panel('assets')===assetElement&&!assetElement.hidden&&close(rect(assetElement).width,beforeHiddenWidth));
+    await setVisible('canvas',false);await setVisible('objects',false);
+    check('Hiding both settings panels releases their shared row while Layers remains visible',doc.querySelector('.property-scroll').hidden&&shown(panel('layers'))&&!doc.querySelector('.properties-panel').hidden);
+    await setVisible('layers',false);
+    check('Hiding all properties panels releases the sidebar',doc.querySelector('.editor-layout').classList.contains('window-properties-empty')&&!shown(doc.querySelector('.properties-panel')));
+    doc.getElementById('show-all-panels').click();await settle(win);
+    check('Show all restores every panel without resetting customized dock sizes',panelKeys.every(key=>shown(panel(key))&&visibility(key).checked)&&close(rect(panel('assets')).width,beforeHiddenWidth));
+    panel('canvas').querySelector('.window-toggle').click();await settle(win);
+    const floatingRect=rect(panel('canvas'));
+    await setVisible('canvas',false);await setVisible('slides',false);
+    check('Hidden floating panels keep their saved geometry and floating state',panel('canvas').hidden&&panel('canvas').dataset.windowState==='floating'&&JSON.parse(localStorage.getItem(STORAGE_KEY)).panels.canvas.rect.width===floatingRect.width);
+    iframe=await loadEditor();win=iframe.contentWindow;doc=iframe.contentDocument;
+    check('Reload restores hidden docked and floating panels with matching unchecked View controls',panel('slides').hidden&&panel('canvas').hidden&&!visibility('slides').checked&&!visibility('canvas').checked&&panel('canvas').dataset.windowState==='floating');
+    await setVisible('canvas',true);
+    check('Showing a reloaded floating panel restores its location and size',shown(panel('canvas'))&&close(rect(panel('canvas')).x,floatingRect.x)&&close(rect(panel('canvas')).y,floatingRect.y)&&close(rect(panel('canvas')).width,floatingRect.width)&&close(rect(panel('canvas')).height,floatingRect.height));
+    const legacy=JSON.parse(localStorage.getItem(STORAGE_KEY));for(const entry of Object.values(legacy.panels))delete entry.visible;localStorage.setItem(STORAGE_KEY,JSON.stringify(legacy));
+    iframe=await loadEditor();win=iframe.contentWindow;doc=iframe.contentDocument;
+    check('Saved layouts from before visibility support default every panel to shown',panelKeys.every(key=>shown(panel(key))&&visibility(key).checked));
+    await setVisible('slides',false);
     await reset();
-    check('Reset restores default dock sizes and clears floating state', ['slides', 'assets', 'layers', 'canvas', 'objects'].every(key => panel(key).dataset.windowState === 'docked' && close(rect(panel(key)).width, initial[key].width) && close(rect(panel(key)).height, initial[key].height)));
+    check('Reset shows every panel, restores default dock sizes and clears floating state', ['slides', 'assets', 'layers', 'canvas', 'objects'].every(key => shown(panel(key)) && visibility(key).checked && panel(key).dataset.windowState === 'docked' && close(rect(panel(key)).width, initial[key].width) && close(rect(panel(key)).height, initial[key].height)));
     iframe.style.width = '900px';
     await settle(win);
     check('Tablet layout keeps Properties width handles inactive', ['layers', 'canvas', 'objects'].every(key => !shown(widthHandle(key)) || widthHandle(key).disabled));
@@ -221,9 +248,12 @@ run.onclick = async () => {
     check('Stacked layout keeps all dock width handles inactive', ['slides', 'assets', 'layers', 'canvas', 'objects'].every(key => !shown(widthHandle(key)) || widthHandle(key).disabled));
     for (const key of ['slides', 'assets']) {
       const before = rect(panel(key)).height;
-      keyboard(win, heightHandle(key), 'ArrowDown');
+      // A populated Assets panel can start taller than the allowed custom height.
+      const shrink = before >= win.innerHeight - 110;
+      keyboard(win, heightHandle(key), shrink ? 'ArrowUp' : 'ArrowDown');
       await settle(win);
-      check(`Stacked ${key} height is resizable`, shown(heightHandle(key)) && rect(panel(key)).height > before + 5);
+      const delta = (rect(panel(key)).height - before) * (shrink ? -1 : 1);
+      check(`Stacked ${key} height responds to resizing within viewport limits`, shown(heightHandle(key)) && delta > 5);
     }
     check('Stacked panels remain within the page width', ['slides', 'assets', 'layers', 'canvas', 'objects'].every(key => rect(panel(key)).left >= -2 && rect(panel(key)).right <= win.innerWidth + 2));
   } catch (error) {

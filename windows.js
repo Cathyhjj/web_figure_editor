@@ -40,6 +40,11 @@ export function initWindows({ onLayoutChange } = {}) {
   const panels = new Map(), cleanup = [];
   const layout = document.querySelector('.editor-layout');
   const properties = layout?.querySelector('.properties-panel');
+  const propertyScroll = properties?.querySelector('.property-scroll');
+  const precisionNote = properties?.querySelector('.precision-note');
+  const viewToggle = document.getElementById('view-toggle');
+  const viewMenu = document.getElementById('view-menu');
+  const viewOptions = document.getElementById('view-panel-options');
   let dockWidths = {};
   let topZ = 30, gesture = null, frame = 0, destroyed = false;
   const viewport = () => {
@@ -67,15 +72,19 @@ export function initWindows({ onLayoutChange } = {}) {
   }
   function persist() {
     const saved = {};
-    for (const [key, panel] of panels) saved[key] = { floating: panel.floating, rect: panel.rect, dockHeight: panel.dockHeight };
+    for (const [key, panel] of panels) saved[key] = { visible: panel.visible, floating: panel.floating, rect: panel.rect, dockHeight: panel.dockHeight };
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, panels: saved, dockWidths })); }
     catch { say('Panel layout could not be saved in this browser. The current layout is still usable.'); }
   }
+  const inDock = key => !!panels.get(key)?.visible && !panels.get(key).floating;
   function dockColumns() {
-    layout?.classList.toggle('window-slides-floating', !!panels.get('slides')?.floating);
-    layout?.classList.toggle('window-assets-floating', !!panels.get('assets')?.floating);
-    layout?.classList.toggle('window-layers-floating', !!panels.get('layers')?.floating);
-    layout?.classList.toggle('window-all-properties-floating', ['layers', 'canvas', 'objects'].every(key => panels.get(key)?.floating));
+    for (const key of ['slides', 'assets', 'layers']) layout?.classList.toggle(`window-${key}-empty`, !inDock(key));
+    const settingsEmpty = !inDock('canvas') && !inDock('objects');
+    layout?.classList.toggle('window-properties-empty', !inDock('layers') && settingsEmpty);
+    layout?.classList.toggle('window-settings-empty', settingsEmpty);
+    layout?.classList.toggle('window-single-setting', inDock('canvas') !== inDock('objects'));
+    if (propertyScroll) propertyScroll.hidden = settingsEmpty;
+    if (precisionNote) precisionNote.hidden = !inDock('objects');
     syncDockSizes();
   }
   function widthKey(panel) {
@@ -88,7 +97,7 @@ export function initWindows({ onLayoutChange } = {}) {
   }
   function heightRange(panel) {
     const min = panel.key === 'slides' ? 220 : 150;
-    return { min, max: Math.max(min, panel.key === 'layers' && window.innerWidth > 1050 ? layout.clientHeight - 150 : window.innerHeight - 100) };
+    return { min, max: Math.max(min, panel.key === 'layers' && window.innerWidth > 1050 ? layout.clientHeight - (propertyScroll?.hidden ? 0 : 150) : window.innerHeight - 100) };
   }
   function syncDockSizes() {
     if (!layout) return;
@@ -98,7 +107,7 @@ export function initWindows({ onLayoutChange } = {}) {
     for (const key of Object.keys(dockMinimums)) layout.style.removeProperty(`--${key}-dock-width`);
     const defaults = getComputedStyle(layout), widths = {};
     for (const key of Object.keys(dockMinimums)) {
-      const visible = key === 'properties' ? desktop && !layout.classList.contains('window-all-properties-floating') : !panels.get(key)?.floating;
+      const visible = key === 'properties' ? desktop && !layout.classList.contains('window-properties-empty') : inDock(key);
       if (columns && visible) widths[key] = dockWidths[key] ?? parseFloat(defaults.getPropertyValue(`--${key}-dock-width`));
     }
     const fitted = fitDockWidths(widths, layout.clientWidth);
@@ -108,11 +117,11 @@ export function initWindows({ onLayoutChange } = {}) {
       const key = widthKey(panel), range = heightRange(panel);
       const height = panel.dockHeight === null ? null : limit(panel.dockHeight, range.min, range.max);
       const canHeight = !['slides', 'assets'].includes(panel.key) || !columns;
-      const constrained = !panel.floating && canHeight && height !== null;
+      const constrained = inDock(panel.key) && canHeight && height !== null;
       panel.element.classList.toggle('has-dock-height', constrained);
       if (constrained) panel.element.style.setProperty('--window-dock-height', `${height}px`);
       else panel.element.style.removeProperty('--window-dock-height');
-      if (constrained && panel.key === 'layers' && desktop) properties.style.gridTemplateRows = `${height}px minmax(0,1fr)`;
+      if (constrained && panel.key === 'layers' && desktop) properties.style.gridTemplateRows = propertyScroll?.hidden ? `${height}px` : `${height}px minmax(0,1fr)`;
       panel.widthResize.hidden = panel.floating || !columns || (key === 'properties' && !desktop);
       panel.heightResize.hidden = panel.floating || !canHeight;
       panel.widthResize.setAttribute('aria-valuenow', String(Math.round(fitted[key] || panel.element.getBoundingClientRect().width)));
@@ -149,6 +158,8 @@ export function initWindows({ onLayoutChange } = {}) {
     Object.assign(panel.element.style, { left: `${x}px`, top: `${y}px`, width: `${width}px`, height: `${height}px` });
   }
   function chrome(panel) {
+    panel.element.hidden = !panel.visible;
+    if (panel.visibilityToggle) panel.visibilityToggle.checked = panel.visible;
     panel.element.classList.toggle('is-floating', panel.floating);
     panel.element.dataset.windowState = panel.floating ? 'floating' : 'docked';
     panel.toggle.textContent = panel.floating ? 'Dock' : 'Float';
@@ -156,6 +167,18 @@ export function initWindows({ onLayoutChange } = {}) {
     panel.toggle.title = panel.floating ? 'Return to the original dock' : 'Float this panel';
     panel.toggle.setAttribute('aria-pressed', String(panel.floating));
     panel.resize.hidden = !panel.floating;
+  }
+  function setVisible(panel, visible) {
+    if (panel.visible === visible) return;
+    if (gesture?.panel === panel) finishGesture(true);
+    if (!visible && panel.element.contains(document.activeElement)) viewToggle?.focus({ preventScroll: true });
+    panel.visible = visible;
+    chrome(panel);
+    if (visible && panel.floating) { applyRect(panel, panel.rect); raise(panel); }
+    dockColumns();
+    persist();
+    notifyLayout();
+    say(`${panel.title} panel ${visible ? 'shown' : 'hidden'}.`);
   }
   function float(panel, rect) {
     if (!panel.floating) {
@@ -285,7 +308,17 @@ export function initWindows({ onLayoutChange } = {}) {
     resize.setAttribute('aria-label', `Resize ${title} panel`);
     element.append(resize);
     const widthResize = document.createElement('button'), heightResize = document.createElement('button');
-    const panel = { key, title, element, header, body, marker, toggle, resize, widthResize, heightResize, grip, floating: false, rect: null, dockHeight: null };
+    const panel = { key, title, element, header, body, marker, toggle, resize, widthResize, heightResize, grip, visible: true, floating: false, rect: null, dockHeight: null };
+    if (viewOptions) {
+      const label = document.createElement('label'), input = document.createElement('input');
+      input.type = 'checkbox';
+      input.dataset.panel = key;
+      panel.visibilityToggle = input;
+      panel.visibilityLabel = document.createTextNode(title);
+      label.append(input, panel.visibilityLabel);
+      viewOptions.append(label);
+      listen(input, 'change', () => setVisible(panel, input.checked));
+    }
     for (const [axis, handle] of [['width', widthResize], ['height', heightResize]]) {
       handle.type = 'button';
       handle.className = `window-edge-resize window-resize-${axis}`;
@@ -316,7 +349,7 @@ export function initWindows({ onLayoutChange } = {}) {
       if (panel.floating) dock(panel); else float(panel);
       toggle.focus({ preventScroll: true });
       persist();
-      say(`${title} panel ${panel.floating ? 'floating. Drag its header to move it.' : 'docked.'}`);
+      say(`${panel.title} panel ${panel.floating ? 'floating. Drag its header to move it.' : 'docked.'}`);
     });
     listen(header, 'pointerdown', event => beginGesture(event, panel, 'move', header));
     listen(header, 'keydown', event => headerKey(event, panel));
@@ -341,10 +374,10 @@ export function initWindows({ onLayoutChange } = {}) {
   function reset() {
     finishGesture(true);
     dockWidths = {};
-    for (const panel of panels.values()) { panel.dockHeight = null; dock(panel); panel.rect = null; }
-    syncDockSizes();
+    for (const panel of panels.values()) { panel.visible = true; panel.dockHeight = null; dock(panel); panel.rect = null; chrome(panel); }
+    dockColumns();
     persist();
-    say('All panels returned to their default docks.');
+    say('All panels shown in their default docks.');
     notifyLayout();
   }
   listen(document, 'pointermove', pointerMove, { capture: true, passive: false });
@@ -354,10 +387,38 @@ export function initWindows({ onLayoutChange } = {}) {
   }, true);
   listen(document, 'pointercancel', () => finishGesture(true), true);
   listen(window, 'blur', () => finishGesture(true));
+  function positionViewMenu() {
+    if (!viewMenu || !viewToggle) return;
+    const bounds = viewToggle.getBoundingClientRect(), v = viewport();
+    const width = Math.min(240, v.width - 16);
+    viewMenu.style.width = `${width}px`;
+    viewMenu.style.left = `${limit(bounds.right - width, v.left + 8, v.left + v.width - width - 8)}px`;
+    viewMenu.style.top = `${bounds.bottom + 6}px`;
+    viewMenu.style.maxHeight = `${Math.max(0, v.top + v.height - bounds.bottom - 14)}px`;
+  }
+  if (viewMenu) {
+    listen(viewMenu, 'beforetoggle', event => { if (event.newState === 'open') positionViewMenu(); });
+    // Keep menu navigation from triggering the figure's keyboard shortcuts.
+    const menuKey = event => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') return;
+      event.stopPropagation();
+    };
+    listen(viewMenu, 'keydown', menuKey);
+    if (viewToggle) listen(viewToggle, 'keydown', menuKey);
+    listen(document, 'focusin', event => {
+      if (viewMenu.matches(':popover-open') && !viewMenu.contains(event.target) && event.target !== viewToggle) viewMenu.hidePopover();
+    });
+  }
+  const showAllButton = document.getElementById('show-all-panels');
+  if (showAllButton) listen(showAllButton, 'click', () => {
+    for (const panel of panels.values()) setVisible(panel, true);
+    say('All panels shown.');
+  });
   const viewportChanged = () => {
     finishGesture(true);
     for (const panel of panels.values()) if (panel.floating) applyRect(panel, panel.rect);
     syncDockSizes();
+    if (viewMenu?.matches(':popover-open')) positionViewMenu();
     persist(); notifyLayout();
   };
   listen(window, 'resize', viewportChanged);
@@ -375,6 +436,8 @@ export function initWindows({ onLayoutChange } = {}) {
       }
       for (const [key, panel] of panels) {
         const entry = saved.panels[key];
+        panel.visible = entry?.visible !== false;
+        chrome(panel);
         if (typeof entry?.dockHeight === 'number' && Number.isFinite(entry.dockHeight)) panel.dockHeight = limit(entry.dockHeight, 150, 2000);
         if (entry?.rect && typeof entry.rect === 'object') panel.rect = clampWindowRect(entry.rect, viewport());
         if (entry?.floating === true) float(panel);
@@ -386,7 +449,7 @@ export function initWindows({ onLayoutChange } = {}) {
     reset,
     destroy() {
       finishGesture(true);
-      for (const panel of panels.values()) dock(panel);
+      for (const panel of panels.values()) { panel.visible = true; chrome(panel); dock(panel); }
       for (const panel of panels.values()) {
         panel.body.replaceWith(...panel.body.childNodes);
         panel.toggle.remove(); panel.resize.remove(); panel.widthResize.remove(); panel.heightResize.remove(); panel.grip.remove(); panel.marker.remove();
@@ -400,7 +463,11 @@ export function initWindows({ onLayoutChange } = {}) {
       cancelAnimationFrame(frame);
       cleanup.forEach(remove => remove());
       announcer.remove(); help.remove();
-      layout?.classList.remove('windows-ready', 'window-slides-floating', 'window-assets-floating', 'window-layers-floating', 'window-all-properties-floating');
+      viewOptions?.replaceChildren();
+      if (viewMenu?.matches(':popover-open')) viewMenu.hidePopover();
+      if (propertyScroll) propertyScroll.hidden = false;
+      if (precisionNote) precisionNote.hidden = false;
+      layout?.classList.remove('windows-ready', 'window-slides-empty', 'window-assets-empty', 'window-layers-empty', 'window-properties-empty', 'window-settings-empty', 'window-single-setting');
       for (const key of Object.keys(dockMinimums)) layout?.style.removeProperty(`--${key}-dock-width`);
       properties?.style.removeProperty('grid-template-rows');
       activeController = null;
