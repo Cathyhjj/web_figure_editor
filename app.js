@@ -4,7 +4,7 @@ import { initShapeDrawing } from './shape-drawing.js';
 import { isMediaItem, posterSource } from './video.js';
 import { createChartFrame } from './html-chart.js';
 import { uid, projectToSVG, exportPNG, downloadBlob } from './core.js';
-import { createDeck, validateDeck, cloneDeck, currentSlide, slideProject, deckSourceManifest, addSlide } from './deck.js';
+import { createDeck, validateDeck, cloneDeck, currentSlide, slideProject, deckSourceManifest, addSlide, moveSlides } from './deck.js';
 import { pickProjectFile, readProjectFile, writeProjectFile } from './project-files.js';
 import { createRecentProjects, openRecentProject } from './recent-projects.js';
 import { initRecentProjectMenu } from './recent-project-menu.js';
@@ -16,6 +16,7 @@ import { exportPPTX, pptxLayout } from './pptx.js';
 import { initPPTXImport } from './pptx-import.js';
 import { exportPDF } from './pdf.js';
 import { initWindows } from './windows.js';
+import { initSlideDrag } from './slide-drag.js';
 import { imageShadowSVG } from './shadow.js';
 import { shadowEditorMarkup, bindShadowEditor } from './shadow-editor.js';
 import { isShapeItem, isLineShape, shapeSVG, shapeBounds } from './shapes.js';
@@ -155,10 +156,10 @@ function renderSlides(){
  if(!validIds.has(slideSelectionAnchor))slideSelectionAnchor=project.activeSlideId;
  const list=$('slide-list'),existing=new Map([...list.children].map(card=>[card.dataset.slide,card]));
  project.slides.forEach((page,index)=>{
-  const card=existing.get(page.id)||document.createElement('button');existing.delete(page.id);card.type='button';card.className='slide-card';card.dataset.slide=page.id;
+  const card=existing.get(page.id)||document.createElement('button');existing.delete(page.id);card.type='button';card.className='slide-card';card.dataset.slide=page.id;card.draggable=false;
   card.setAttribute('aria-current',String(page.id===project.activeSlideId));
   card.setAttribute('aria-pressed',String(selectedSlideIds.has(page.id)));
-  card.setAttribute('aria-label',`Slide ${index+1}: ${page.name}`);card.title=page.name;
+  card.setAttribute('aria-label',`Slide ${index+1}: ${page.name}`);card.title=`${page.name} · Drag to reorder`;
   const preview=svg('svg',{class:'slide-preview',viewBox:`0 0 ${page.canvas.width} ${page.canvas.height}`,'aria-hidden':'true'});
   preview.append(svg('rect',{width:page.canvas.width,height:page.canvas.height,fill:page.canvas.background}));
   for(const item of page.items){
@@ -183,6 +184,7 @@ function renderSlides(){
  $('paste-slide').disabled=readingSlideClipboard||project.slides.length>=100;
 }
 function selectSlide(id,{ids=new Set([id]),anchor=id}={}){
+ if(!project.slides.some(page=>page.id===id))return;
  flushText();project.activeSlideId=id;selectedSlideIds=ids;slideSelectionAnchor=anchor;editRevision++;selected.clear();lastTap=null;lastPointerItem=null;
  render();fit();saveDraft();status(`Editing ${slide().name}. Assets are shared across slides.`);
 }
@@ -228,6 +230,25 @@ $('delete-slide').onclick=()=>{
 };
 $('slide-name').oninput=e=>{if(!pendingText)pendingText=snapshot();slide().name=e.target.value.trim().slice(0,120)||'Untitled slide';changed();};
 $('slide-name').onblur=()=>{flushText();renderToolbar();};
+initSlideDrag({
+ list:$('slide-list'),
+ context:()=>project,
+ start(id,source){
+  if(source!==project||!project.slides.some(page=>page.id===id))return null;
+  if(!selectedSlideIds.has(id))selectSlide(id);
+  else{flushText();selected.clear();render();}
+  const token={project,revision:editRevision,ids:new Set(selectedSlideIds),activeId:project.activeSlideId};
+  status(`Moving ${token.ids.size===1?'slide':token.ids.size+' slides'}. Drop at the insertion line; Escape cancels.`);
+  return token;
+ },
+ isCurrent(token){return token.project===project&&token.revision===editRevision&&token.activeId===project.activeSlideId&&token.ids.size===selectedSlideIds.size&&[...token.ids].every(id=>selectedSlideIds.has(id));},
+ drop(token,index){
+  const candidate={...project};
+  if(!moveSlides(candidate,token.ids,index)){focusCurrentSlide();status('Slide order unchanged.');return;}
+  if(change(()=>{project.slides=candidate.slides;})){focusCurrentSlide();status(`${token.ids.size===1?'Slide':token.ids.size+' slides'} moved. Use Undo to restore the previous order.`);}
+ },
+ cancel(reason){status(reason==='changed'?'Slide move cancelled because the project or selection changed.':'Slide move cancelled.');},
+});
 function renderStage(){
  syncHTMLChart();
  const stage=$('stage');stage.replaceChildren();stage.setAttribute('viewBox',`0 0 ${slide().canvas.width} ${slide().canvas.height}`);

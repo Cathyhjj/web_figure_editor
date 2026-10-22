@@ -123,6 +123,23 @@ export function deleteSlide(deck) {
   return next;
 }
 
+/** Move a selected group to an original-order boundary, retaining all record identities. */
+export function moveSlides(deck, selectedSlideIds, insertionIndex) {
+  if (!Number.isInteger(insertionIndex) || insertionIndex < 0 || insertionIndex > deck.slides.length) {
+    throw new Error('The slide insertion position must be an integer between 0 and the slide count.');
+  }
+  const ids = new Set(selectedSlideIds);
+  if (!ids.size) throw new Error('Select at least one slide to move.');
+  const moving = deck.slides.filter(slide => ids.has(slide.id));
+  if (moving.length !== ids.size) throw new Error('A slide selected for moving does not exist.');
+  const removedBefore = deck.slides.slice(0, insertionIndex).filter(slide => ids.has(slide.id)).length;
+  const reordered = deck.slides.filter(slide => !ids.has(slide.id));
+  reordered.splice(insertionIndex - removedBefore, 0, ...moving);
+  if (reordered.every((slide, index) => slide === deck.slides[index])) return false;
+  deck.slides = reordered;
+  return true;
+}
+
 export function deckSourceManifest(input) {
   const deck = validateDeck(input);
   const base = sourceManifest(slideProject(deck));

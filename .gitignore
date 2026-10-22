@@ -141,3 +141,8 @@
 !/resources/LICENSE-Apache-POI.txt
 !/resources/NOTICE-Apache-POI.txt
 !/resources/NOTICE-preset-shapes.txt
+
+# Slide drag reordering and browser checks.
+!/slide-drag.js
+!/tests/slide-order.html
+!/tests/slide-order-browser.js
