@@ -1,5 +1,13 @@
 import { isMediaItem } from './video.js';
 import { isShapeItem, isLineShape } from './shapes.js';
+
+/** Scale both dimensions together within the portable model's size bounds. */
+export function resizeMediaDimension(item, dimension, value) {
+  const minimum = Math.max(0.01 / item.width, 0.01 / item.height);
+  const maximum = Math.min(100000 / item.width, 100000 / item.height);
+  const scale = Math.max(minimum, Math.min(maximum, value / item[dimension]));
+  return { width: Math.max(0.01, Math.min(100000, item.width * scale)), height: Math.max(0.01, Math.min(100000, item.height * scale)) };
+}
 /** Resize in the object's local axes while keeping the opposite edge/corner fixed. */
 export function resizeItem(item, handle, dx, dy, { free = false } = {}) {
   const angle = (item.rotation || 0) * Math.PI / 180;

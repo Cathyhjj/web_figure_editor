@@ -1,5 +1,5 @@
 import { uid } from './core.js';
-import { readProjectFile } from './project-files.js';
+import { readProjectFileState } from './project-files.js';
 
 const DB_NAME = 'figure-editor-recent-projects';
 const STORE = 'recent';
@@ -141,5 +141,5 @@ export async function openRecentProject(entry) {
     if (permission !== 'granted') throw denied();
   }
   const file = await handle.getFile();
-  return { project: await readProjectFile(file), handle, name: handle.name || file.name || entry.name };
+  return { ...await readProjectFileState(file), handle, name: handle.name || file.name || entry.name };
 }

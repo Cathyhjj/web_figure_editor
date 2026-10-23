@@ -4,6 +4,8 @@
 import argparse
 import fcntl
 import hashlib
+import importlib.machinery
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -99,10 +101,45 @@ def stop_owned_server(url):
         raise LaunchError("The existing Figure Editor server could not restart safely.")
 
 
+class SnapshotModuleLoader(importlib.machinery.SourceFileLoader):
+    def __init__(self, name, path, source):
+        super().__init__(name, path)
+        self.source = source
+
+    def get_code(self, fullname):
+        # Bypass timestamp/size pyc validation and later changes on disk.
+        return compile(self.source, self.path, "exec", dont_inherit=True)
+
+
+class SnapshotImports:
+    """Resolve only this snapshot's top-level Python modules; leave other imports alone."""
+
+    def __init__(self, root, files):
+        self.sources = {Path(name).stem: (str(root / name), source)
+                        for name, source in files.items()
+                        if "/" not in name and name.endswith(".py")}
+
+    def find_spec(self, fullname, path=None, target=None):
+        if path is not None or fullname not in self.sources:
+            return None
+        filename, source = self.sources[fullname]
+        return importlib.util.spec_from_file_location(
+            fullname, filename, loader=SnapshotModuleLoader(fullname, filename, source))
+
+
 def serve(port):
-    # Compile the snapshot itself: timestamp-based bytecode caches must not select
-    # an older backend after an edit or checkout with matching size and mtime.
     fingerprint, files = source_snapshot()
+    # Keep lazy local imports tied to the same fingerprint for the server's life.
+    snapshot_imports = SnapshotImports(ROOT, files)
+    sys.meta_path.insert(0, snapshot_imports)
+    try:
+        serve_snapshot(port, fingerprint, files)
+    finally:
+        sys.meta_path.remove(snapshot_imports)
+
+
+def serve_snapshot(port, fingerprint, files):
+    # Compile the entry point and imported helpers from the captured bytes.
     sys.path.insert(0, str(ROOT))
     module = types.ModuleType("figure_editor_live_server")
     module.__file__ = str(ROOT / "server.py")

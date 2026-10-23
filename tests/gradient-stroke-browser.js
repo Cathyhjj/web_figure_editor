@@ -58,7 +58,7 @@ document.querySelector('#run').onclick=async()=>{
   check('No Border removes the gradient paint server',!doc.querySelector(`#stage [data-item="${deck.slides[0].items.find(i=>i.name==='Border').id}"] linearGradient`));
   doc.querySelector('#undo').click();choose('Border');paint('solid');
   check('Solid Border clears the former gradient',!doc.querySelector(editor));doc.querySelector('#undo').click();
-  let saved;win.showSaveFilePicker=async()=>({name:'gradient.figure.json',createWritable:async()=>({write:async blob=>{saved=JSON.parse(await blob.text());},close:async()=>{}})});
+  let saved,savedFile=new Blob([]);win.showSaveFilePicker=async()=>({getFile:async()=>savedFile,name:'gradient.figure.json',createWritable:async()=>{let pending;return {write:async blob=>{pending=blob;},close:async()=>{savedFile=pending;saved=JSON.parse(await pending.text());}};}});
   doc.querySelector('#save-project-as').click();await wait(()=>saved);
   check('Saved project retains each native gradient and independent stops',saved.slides[0].items.filter(i=>i.strokeGradient).length===5);
   await open(saved);choose('Horizontal');chooseStop(0);check('Reopening restores the edited gradient',doc.querySelector(`${editor} [data-gradient-field="color"]`).value==='#00ff00');

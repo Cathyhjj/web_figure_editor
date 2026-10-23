@@ -51,6 +51,60 @@ def fixture(slides=None, extra=None):
 
 
 class PptxImportTests(unittest.TestCase):
+    def test_luminance_transforms_preserve_hue_saturation_order_and_alpha(self):
+        # Hand-calculated HSL examples distinguish luminance from per-channel RGB
+        # arithmetic. Import the actual text style so this also covers consumers.
+        cases = [
+            ('800000', '<a:lumMod val="50000"/><a:lumOff val="50000"/>', '#ff4040'),
+            ('800000', '<a:lumOff val="50000"/><a:lumMod val="50000"/>', '#c00000'),
+            ('FF8080', '<a:lumMod val="50000"/>', '#c00000'),
+            ('008000', '<a:lumOff val="50000"/>', '#80ff80'),
+            ('000080', '<a:alpha val="50000"/><a:lumMod val="50000"/><a:lumOff val="50000"/>', '#4040ff80'),
+            ('800000', '<a:lumMod val="50000"/><a:alpha val="50000"/><a:lumOff val="50000"/>', '#ff404080'),
+            ('FF0000', '<a:lumMod val="50000"/><a:shade val="50000"/><a:lumOff val="50000"/>', '#ff4040'),
+            ('FF0000', '<a:lumMod val="50000"/><a:tint val="50000"/>', '#bf8080'),
+            ('808080', '<a:lumMod val="50000"/>', '#404040'),
+        ]
+        for source, transforms, expected in cases:
+            with self.subTest(source=source, transforms=transforms):
+                content = text_shape().replace('<a:srgbClr val="123456"/>',
+                    f'<a:srgbClr val="{source}">{transforms}</a:srgbClr>')
+                result = import_pptx({**fixture([slide(content)]), 'slide':1})
+                self.assertEqual(result['items'][0]['paragraphs'][0]['runs'][0]['color'], expected)
+
+    def test_luminance_clamps_each_step_without_losing_hue_at_endpoints(self):
+        cases = [
+            ('<a:lumOff val="100000"/><a:lumMod val="50000"/>', '#ff0000'),
+            ('<a:lumOff val="-100000"/><a:lumOff val="50000"/>', '#ff0000'),
+            ('<a:lumMod val="300000"/>', '#ffffff'),
+            ('<a:lumOff val="-100000"/>', '#000000'),
+        ]
+        for transforms, expected in cases:
+            with self.subTest(transforms=transforms):
+                paint = f'<a:solidFill><a:srgbClr val="FF0000">{transforms}</a:srgbClr></a:solidFill>'
+                content = text_shape(geometry=xfrm()+'<a:prstGeom prst="rect"/>'+paint)
+                result = import_pptx({**fixture([slide(content)]), 'slide':1})
+                self.assertEqual(result['items'][0]['fill'], expected)
+
+    def test_tint_uses_input_fraction_and_shade_keeps_its_rgb_semantics(self):
+        # DrawingML tint=10% means 10% input plus 90% white, unlike lumOff.
+        cases = [
+            ('<a:tint val="0"/>', '#ffffff'),
+            ('<a:tint val="100000"/>', '#000000'),
+            ('<a:tint val="10000"/>', '#e6e6e6'),
+            ('<a:tint val="100000"/><a:lumOff val="50000"/>', '#808080'),
+        ]
+        for transforms, expected in cases:
+            with self.subTest(transforms=transforms):
+                content = text_shape().replace('<a:srgbClr val="123456"/>',
+                    f'<a:srgbClr val="000000">{transforms}</a:srgbClr>')
+                result = import_pptx({**fixture([slide(content)]), 'slide':1})
+                self.assertEqual(result['items'][0]['paragraphs'][0]['runs'][0]['color'], expected)
+        content = text_shape().replace('<a:srgbClr val="123456"/>',
+            '<a:srgbClr val="FF8080"><a:shade val="50000"/><a:alpha val="25000"/></a:srgbClr>')
+        result = import_pptx({**fixture([slide(content)]), 'slide':1})
+        self.assertEqual(result['items'][0]['paragraphs'][0]['runs'][0]['color'], '#80404040')
+
     def test_svg_extension_prefers_vector_and_retains_png_fallback(self):
         svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10" fill="red"/></svg>'
         extension = '<a:extLst><a:ext uri="{96DAC541-7B7A-43D3-8B79-37D633B846F1}"><asvg:svgBlip xmlns:asvg="http://schemas.microsoft.com/office/drawing/2016/SVG/main" r:embed="vector"/></a:ext></a:extLst>'
@@ -64,6 +118,50 @@ class PptxImportTests(unittest.TestCase):
         missing = import_pptx({**fixture([slide(content)]), 'slide':1})
         self.assertEqual(missing['media'][0]['mime'], 'image/png')
         self.assertTrue(any('SVG source is missing' in w for w in missing['warnings']))
+
+    def test_missing_svg_part_uses_embedded_preview_without_losing_picture_properties(self):
+        extension = '<a:extLst><a:ext uri="{96DAC541-7B7A-43D3-8B79-37D633B846F1}"><asvg:svgBlip xmlns:asvg="http://schemas.microsoft.com/office/drawing/2016/SVG/main" r:embed="vector"/></a:ext></a:extLst>'
+        content = picture('<a:srcRect l="10000" r="20000"/>').replace('<a:blip r:embed="img"/>',
+            '<a:blip r:embed="img"><a:alphaModFix amt="50000"/>'+extension+'</a:blip>')
+        extra = {'ppt/slides/_rels/slide1.xml.rels':relations([
+            ('img','image','../media/panel.png',''), ('vector','image','../media/missing.svg','')])}
+        result = import_pptx({**fixture([slide(content)], extra), 'slide':1})
+        self.assertEqual(len(result['items']), 1)
+        item = result['items'][0]
+        self.assertEqual((item['x'], item['y'], item['width'], item['height']), (200,100,240,180))
+        self.assertEqual(item['opacity'], .5)
+        self.assertEqual(item['crop'], {'x':.1,'y':0,'width':.7,'height':1})
+        self.assertEqual(result['media'][0]['mime'], 'image/png')
+        self.assertEqual(item['assetId'], result['media'][0]['id'])
+        self.assertTrue(any('SVG source is missing; its preview image is used.' in w for w in result['warnings']))
+
+    def test_existing_svg_survives_missing_optional_preview_part_or_relationship(self):
+        svg = b'<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10" fill="red"/></svg>'
+        extension = '<a:extLst><a:ext uri="{96DAC541-7B7A-43D3-8B79-37D633B846F1}"><asvg:svgBlip xmlns:asvg="http://schemas.microsoft.com/office/drawing/2016/SVG/main" r:embed="vector"/></a:ext></a:extLst>'
+        content = picture().replace('<a:blip r:embed="img"/>', '<a:blip r:embed="img">'+extension+'</a:blip>')
+        for preview_rel in ([('img','image','../media/missing.png','')], []):
+            with self.subTest(preview_rel=preview_rel):
+                extra = {'ppt/media/vector.svg':svg, 'ppt/slides/_rels/slide1.xml.rels':relations([
+                    *preview_rel, ('vector','image','../media/vector.svg','')])}
+                result = import_pptx({**fixture([slide(content)], extra), 'slide':1})
+                self.assertEqual(len(result['items']), 1)
+                self.assertEqual(len(result['media']), 1)
+                vector = result['media'][0]
+                self.assertEqual(vector['mime'], 'image/svg+xml')
+                self.assertNotIn('fallbackId', vector)
+                self.assertEqual(base64.b64decode(vector['dataUrl'].split(',')[1]), svg)
+                self.assertTrue(any('Preview image is missing; the SVG source was retained.' in w for w in result['warnings']))
+
+    def test_missing_svg_and_preview_report_omission_and_keep_other_content(self):
+        extension = '<a:extLst><a:ext uri="{96DAC541-7B7A-43D3-8B79-37D633B846F1}"><asvg:svgBlip xmlns:asvg="http://schemas.microsoft.com/office/drawing/2016/SVG/main" r:embed="vector"/></a:ext></a:extLst>'
+        content = picture().replace('<a:blip r:embed="img"/>', '<a:blip r:embed="img">'+extension+'</a:blip>')
+        extra = {'ppt/slides/_rels/slide1.xml.rels':relations([
+            ('img','image','../media/missing.png',''), ('vector','image','../media/missing.svg','')])}
+        result = import_pptx({**fixture([slide(content+text_shape())], extra), 'slide':1})
+        self.assertEqual([item['type'] for item in result['items']], ['textBlock'])
+        self.assertEqual(result['media'], [])
+        self.assertTrue(any('SVG source and preview image are missing' in w for w in result['warnings']))
+        self.assertFalse(any('preview image is used' in w for w in result['warnings']))
 
     def test_gradient_arrows_are_independent_vectors_with_editable_text(self):
         gradient='<a:gradFill><a:gsLst><a:gs pos="0"><a:srgbClr val="FF0000"><a:alpha val="50000"/></a:srgbClr></a:gs><a:gs pos="100000"><a:srgbClr val="0000FF"/></a:gs></a:gsLst><a:lin ang="5400000"/></a:gradFill>'

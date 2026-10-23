@@ -2,7 +2,9 @@
 
 import http.server
 import importlib.util
+import os
 from pathlib import Path
+import py_compile
 import shutil
 import socket
 import subprocess
@@ -109,8 +111,6 @@ class DesktopLauncherTests(unittest.TestCase):
         backend = self.root / "server.py"
         backend.write_bytes(backend.read_bytes() + b'\nHandler.server_version = "BackendOld"\n')
         # Make a valid old pyc, then preserve the source size/mtime across its edit.
-        import os
-        import py_compile
         py_compile.compile(str(backend), doraise=True)
         old_stat = backend.stat()
         first = self.launch()
@@ -156,6 +156,59 @@ class DesktopLauncherTests(unittest.TestCase):
             other.shutdown()
             thread.join()
             other.server_close()
+
+    def test_imported_helpers_reload_ignoring_matching_size_and_timestamp_bytecode(self):
+        helpers = [self.root / name for name in ("pdf_text.py", "pptx_import.py", "pptx_clipboard.py")]
+        old_stats = []
+        for helper in helpers:
+            helper.write_bytes(helper.read_bytes() + b'\nSNAPSHOT_MARKER = "OLD"\n')
+            py_compile.compile(str(helper), doraise=True)
+            old_stats.append(helper.stat())
+        backend = self.root / "server.py"
+        backend.write_bytes(backend.read_bytes() + b'''
+import pdf_text, pptx_import, pptx_clipboard
+Handler.server_version = "/".join(helper.SNAPSHOT_MARKER for helper in (pdf_text, pptx_import, pptx_clipboard))
+''')
+        first = self.launch()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        initial = self.info()
+        with self.opener.open(self.url, timeout=2) as response:
+            self.assertTrue(response.headers["Server"].startswith("OLD/OLD/OLD"))
+
+        for helper, old_stat in zip(helpers, old_stats):
+            helper.write_bytes(helper.read_bytes().replace(b'SNAPSHOT_MARKER = "OLD"', b'SNAPSHOT_MARKER = "NEW"'))
+            os.utime(helper, ns=(old_stat.st_atime_ns, old_stat.st_mtime_ns))
+            self.assertEqual(helper.stat().st_size, old_stat.st_size)
+        restarted = self.launch()
+        self.assertEqual(restarted.returncode, 0, restarted.stderr)
+        self.assertNotEqual(self.info()["pid"], initial["pid"])
+        self.assertNotEqual(self.info()["fingerprint"], initial["fingerprint"])
+        self.assertEqual(self.info()["fingerprint"], launcher.source_snapshot(self.root)[0])
+        with self.opener.open(self.url, timeout=2) as response:
+            self.assertTrue(response.headers["Server"].startswith("NEW/NEW/NEW"), response.headers["Server"])
+
+    def test_lazily_imported_helper_uses_the_fingerprinted_source_snapshot(self):
+        lazy = self.root / "snapshot_lazy.py"
+        lazy.write_text('MARKER = "captured before startup"\n', encoding="utf-8")
+        helper = self.root / "pptx_clipboard.py"
+        helper.write_bytes(helper.read_bytes() + b'''
+def clipboard_available():
+    import snapshot_lazy
+    return snapshot_lazy.MARKER
+''')
+        result = self.launch()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        initial = self.info()
+        # The desktop readiness request does not import this helper. A later
+        # request must still run the bytes represented by the server fingerprint.
+        lazy.write_text('MARKER = "changed after startup"\n', encoding="utf-8")
+        self.assertEqual(launcher.request_json(self.url + "api/local")["pptxClipboard"], "captured before startup")
+        self.assertEqual(self.info()["fingerprint"], initial["fingerprint"])
+        self.assertNotEqual(launcher.source_snapshot(self.root)[0], initial["fingerprint"])
+        restarted = self.launch()
+        self.assertEqual(restarted.returncode, 0, restarted.stderr)
+        self.assertNotEqual(self.info()["pid"], initial["pid"])
+        self.assertEqual(launcher.request_json(self.url + "api/local")["pptxClipboard"], "changed after startup")
 
 
 if __name__ == "__main__":

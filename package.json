@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "python3 server.py",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "test:integrity": "node tests/integrity-browser.mjs"
   }
 }

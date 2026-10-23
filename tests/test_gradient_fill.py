@@ -80,7 +80,7 @@ class GradientFillTests(unittest.TestCase):
         # single brightness control and must retain its resolved appearance.
         stops = STOPS.replace('<a:alpha val="50000"/>','<a:lumMod val="50000"/><a:lumOff val="20000"/><a:alpha val="50000"/>')
         stop = converted(shape(radial(stops=stops)))['items'][0]['fillGradient']['stops'][0]
-        self.assertEqual(stop,{'offset':0,'color':'#b2333380'})
+        self.assertEqual(stop,{'offset':0,'color':'#e6000080'})
 
     def test_theme_radial_fill_inherits_and_explicit_no_fill_overrides(self):
         theme = f'<a:theme {HEADER}><a:themeElements><a:fmtScheme><a:fillStyleLst>{radial((1,0))}</a:fillStyleLst></a:fmtScheme></a:themeElements></a:theme>'

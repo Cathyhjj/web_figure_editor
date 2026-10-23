@@ -194,3 +194,6 @@
 !/gradient-editor.js
 !/tests/gradient-fill.test.mjs
 !/tests/test_gradient_fill.py
+
+# File/asset integrity and draft recovery regression checks.
+!/tests/integrity-browser.mjs

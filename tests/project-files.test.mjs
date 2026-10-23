@@ -1,28 +1,32 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { createProject } from '../core.js';
 import { createDeck, validateDeck } from '../deck.js';
-import { MAX_PROJECT_BYTES, readProjectFile, pickProjectFile, writeProjectFile } from '../project-files.js';
+import { MAX_PROJECT_BYTES, readProjectFile, pickProjectFile, writeProjectFile, projectFileRevision } from '../project-files.js';
 
 const fileFor = (project, name = 'research.figure.json') => Object.assign(new Blob([JSON.stringify(project)], { type: 'application/json' }), { name });
+const INITIAL_BYTES = 'Original file bytes';
+const INITIAL_REVISION = createHash('sha256').update(INITIAL_BYTES).digest('hex');
 function destination(name = 'research.figure.json') {
   const calls = [];
+  let stored = Object.assign(new Blob([INITIAL_BYTES]), { lastModified: 123 }), pending;
   const writer = {
-    async write(file) { calls.push(['write', file]); },
-    async close() { calls.push(['close']); },
+    async write(file) { pending = file; calls.push(['write', file]); },
+    async close() { stored = pending; calls.push(['close']); },
     async abort() { calls.push(['abort']); },
   };
-  const handle = { name, async createWritable() { calls.push(['createWritable']); return writer; } };
-  return { handle, writer, calls };
+  const handle = { name, async getFile() { return stored; }, async createWritable() { calls.push(['createWritable']); return writer; } };
+  return { handle, writer, calls, replaceFile(file) { stored = file; } };
 }
 const noDownload = () => assert.fail('Must not download when using a file handle.');
 
 test('Save reuses the opened file and commits a complete editable project', async () => {
   const project = createDeck(), { handle, calls } = destination();
   const result = await writeProjectFile(project, {
-    handle, pickerHost: { showSaveFilePicker() { assert.fail('Save must reuse its target.'); } }, download: noDownload,
+    handle, revision: INITIAL_REVISION, pickerHost: { showSaveFilePicker() { assert.fail('Save must reuse its target.'); } }, download: noDownload,
   });
-  assert.deepEqual(result, { handle, name: handle.name, downloaded: false });
+  assert.deepEqual(result, { handle, name: handle.name, downloaded: false, revision: await projectFileRevision(calls[1][1]) });
   assert.deepEqual(calls.map(([step]) => step), ['createWritable', 'write', 'close']);
   assert.deepEqual(JSON.parse(await calls[1][1].text()), validateDeck(project));
 });
@@ -35,7 +39,7 @@ test('Save requests readwrite access for an existing handle before serializing',
     assert.deepEqual(options, { mode: 'readwrite' });
     return 'granted';
   };
-  const result = await writeProjectFile(project, { handle: target.handle, download: noDownload });
+  const result = await writeProjectFile(project, { handle: target.handle, revision: INITIAL_REVISION, download: noDownload });
   assert.equal(events[0], 'permission');
   assert.ok(events.includes('serialize'));
   assert.equal(result.handle, target.handle);
@@ -50,7 +54,7 @@ test('denied write permission explains recovery and leaves the file untouched', 
       if (permission === 'throw') throw new DOMException('Access denied', 'NotAllowedError');
       return permission;
     };
-    await assert.rejects(writeProjectFile(project, { handle: target.handle, download: noDownload }), error => {
+    await assert.rejects(writeProjectFile(project, { handle: target.handle, revision: INITIAL_REVISION, download: noDownload }), error => {
       assert.equal(error.name, 'NotAllowedError');
       assert.match(error.message, /Allow access.*Save As/);
       return true;
@@ -69,12 +73,12 @@ test('automatic Save checks existing access, commits a complete project, and nev
   };
   target.handle.requestPermission = () => assert.fail('Autosave must never request permission.');
   const result = await writeProjectFile(project, {
-    automatic: true, handle: target.handle, download: noDownload,
+    automatic: true, handle: target.handle, revision: INITIAL_REVISION, download: noDownload,
     pickerHost: { showSaveFilePicker() { assert.fail('Autosave must never open a picker.'); } },
   });
   assert.equal(events[0], 'queryPermission');
   assert.ok(events.includes('serialize'));
-  assert.deepEqual(result, { handle: target.handle, name: target.handle.name, downloaded: false });
+  assert.deepEqual(result, { handle: target.handle, name: target.handle.name, downloaded: false, revision: await projectFileRevision(target.calls[1][1]) });
   assert.deepEqual(target.calls.map(([step]) => step), ['createWritable', 'write', 'close']);
   assert.deepEqual(JSON.parse(await target.calls[1][1].text()), validateDeck(project));
 });
@@ -112,7 +116,7 @@ test('automatic Save waits for close and aborts the writer when close fails', as
     return new Promise((resolve, reject) => { failClose = reject; });
   };
   const saving = writeProjectFile(createDeck(), {
-    automatic: true, handle: target.handle, download: noDownload,
+    automatic: true, handle: target.handle, revision: INITIAL_REVISION, download: noDownload,
   });
   saving.then(() => { settled = true; }, () => { settled = true; });
   await closing;
@@ -143,7 +147,7 @@ test('first Save picks its destination before serializing project content', asyn
 test('Save As writes only to the newly selected file', async () => {
   const original = destination('original.figure.json'), copy = destination('copy.figure.json');
   const result = await writeProjectFile(createDeck(), {
-    handle: original.handle, saveAs: true, download: noDownload,
+    handle: original.handle, revision: INITIAL_REVISION, saveAs: true, download: noDownload,
     pickerHost: { async showSaveFilePicker() { return copy.handle; } },
   });
   assert.deepEqual(original.calls, []);
@@ -157,7 +161,7 @@ test('a save is not successful until close resolves', async () => {
   let completeClose, enteredClose, resolved = false;
   const closing = new Promise(resolve => { enteredClose = resolve; });
   target.writer.close = () => { enteredClose(); return new Promise(resolve => { completeClose = resolve; }); };
-  const saving = writeProjectFile(createDeck(), { handle: target.handle, download: noDownload }).then(result => { resolved = true; return result; });
+  const saving = writeProjectFile(createDeck(), { handle: target.handle, revision: INITIAL_REVISION, download: noDownload }).then(result => { resolved = true; return result; });
   await closing;
   assert.equal(resolved, false);
   completeClose();
@@ -168,7 +172,7 @@ test('a save is not successful until close resolves', async () => {
 test('picker cancellation leaves the existing destination untouched without downloading', async () => {
   const target = destination(), cancelled = new DOMException('Cancelled', 'AbortError');
   await assert.rejects(writeProjectFile(createDeck(), {
-    handle: target.handle, saveAs: true, download: noDownload,
+    handle: target.handle, revision: INITIAL_REVISION, saveAs: true, download: noDownload,
     pickerHost: { async showSaveFilePicker() { throw cancelled; } },
   }), error => error === cancelled);
   assert.deepEqual(target.calls, []);
@@ -186,7 +190,7 @@ for (const phase of ['createWritable', 'write', 'close']) {
     const target = destination(), failure = new Error(`${phase} failed`);
     (phase === 'createWritable' ? target.handle : target.writer)[phase] = async () => { throw failure; };
     target.writer.abort = async () => { target.calls.push(['abort']); throw new Error('Cleanup failed'); };
-    await assert.rejects(writeProjectFile(createDeck(), { handle: target.handle, download: noDownload }), error => error === failure);
+    await assert.rejects(writeProjectFile(createDeck(), { handle: target.handle, revision: INITIAL_REVISION, download: noDownload }), error => error === failure);
     assert.equal(target.calls.filter(([step]) => step === 'abort').length, phase === 'createWritable' ? 0 : 1);
     assert.equal(target.calls.some(([step]) => step === 'close'), false);
   });
@@ -206,7 +210,7 @@ test('unsupported browsers download a portable project when no target is bound',
 test('Save As cannot overwrite a bound file when the save picker is unavailable', async () => {
   const target = destination();
   await assert.rejects(writeProjectFile(createDeck(), {
-    handle: target.handle, saveAs: true, pickerHost: {}, download: noDownload,
+    handle: target.handle, revision: INITIAL_REVISION, saveAs: true, pickerHost: {}, download: noDownload,
   }), /Save As requires/);
   assert.deepEqual(target.calls, []);
 });
@@ -221,6 +225,86 @@ test('Open returns the selected handle and validates its complete deck', async (
   assert.equal(opened.handle, handle);
   assert.equal(opened.name, file.name);
   assert.deepEqual(opened.project, validateDeck(project));
+  assert.equal(opened.revision, await projectFileRevision(file));
+});
+
+test('manual Save and AutoSave reject changed bytes even when size and mtime match', async () => {
+  for (const automatic of [false, true]) {
+    const target = destination();
+    const external = Object.assign(new Blob(['External file bytes']), { lastModified: 123 });
+    assert.equal(external.size, new Blob([INITIAL_BYTES]).size);
+    assert.equal(external.lastModified, (await target.handle.getFile()).lastModified);
+    target.replaceFile(external);
+    target.handle.queryPermission = async () => 'granted';
+    await assert.rejects(writeProjectFile(createDeck(), {
+      handle: target.handle, revision: INITIAL_REVISION, automatic, download: noDownload,
+    }), { name: 'ProjectFileConflictError' });
+    assert.deepEqual(target.calls, []);
+    assert.equal(await (await target.handle.getFile()).text(), 'External file bytes');
+  }
+});
+
+test('a missing or invalid baseline never silently authorizes replacing a bound file', async () => {
+  for (const revision of [null, undefined, 'invalid']) {
+    const target = destination();
+    await assert.rejects(writeProjectFile(createDeck(), { handle: target.handle, revision }), { name: 'ProjectFileConflictError' });
+    assert.deepEqual(target.calls, []);
+  }
+});
+
+test('an external change while writing aborts the staged write before close', async () => {
+  const target = destination(), write = target.writer.write;
+  target.writer.write = async file => {
+    await write(file);
+    target.replaceFile(new Blob(['Concurrent external correction']));
+  };
+  await assert.rejects(writeProjectFile(createDeck(), { handle: target.handle, revision: INITIAL_REVISION }), { name: 'ProjectFileConflictError' });
+  assert.deepEqual(target.calls.map(([step]) => step), ['createWritable', 'write', 'abort']);
+  assert.equal(await (await target.handle.getFile()).text(), 'Concurrent external correction');
+});
+
+test('Save As to the same entry cannot bypass a conflict, while a new destination is usable', async () => {
+  const target = destination(), alias = { ...target.handle }, copy = destination('copy.figure.json');
+  target.handle.isSameEntry = async handle => handle === alias;
+  target.replaceFile(new Blob(['Changed outside the editor']));
+  await assert.rejects(writeProjectFile(createDeck(), {
+    handle: target.handle, revision: INITIAL_REVISION, saveAs: true,
+    pickerHost: { showSaveFilePicker: async () => alias },
+  }), { name: 'ProjectFileConflictError' });
+  assert.deepEqual(target.calls, []);
+  const saved = await writeProjectFile(createDeck(), {
+    handle: target.handle, revision: INITIAL_REVISION, saveAs: true,
+    pickerHost: { showSaveFilePicker: async () => copy.handle },
+  });
+  assert.equal(saved.handle, copy.handle);
+  assert.equal(saved.revision, await projectFileRevision(await copy.handle.getFile()));
+  assert.equal(await (await target.handle.getFile()).text(), 'Changed outside the editor');
+});
+
+test('a newly picked destination is checked again after serialization', async () => {
+  const target = destination(), project = createDeck();
+  Object.defineProperty(project, 'name', { get() { target.replaceFile(new Blob(['Concurrent change'])); return 'Editing'; } });
+  await assert.rejects(writeProjectFile(project, { pickerHost: { showSaveFilePicker: async () => target.handle } }), { name: 'ProjectFileConflictError' });
+  assert.deepEqual(target.calls, []);
+});
+
+test('the successful revision describes written bytes, never a later external update', async () => {
+  const target = destination(), close = target.writer.close;
+  target.writer.close = async () => { await close(); target.replaceFile(new Blob(['Changed immediately after close'])); };
+  const saved = await writeProjectFile(createDeck(), { handle: target.handle, revision: INITIAL_REVISION });
+  assert.equal(saved.revision, await projectFileRevision(target.calls.find(([step]) => step === 'write')[1]));
+  assert.notEqual(saved.revision, await projectFileRevision(await target.handle.getFile()));
+  await assert.rejects(writeProjectFile(createDeck(), { handle: target.handle, revision: saved.revision }), { name: 'ProjectFileConflictError' });
+  assert.equal(target.calls.filter(([step]) => step === 'createWritable').length, 1);
+});
+
+test('successive saves use the committed revision as the next baseline', async () => {
+  const target = destination(), project = createDeck();
+  const first = await writeProjectFile(project, { handle: target.handle, revision: INITIAL_REVISION });
+  project.name = 'Second revision';
+  const second = await writeProjectFile(project, { handle: target.handle, revision: first.revision });
+  assert.notEqual(first.revision, second.revision);
+  assert.equal((await readProjectFile(await target.handle.getFile())).name, project.name);
 });
 
 test('Open migrates legacy single-slide projects and rejects malformed content', async () => {
@@ -242,7 +326,7 @@ test('Open propagates cancellation and refuses oversize files before reading', a
 
 test('invalid project data cannot open a writable stream', async () => {
   const target = destination();
-  await assert.rejects(writeProjectFile({ ...createDeck(), slides: [] }, { handle: target.handle, download: noDownload }), /1–100 slides/);
+  await assert.rejects(writeProjectFile({ ...createDeck(), slides: [] }, { handle: target.handle, revision: INITIAL_REVISION, download: noDownload }), /1–100 slides/);
   assert.deepEqual(target.calls, []);
 });
 
@@ -251,9 +335,9 @@ test('serialized size limit is checked before opening a writer or downloading', 
   // Simulate a large encoded Blob without allocating 240 MB in the unit suite.
   globalThis.Blob = class extends NativeBlob { get size() { return MAX_PROJECT_BYTES + 1; } };
   try {
-    await assert.rejects(writeProjectFile(createDeck(), { handle: target.handle, download: noDownload }), /240 MB/);
+    await assert.rejects(writeProjectFile(createDeck(), { handle: target.handle, revision: INITIAL_REVISION, download: noDownload }), /240 MB/);
     target.handle.queryPermission = async () => 'granted';
-    await assert.rejects(writeProjectFile(createDeck(), { automatic: true, handle: target.handle, download: noDownload }), /240 MB/);
+    await assert.rejects(writeProjectFile(createDeck(), { automatic: true, handle: target.handle, revision: INITIAL_REVISION, download: noDownload }), /240 MB/);
     await assert.rejects(writeProjectFile(createDeck(), { pickerHost: {}, download: noDownload }), /240 MB/);
     assert.deepEqual(target.calls, []);
   } finally { globalThis.Blob = NativeBlob; }

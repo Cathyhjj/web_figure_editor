@@ -45,7 +45,9 @@ function slideSVG(deck, slide, index, assets) {
     // A report needs rendered copies, not private local paths, fingerprints, or browser binding tokens.
     assets: [...used].map(id => {
       const asset = posterProject({ items: [], assets: [assets.get(id)] }).assets[0];
-      return { id: asset.id, name: 'Embedded image', mime: asset.mime, dataUrl: asset.dataUrl, width: asset.width, height: asset.height, size: asset.size, lastModified: 0, sourceKind: 'copy' };
+      return { id: asset.id, name: 'Embedded image', mime: asset.mime, dataUrl: asset.dataUrl, width: asset.width, height: asset.height, size: asset.size, lastModified: 0, sourceKind: 'copy',
+        ...(asset.svgDocument ? { svgDocument: asset.svgDocument } : {}),
+      };
     }),
   };
   // These transformations operate only on controlled core-generated SVG, never arbitrary source SVG.

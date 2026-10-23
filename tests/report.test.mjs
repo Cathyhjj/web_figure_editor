@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createProject } from '../core.js';
 import { createDeck, currentSlide, addSlide, cloneDeck } from '../deck.js';
 import { generateHTMLReport } from '../report.js';
+import { validateSVGDocument, svgDataURL } from '../svg-vector.js';
 
 const PIXEL = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nWQAAAAASUVORK5CYII=';
 const asset = id => ({ id, name: 'source.png', mime: 'image/png', dataUrl: `data:image/png;base64,${PIXEL}`, width: 1, height: 1, size: 68, lastModified: 0, sourceKind: 'copy' });
@@ -86,6 +87,29 @@ test('does not expose local source metadata, unused images, hidden objects, or o
   const report = generateHTMLReport(deck);
   for (const secret of ['private-binding', 'private-directory', 'private-fingerprint', 'private-unused-asset', 'HIDDEN PRIVATE NOTE', 'data:image/svg+xml', '<metadata>']) assert.equal(report.includes(secret), false, secret);
   assert.equal((report.match(/data:image\/png;base64,/g) || []).length, 1);
+});
+
+test('exports visible SVG assets as vectors while removing their private source metadata', () => {
+  const deck = fixture();
+  const svgDocument = validateSVGDocument({ tag: 'svg', attrs: { width: '100', height: '100' }, children: [
+    { tag: 'rect', attrs: { width: '100', height: '100', fill: '#123456' }, children: [] },
+  ] });
+  const dataUrl = svgDataURL(svgDocument);
+  deck.assets.push({ id: 'vector', name: 'private-vector-name.svg', mime: 'image/svg+xml',
+    dataUrl, svgDocument, width: 100, height: 100, sourceKind: 'linked',
+    linkToken: 'private-svg-binding', relativePath: 'private-svg-directory/source.svg',
+    fingerprint: 'private-svg-fingerprint', lastModified: 123456789 });
+  deck.slides[0].items.push(picture('vector-item', 'vector'));
+  deck.slides[1].items.push(picture('vector-copy', 'vector'));
+  const before = structuredClone(deck);
+  const report = generateHTMLReport(deck);
+  assert.equal((report.match(/href="data:image\/svg\+xml;base64,/g) || []).length, 2);
+  assert.ok(report.includes(`href="${dataUrl}"`));
+  assert.match(Buffer.from(dataUrl.split(',')[1], 'base64').toString(), /<rect[^>]*fill="#123456"/);
+  for (const secret of ['private-vector-name', 'private-svg-binding', 'private-svg-directory', 'private-svg-fingerprint', '<metadata>']) {
+    assert.equal(report.includes(secret), false, secret);
+  }
+  assert.deepEqual(deck, before);
 });
 
 test('report generation does not change deck records, active slide, assets, or source associations', () => {

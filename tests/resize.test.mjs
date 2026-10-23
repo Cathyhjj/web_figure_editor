@@ -1,12 +1,27 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resizeItem } from '../resize.js';
+import { resizeItem, resizeMediaDimension } from '../resize.js';
 import { createProject, projectToSVG, validateProject } from '../core.js';
 import { serializeDeck, validateDeck } from '../deck.js';
 
 const item = { id: 'picture', type: 'image', assetId: 'source', x: 55, y: 90, width: 400, height: 200, rotation: 0, opacity: 1 };
 const crop = { x: .25, y: .1, width: .5, height: .6 };
 const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-7, `${actual} != ${expected}`);
+
+test('proportional inspector edits bound both dimensions and preserve extreme aspect ratios', () => {
+  for (const [width, height] of [[1000, 10], [10, 1000], [100000, .01], [.01, 100000], [1, 1]]) {
+    for (const dimension of ['width', 'height']) for (const value of [1, 2000, 20000]) {
+      const original = { ...item, width, height }, resized = resizeMediaDimension(original, dimension, value);
+      assert.ok(resized.width >= .01 && resized.width <= 100000);
+      assert.ok(resized.height >= .01 && resized.height <= 100000);
+      assert.ok(Math.abs(resized.width / resized.height / (width / height) - 1) < 1e-12);
+      assert.equal(original.width, width);
+      assert.equal(original.height, height);
+    }
+  }
+  assert.deepEqual(resizeMediaDimension({ ...item, width: 1000, height: 10 }, 'height', 2000), { width: 100000, height: 1000 });
+  assert.deepEqual(resizeMediaDimension({ ...item, width: 10, height: 1000 }, 'width', 2000), { width: 1000, height: 100000 });
+});
 const rotate = (x, y, angle) => { const a = angle * Math.PI / 180; return [x * Math.cos(a) - y * Math.sin(a), x * Math.sin(a) + y * Math.cos(a)]; };
 function world(object, u, v) {
   const [dx, dy] = rotate((u - .5) * object.width, (v - .5) * object.height, object.rotation);

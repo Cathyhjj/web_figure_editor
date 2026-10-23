@@ -6,7 +6,7 @@ import { isMediaItem, posterSource } from './video.js';
 import { createChartFrame } from './html-chart.js';
 import { uid, projectToSVG, exportPNG, downloadBlob } from './core.js';
 import { createDeck, validateDeck, cloneDeck, currentSlide, slideProject, deckSourceManifest, addSlide, moveSlides } from './deck.js';
-import { pickProjectFile, readProjectFile, writeProjectFile } from './project-files.js';
+import { pickProjectFile, readProjectFile, readProjectFileState, writeProjectFile, checkProjectFileRevision } from './project-files.js';
 import { createRecentProjects, openRecentProject } from './recent-projects.js';
 import { initRecentProjectMenu } from './recent-project-menu.js';
 import { importFiles, pickImages, importFolderFiles, pickFolder, importDroppedFiles, linkAsset, refreshAsset, replaceAsset } from './assets.js?v=locate-1';
@@ -28,7 +28,7 @@ import { isShapeItem, isLineShape, shapeSVG, shapeBounds } from './shapes.js';
 import { opacityEditorMarkup, shapeEditorMarkup, bindShapeEditor } from './shape-editor.js';
 import { imageCrop, isCropped, cropImage } from './crop.js';
 import { createCropEditor } from './crop-editor.js';
-import { resizeItem } from './resize.js';
+import { resizeItem, resizeMediaDimension } from './resize.js';
 import { selectionRect, enclosedItemIds } from './selection.js';
 import { initFontTools, fontValue } from './font-tools.js';
 
@@ -43,8 +43,9 @@ const ns = 'http://www.w3.org/2000/svg';
 let project = createDeck(), selected = new Set(), zoom = .75, undoStack = [], redoStack = [];
 let selectedSlideIds = new Set([project.activeSlideId]), slideSelectionAnchor = project.activeSlideId;
 const slideSelectionSnapshots = new WeakMap();
-let gesture = null, dirty = false, relinkId = null, draftTimer, draftDb, pendingText = null, lastPointerItem = null, lastTap = null;
-let projectFileHandle = null, projectFileName = '', projectFilePersistent = true;
+let gesture = null, dirty = false, relinkTarget = null, draftTimer, draftDb, pendingText = null, lastPointerItem = null, lastTap = null;
+let projectFileHandle = null, projectFileName = '', projectFileRevision = null, projectFilePersistent = true;
+const assetOperations = new Map();
 // Keep file actions unavailable until the initial draft has finished restoring.
 let projectEpoch = 0, editRevision = 0, fileOperation = true, draftWrites = Promise.resolve();
 const AUTOSAVE_DELAY = 1500;
@@ -440,7 +441,7 @@ function renderInspector(){
    if(key==='name')val=val.slice(0,1000);
    if(i[key]===val)return;
    if(!pendingText)pendingText=snapshot();
-   if(isMediaItem(i)&&(key==='width'||key==='height')){const ratio=i.width/i.height;if(key==='width')i.height=val/ratio;else i.width=val*ratio;const other=box.querySelector(`[data-property="${key==='width'?'height':'width'}"]`);if(other)other.value=round(key==='width'?i.height:i.width);}
+   if(isMediaItem(i)&&(key==='width'||key==='height')){Object.assign(i,resizeMediaDimension(i,key,val));val=i[key];const other=box.querySelector(`[data-property="${key==='width'?'height':'width'}"]`);if(other)other.value=round(key==='width'?i.height:i.width);}
    i[key]=val;changed();renderStage();
   };
   input.oninput=()=>{if(input.dataset.property!=='fontFamily')apply();};
@@ -457,7 +458,7 @@ function renderInspector(){
  bindSoftEdgeEditor(i,box,styleBindings);
  bindShapeEditor(i,box,styleBindings);
  $('object-locked').onchange=e=>change(()=>i.locked=e.target.checked);
- const text=$('text-content');if(text){text.disabled=i.locked;text.oninput=()=>{if(!pendingText)pendingText=snapshot();i.text=text.value.slice(0,20000);i.height=Math.max(i.fontSize*1.2*i.text.split('\n').length,i.height);changed();renderStage();};text.onblur=()=>{flushText();renderLayers();renderToolbar();};}
+ const text=$('text-content');if(text){text.disabled=i.locked;text.oninput=()=>{if(!pendingText)pendingText=snapshot();i.text=text.value.slice(0,20000);i.height=Math.min(100000,Math.max(i.fontSize*1.2*i.text.split('\n').length,i.height));changed();renderStage();};text.onblur=()=>{flushText();renderLayers();renderToolbar();};}
 }
 function flushText(){if(pendingText){const before=pendingText;pendingText=null;record(before);renderSlides();}}
 const round=n=>Math.round(n*10)/10;
@@ -553,8 +554,29 @@ function renderLibraryImportNotice(){
  notice.textContent=busy?'Reading images, videos, and subfolders…':libraryImportNotice.text;
  notice.classList.toggle('error',!busy&&libraryImportNotice.error);
 }
-async function relink(a){try{const updated=await linkAsset(a);if(updated)change(()=>{project.assets=project.assets.map(x=>x.id===a.id?updated:x);});else{relinkId=a.id;$('relink-input').click();}status(updated?'Local file linked and embedded copy updated.':'Select the local file to link.');}catch(e){if(e.name!=='AbortError')status(e.message,true);}}
-async function refresh(a){try{const updated=await refreshAsset(a);change(()=>{project.assets=project.assets.map(x=>x.id===a.id?updated:x);});status('Embedded copy updated from the authorized local file.');}catch(e){status(e.message,true);}}
+function beginAssetOperation(asset){
+ const target={project,epoch:projectEpoch,asset,original:{...asset}};
+ assetOperations.set(asset.id,target);return target;
+}
+function assetOperationCurrent(target){
+ return target&&target.project===project&&target.epoch===projectEpoch&&assetById(target.asset.id)===target.asset&&assetOperations.get(target.asset.id)===target&&Object.keys({...target.original,...target.asset}).every(key=>target.original[key]===target.asset[key]);
+}
+function applyAssetOperation(target,updated,message){
+ if(!assetOperationCurrent(target))return;
+ if(change(()=>{project.assets=project.assets.map(asset=>asset===target.asset?updated:asset);}))status(message);
+}
+async function relink(a){
+ const target=beginAssetOperation(a);
+ try{const updated=await linkAsset(a);if(!assetOperationCurrent(target))return;
+  if(updated)applyAssetOperation(target,updated,'Local file linked and embedded copy updated.');
+  else{relinkTarget=target;$('relink-input').click();status('Select the local file to link.');}
+ }catch(e){if(assetOperationCurrent(target)&&e.name!=='AbortError')status(e.message,true);}
+}
+async function refresh(a){
+ const target=beginAssetOperation(a);
+ try{applyAssetOperation(target,await refreshAsset(a),'Embedded copy updated from the authorized local file.');}
+ catch(e){if(assetOperationCurrent(target))status(e.message,true);}
+}
 async function locate(a){
  if(locatingAsset)return;
  const targetProject=project;
@@ -581,7 +603,12 @@ $('add-folders').onclick=async()=>{
  await importToLibrary(pickFolder(),target);
 };
 $('folder-input').onchange=async e=>{const files=[...e.target.files];e.target.value='';if(files.length)await importToLibrary(importFolderFiles(files),importTarget());};
-$('relink-input').onchange=async e=>{try{const a=assetById(relinkId);if(a&&e.target.files[0]){const updated=await replaceAsset(a,e.target.files[0]);change(()=>{project.assets=project.assets.map(x=>x.id===a.id?updated:x);});status('Asset copy updated. This browser does not retain a local file link.');}}catch(err){status(err.message,true);}e.target.value='';};
+$('relink-input').onchange=async e=>{
+ const target=relinkTarget,file=e.target.files[0];relinkTarget=null;e.target.value='';
+ if(!file||!assetOperationCurrent(target))return;
+ try{applyAssetOperation(target,await replaceAsset(target.asset,file),'Asset copy updated. This browser does not retain a local file link.');}
+ catch(error){if(assetOperationCurrent(target))status(error.message,true);}
+};
 $('workspace').ondragover=e=>{e.preventDefault();e.dataTransfer.dropEffect='copy';$('workspace').classList.add('drag-over');};
 $('workspace').ondragleave=e=>{if(!$('workspace').contains(e.relatedTarget))$('workspace').classList.remove('drag-over');};
 $('workspace').ondrop=async e=>{
@@ -703,7 +730,11 @@ function endGesture(e){
   if(e.type==='pointerup')updateMarquee(e);
   if(gesture)finishMarquee(e.type!=='pointerup');return;
  }
- const edit=gesture.edit&&!gesture.moved&&e.type==='pointerup'?byId(gesture.id):null;if(gesture.moved){record(gesture.before);lastTap=null;}releaseGesture();render();
+ const edit=gesture.edit&&!gesture.moved&&e.type==='pointerup'?byId(gesture.id):null;if(gesture.moved){
+  try{validateDeck(project);record(gesture.before);}
+  catch(error){project=gesture.before;restoreSlideSelection(project);status(error.message,true);}
+  lastTap=null;
+ }releaseGesture();render();
  // Redrawing selection hit targets can suppress the browser's dblclick event.
  if(edit?.type==='html'){lastTap=null;openHTMLChart(edit);}else if(edit)focusTextEditor();
 }
@@ -751,7 +782,7 @@ function renderAutosave(){
  let state='local',label='Local draft',detail='Use Save once to choose a project file. Browser drafts stay in this browser and can be removed by clearing site data.';
  if(autosaveWriting){state='saving';label='Saving…';detail=`Saving to ${projectFileName}.`;}
  else if(dirty&&draftError){state='draft-error';label='Draft not saved';detail=draftError+' Use Save to keep a project file.';}
- else if(autosaveEnabled&&autosaveError){({state,label,detail}=autosaveError);}
+ else if(autosaveError&&(autosaveEnabled||autosaveError.state==='conflict')){({state,label,detail}=autosaveError);}
  else if(!autosaveEnabled){state='off';label='AutoSave off';detail='File AutoSave is off. Local draft recovery remains on; use Save to update the file.';}
  else if(projectFileHandle&&!dirty){state='saved';label='Saved to file';detail=lastFileSave?`Saved to ${projectFileName} at ${lastFileSave.toLocaleTimeString()}.`:`File: ${projectFileName}. Changes will save automatically.`;}
  else if(dirty&&(projectFileHandle||draftRevision!==editRevision)){state='pending';label='Changes pending';detail=projectFileHandle?`Changes will save to ${projectFileName} after you pause editing.`:'Saving a local draft in this browser…';}
@@ -772,7 +803,7 @@ function scheduleAutosave(){
 $('autosave-toggle').onchange=e=>{
  autosaveEnabled=e.target.checked;
  try{localStorage.setItem('figure-editor-autosave',autosaveEnabled?'on':'off');}catch{ /* The setting still applies for this session. */ }
- if(autosaveEnabled)autosaveError=null;
+ if(autosaveEnabled&&autosaveError?.state!=='conflict')autosaveError=null;
  scheduleAutosave();renderAutosave();
 };
 function renderFileActions(){
@@ -790,9 +821,9 @@ async function saveProject(saveAs=false,{automatic=false}={}){
  const savedProject=snapshot(),epoch=projectEpoch,revision=editRevision;
  fileOperation=true;autosaveWriting=automatic;renderFileActions();if(!automatic)status('Saving project…');
  try{
-  const result=await writeProjectFile(savedProject,{handle:projectFileHandle,name:saveAs?filename()+'.figure.json':projectFileName||filename()+'.figure.json',saveAs,automatic});
+  const result=await writeProjectFile(savedProject,{handle:projectFileHandle,revision:projectFileRevision,name:saveAs?filename()+'.figure.json':projectFileName||filename()+'.figure.json',saveAs,automatic});
   if(epoch!==projectEpoch)return;
-  projectFileHandle=result.handle;projectFileName=result.name;
+  projectFileHandle=result.handle;projectFileName=result.name;projectFileRevision=result.revision??null;
   // Drag geometry changes before its undo/revision entry is committed on pointerup.
   dirty=result.downloaded||revision!==editRevision||Boolean(gesture?.moved&&gesture.mode!=='select');
   autosaveError=null;if(!result.downloaded)lastFileSave=new Date();
@@ -801,7 +832,10 @@ async function saveProject(saveAs=false,{automatic=false}={}){
   await saveDraft();
  }catch(error){
   if(epoch!==projectEpoch)return;
-  if(automatic)autosaveError=error.name==='NotAllowedError'
+  if(error.name==='ProjectFileConflictError'){
+   dirty=true;autosaveError={state:'conflict',label:'File changed — Save As',detail:error.message};
+   status(error.message,true);await saveDraft();
+  }else if(automatic)autosaveError=error.name==='NotAllowedError'
    ?{state:'permission',label:'Click Save to allow',detail:'AutoSave needs write access. Click Save to grant permission. Local draft recovery remains on.'}
    :{state:'error',label:'AutoSave failed',detail:`Could not save to ${projectFileName}: ${error.message} Click Save to retry; local draft recovery remains on.`};
   else status(error.name==='AbortError'?'Save canceled. Your changes are still in the editor.':`Could not save project: ${error.message}`,error.name!=='AbortError');
@@ -809,10 +843,10 @@ async function saveProject(saveAs=false,{automatic=false}={}){
 }
 $('save-project').onclick=()=>saveProject();
 $('save-project-as').onclick=()=>saveProject(true);
-function replaceProject(p,{handle=null,name=''}={}){
+function replaceProject(p,{handle=null,name='',revision=null}={}){
  const next=validateDeck(p);
  clearTimeout(autosaveTimer);clearTimeout(draftTimer);
- project=next;projectEpoch++;editRevision=0;projectFileHandle=handle;projectFileName=name;projectFilePersistent=true;
+ project=next;projectEpoch++;editRevision=0;projectFileHandle=handle;projectFileName=name;projectFileRevision=revision;projectFilePersistent=true;assetOperations.clear();relinkTarget=null;
  autosaveError=null;draftError=null;draftRevision=-1;lastFileSave=null;
  resetSlideSelection();
  selected.clear();undoStack=[];redoStack=[];pendingText=null;dirty=false;collapsedAssetFolders.clear();$('asset-list').replaceChildren();libraryImportNotice={hidden:true,text:'',error:false};renderLibraryImportNotice();render();fit();saveDraft();
@@ -1082,15 +1116,17 @@ function writeDraftRecord(savedProject,file){
 function saveDraft(){
  clearTimeout(draftTimer);
  // Capture together before awaiting storage; keep older autosaves ahead of newer ones.
- const savedProject=snapshot(),file={handle:projectFileHandle,name:projectFileName,dirty},epoch=projectEpoch,revision=editRevision;
+ const savedProject=snapshot(),file={handle:projectFileHandle,name:projectFileName,revision:projectFileRevision,dirty},epoch=projectEpoch,revision=editRevision;
  draftWrites=draftWrites.then(async()=>{
+  // Keep the last recoverable draft if a transient or invalid edit slips through.
+  const validProject=validateDeck(savedProject);
   draftDb??=await openDraftDB();
   try{
-   await writeDraftRecord(savedProject,file);
+   await writeDraftRecord(validProject,file);
    if(epoch===projectEpoch&&file.handle===projectFileHandle)projectFilePersistent=true;
   }catch(error){
    if(error.name!=='DataCloneError'||!file.handle)throw error;
-   await writeDraftRecord(savedProject,{...file,handle:null});
+   await writeDraftRecord(validProject,{...file,handle:null});
    if(epoch===projectEpoch&&file.handle===projectFileHandle)projectFilePersistent=false;
   }
   if(epoch===projectEpoch){draftRevision=revision;draftError=null;}
@@ -1106,12 +1142,28 @@ async function loadDraft(){
   const read=key=>new Promise((resolve,reject)=>{const req=store.get(key);req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});
   const [savedProject,file]=await Promise.all([read('current'),read('current-file')]);
   if(!savedProject||epoch!==projectEpoch||revision!==editRevision)return;
-  project=validateDeck(savedProject);projectEpoch++;resetSlideSelection();
-  projectFileHandle=file?.handle?.kind==='file'&&typeof file.handle.createWritable==='function'?file.handle:null;
+  let restored=validateDeck(savedProject),restoredDirty=file?.dirty!==false,restoredRevision=file?.revision??null,problem=null;
+  const handle=file?.handle?.kind==='file'&&typeof file.handle.createWritable==='function'?file.handle:null;
+  if(handle){
+   try{
+    if(restoredDirty)await checkProjectFileRevision(handle,restoredRevision);
+    else{const latest=await readProjectFileState(await handle.getFile());restored=latest.project;restoredRevision=latest.revision;}
+   }catch(error){
+    restoredDirty=true;
+    problem=error.name==='ProjectFileConflictError'
+     ?{state:'conflict',label:'File changed — Save As',detail:error.message}
+     :{state:'permission',label:'File not verified',detail:'Your local draft is preserved. File access could not be verified. Use Save to retry, Save As to keep a copy, or Open to read the latest file. '+error.message};
+   }
+  }
+  // Editing controls remain available while the asynchronous startup read runs.
+  if(epoch!==projectEpoch||revision!==editRevision)return;
+  project=restored;projectEpoch++;resetSlideSelection();
+  projectFileHandle=handle;projectFileRevision=restoredRevision;
   projectFileName=typeof file?.name==='string'?file.name:'';
-  dirty=typeof file?.dirty==='boolean'?file.dirty:true;
+  dirty=restoredDirty;autosaveError=problem;
   draftRevision=editRevision;
-  render();fit();status(projectFileHandle?`Local draft restored. Save will update ${projectFileName}.`:'Local draft restored. Use Save to choose a project file location.');
+  render();fit();status(problem?problem.detail:projectFileHandle?`Local draft restored${dirty?'': ' from the current file'}. Save will update ${projectFileName}.`:'Local draft restored. Use Save to choose a project file location.',!!problem);
+  await saveDraft();
  }catch{draftError='Local drafts are unavailable.';renderAutosave();status('Local drafts are unavailable. Use Save to keep a project file.');}
 }
 $('demo-project').onclick=async()=>{

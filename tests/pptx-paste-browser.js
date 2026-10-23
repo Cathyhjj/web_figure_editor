@@ -34,8 +34,8 @@ document.querySelector('#run').onclick=async()=>{
   const color=doc.querySelector(`${gradientEditor} [data-gradient-field="color"]`);color.value='#ff0000';color.dispatchEvent(new win.Event('change'));
   layer('Editable title').click();const text=doc.querySelector('#text-content');text.value='Edited paste title';text.dispatchEvent(new win.Event('input'));text.dispatchEvent(new win.Event('blur'));
   layer('Editable picture').click();const width=doc.querySelector('[data-property="width"]');width.value='250';width.dispatchEvent(new win.Event('change'));
-  let saved;
-  win.showSaveFilePicker=async()=>({name:'pasted.figure.json',createWritable:async()=>({write:async b=>{saved=JSON.parse(await b.text());},close:async()=>{}})});
+  let saved,savedFile=new Blob([]);
+  win.showSaveFilePicker=async()=>({getFile:async()=>savedFile,name:'pasted.figure.json',createWritable:async()=>{let pending;return {write:async blob=>{pending=blob;},close:async()=>{savedFile=pending;saved=JSON.parse(await pending.text());}};}});
   doc.querySelector('#save-project').click();await wait(()=>saved&&!doc.querySelector('#save-project').disabled);
   const inserted=saved.slides[1];
   check('Save keeps edited text, image dimensions and gradient alpha independently',inserted.items.some(i=>i.type==='text'&&i.text==='Edited paste title')&&inserted.items.some(i=>i.type==='image'&&i.width===250)&&inserted.items.some(i=>i.type==='shape'&&i.fillGradient.stops[0].color==='#ff000080'));

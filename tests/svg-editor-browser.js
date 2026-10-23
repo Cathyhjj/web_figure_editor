@@ -55,7 +55,7 @@ document.querySelector('#run').onclick=async()=>{
   check('Applying changes only selected copy, keeping the other SVG unchanged',firstURL!==doc.querySelector('#stage [data-item="second"] image').getAttribute('href'));
   doc.querySelector('#undo').click();check('Undo restores original vector exactly',doc.querySelector('#stage [data-item="first"] image').getAttribute('href')===assets[0].dataUrl);
   doc.querySelector('#redo').click();check('Redo restores edited vector exactly',doc.querySelector('#stage [data-item="first"] image').getAttribute('href')===firstURL);
-  let saved;win.showSaveFilePicker=async()=>({name:'svg.figure.json',createWritable:async()=>({write:async blob=>{saved=JSON.parse(await blob.text());},close:async()=>{}})});
+  let saved,savedFile=new Blob([]);win.showSaveFilePicker=async()=>({getFile:async()=>savedFile,name:'svg.figure.json',createWritable:async()=>{let pending;return {write:async blob=>{pending=blob;},close:async()=>{savedFile=pending;saved=JSON.parse(await pending.text());}};}});
   doc.querySelector('#save-project-as').click();await wait(()=>saved);
   check('Saved project keeps original and edited vector documents',saved.assets.every(a=>a.mime==='image/svg+xml'&&a.svgDocument));
   await open(saved);check('Reopen retains edited geometry, gradients and filters',doc.querySelector('#stage [data-item="first"] image').getAttribute('href')===firstURL);

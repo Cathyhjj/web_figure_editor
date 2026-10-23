@@ -68,6 +68,12 @@ run.onclick = async () => {
     });
     iframe.src = '../index.html'; document.querySelector('#editor-host').replaceChildren(iframe); await loaded;
     const win = iframe.contentWindow, doc = iframe.contentDocument, get = id => doc.getElementById(id);
+    // iframe load can precede the app's awaited draft/recent-file restoration.
+    const readyDeadline = performance.now() + 15000;
+    while (get('open-project').disabled) {
+      if (performance.now() > readyDeadline) throw new Error('Editor initialization timed out.');
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
     const urls = new Map(), downloads = [];
     const originalURL = win.URL.createObjectURL, originalClick = win.HTMLAnchorElement.prototype.click, originalConfirm = win.confirm, originalSavePicker = win.showSaveFilePicker;
     win.confirm = () => true;

@@ -1,6 +1,7 @@
 """Bounded, read-only OOXML slide import. No extraction, Office automation or network IO."""
 import base64
 import binascii
+import colorsys
 import copy
 import hashlib
 import io
@@ -177,14 +178,24 @@ class Converter:
         if not re.fullmatch('[a-fA-F0-9]{6}', value):
             return default
         rgb, alpha = [int(value[i:i+2], 16) / 255 for i in (0, 2, 4)], 1
+        hls = None
         for transform in node:
             v = num(transform, 'val') / 100000
             typ = tag(transform)
-            if typ == 'tint': rgb = [c + (1-c)*v for c in rgb]
-            elif typ == 'shade': rgb = [c*v for c in rgb]
-            elif typ == 'lumMod': rgb = [c*v for c in rgb]
-            elif typ == 'lumOff': rgb = [c+v for c in rgb]
+            if typ in ('tint', 'shade'):
+                if hls is not None:
+                    rgb, hls = colorsys.hls_to_rgb(*hls), None
+                # DrawingML tint is the retained input fraction, mixed with white.
+                rgb = [max(0, min(1, c*v + (1-v if typ == 'tint' else 0))) for c in rgb]
+            elif typ in ('lumMod', 'lumOff'):
+                # Keep hue/saturation through consecutive luminance transforms,
+                # including a temporary black/white endpoint or intervening alpha.
+                if hls is None:
+                    hls = list(colorsys.rgb_to_hls(*rgb))
+                hls[1] = max(0, min(1, hls[1]*v if typ == 'lumMod' else hls[1]+v))
             elif typ == 'alpha': alpha = v
+        if hls is not None:
+            rgb = colorsys.hls_to_rgb(*hls)
         rgb = ''.join(f'{round(max(0, min(1, c))*255):02x}' for c in rgb)
         return '#' + rgb + (f'{round(max(0, min(1, alpha))*255):02x}' if alpha != 1 else '')
 
@@ -564,22 +575,28 @@ class Converter:
             blip = find(shape, 'p:blipFill/a:blip')
             svg_blip = find(blip, './/{http://schemas.microsoft.com/office/drawing/2016/SVG/main}svgBlip')
             fallback_ref = blip.get(RID+'embed') if blip is not None else None
-            fallback_target = self.pkg.relationships(path).get(fallback_ref, (None,''))[0]
-            svg_target = self.pkg.relationships(path).get(svg_blip.get(RID+'embed'), (None,''))[0] if svg_blip is not None else None
-            target = svg_target or fallback_target
-            if svg_blip is not None and not svg_target:
+            relationships = self.pkg.relationships(path)
+            fallback_target = relationships.get(fallback_ref, (None,''))[0]
+            svg_target = relationships.get(svg_blip.get(RID+'embed'), (None,''))[0] if svg_blip is not None else None
+            has_svg = svg_target in self.pkg.names
+            has_fallback = fallback_target in self.pkg.names
+            target = svg_target if has_svg else fallback_target if has_fallback else None
+            if svg_blip is not None and not has_svg and has_fallback:
                 self.warn('SVG source is missing; its preview image is used.', name)
-            if not target or target not in self.pkg.names:
-                self.warn('Linked or missing image was omitted; embed it in PowerPoint first.', name)
+            if target is None:
+                self.warn('SVG source and preview image are missing; picture was omitted. Embed it in PowerPoint first.'
+                          if svg_blip is not None else 'Linked or missing image was omitted; embed it in PowerPoint first.', name)
                 return
             mid = self.add_media(target)
             if mid is None:
                 self.warn('Unsupported image format (' + posixpath.splitext(target)[1] + ') was omitted. Use PNG, JPEG, WebP or SVG.',name)
                 return
-            if svg_target and fallback_target and fallback_target != svg_target:
+            if has_svg and has_fallback and fallback_target != svg_target:
                 fallback_mid = self.add_media(fallback_target)
                 if fallback_mid:
                     self.media[target]['fallbackId'] = fallback_mid
+            elif has_svg and fallback_ref and not has_fallback:
+                self.warn('Preview image is missing; the SVG source was retained.', name)
             item = self.base(name,g,'image'); item['assetId'] = mid
             if native_shadow:item['shadow']=native_shadow
             if native_soft_edge is not None:item['softEdge']=native_soft_edge

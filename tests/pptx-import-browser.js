@@ -33,7 +33,7 @@ run.onclick=async()=>{
   check('Selected page inserts after the current slide',doc.querySelectorAll('.slide-card').length===2&&doc.querySelector('#slide-position').textContent==='Slide 2 of 2');
   const label=[...doc.querySelectorAll('.layer-select')].find(el=>el.textContent.includes('Editable label'));label.click();
   const text=doc.querySelector('#text-content');check('Imported text opens in the text inspector',text?.value==='Synthetic title');text.value='Edited after importing';text.dispatchEvent(new win.Event('input',{bubbles:true}));text.dispatchEvent(new win.Event('blur'));
-  let saved;win.showSaveFilePicker=async()=>({name:'imported.figure.json',createWritable:async()=>({write:async blob=>{saved=JSON.parse(await blob.text());},close:async()=>{}})});
+  let saved,savedFile=new Blob([]);win.showSaveFilePicker=async()=>({getFile:async()=>savedFile,name:'imported.figure.json',createWritable:async()=>{let pending;return {write:async blob=>{pending=blob;},close:async()=>{savedFile=pending;saved=JSON.parse(await pending.text());}};}});
   doc.querySelector('#save-project').click();await wait(()=>saved&&!doc.querySelector('#save-project').disabled);
   const inserted=saved.slides[1];check('Save preserves independently edited text',inserted.items.some(i=>i.type==='text'&&i.text==='Edited after importing'));
   check('Original image and restorable crop survive Save',inserted.items.some(i=>i.type==='image'&&i.crop?.x===.25&&i.crop?.width===.5)&&saved.assets[0].width===120);
