@@ -8,6 +8,9 @@
 !/index.html
 !/style.css
 !/app.js
+!/automation.js
+!/automation_bridge.py
+!/figure_mcp.py
 !/font-tools.js
 !/assets.js
 !/asset-tree.js
@@ -197,3 +200,7 @@
 
 # File/asset integrity and draft recovery regression checks.
 !/tests/integrity-browser.mjs
+
+# Live editor MCP integration checks.
+!/tests/test_automation.py
+!/tests/automation-browser.mjs

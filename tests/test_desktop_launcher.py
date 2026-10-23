@@ -29,6 +29,7 @@ class DesktopLauncherTests(unittest.TestCase):
         self.root = Path(self.temporary.name).resolve()
         (self.root / "scripts").mkdir()
         shutil.copy2(REPO / "server.py", self.root / "server.py")
+        shutil.copy2(REPO / "automation_bridge.py", self.root / "automation_bridge.py")
         shutil.copy2(REPO / "pdf_text.py", self.root / "pdf_text.py")
         shutil.copy2(REPO / "pptx_import.py", self.root / "pptx_import.py")
         shutil.copy2(REPO / "pptx_clipboard.py", self.root / "pptx_clipboard.py")

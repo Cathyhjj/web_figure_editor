@@ -1,5 +1,37 @@
 # Figure Editor
 
+### 本地 AI 控制（轻量 MCP）
+
+启动新版 `python3 server.py`（默认端口 **8766**）并刷新编辑器后，页面的 **AI connected** 表示当前标签页已连接本地控制桥。点击可暂停，再次点击重新连接。MCP 操作的是此页面正在编辑的项目，修改立即可见，并复用同一套校验、Undo、浏览器草稿与文件 AutoSave。
+
+适配器 `figure_mcp.py` 使用 Python 标准库和 MCP stdio，无须安装额外服务依赖。把下面的路径换成你的仓库绝对路径，在终端注册一次：
+
+```sh
+codex mcp add figure_editor -- python3 /absolute/path/web_figure_editor/figure_mcp.py
+```
+
+其他 MCP 客户端配置 `command: "python3"`、`args: ["/absolute/path/web_figure_editor/figure_mcp.py"]` 即可。使用非默认服务端口时追加 `--port 8767`；导出目录默认是仓库内的 `output/mcp/`，可通过 `--output-dir /absolute/output/directory` 指定。注册后按客户端要求重新加载 MCP 工具。
+
+| 工具 | 第一版支持的操作 |
+| --- | --- |
+| `figure_sessions` | 列出已连接页面及项目摘要；每次明确选择 `sessionId`，不会自动猜测标签页。 |
+| `figure_get_state` | 当前项目、所有页摘要、指定页的对象 ID／文字／几何／锁定状态、选择、revision、Undo 数量和保存状态；素材只返回元数据。 |
+| `figure_batch_edit` | 批量 `set` 位置、尺寸、旋转、透明度和文字格式；`align` 对齐；`distribute` 等间距排版；`add_text` 创建标注。整批成功后对应一次 Undo，任何错误都不部分提交。 |
+| `figure_preview` | 当前或指定 slide 的 PNG 预览，最长边可设 256–1600 px；返回图片与渲染时的 revision。 |
+| `figure_export` | PNG／SVG／PDF 导出一页，PPTX／HTML 导出全部页；写入导出目录中的新文件，返回绝对路径、大小和 SHA-256，不覆盖已有文件。 |
+| `figure_history` | 一次 Undo 或 Redo，使用编辑器原有历史。 |
+| `figure_save` | `destination=file` 保存到已授权项目文件；`destination=draft` 只保存浏览器恢复草稿。 |
+
+典型流程：`figure_sessions` → `figure_get_state` → 将返回的 `revision` 作为 `expectedRevision` 传给 `figure_batch_edit`／`figure_history`／`figure_save` → `figure_preview` 检查效果。每个排版 operation 都要明确 `slideId` 和对象 `itemIds`（`add_text` 不需要已有对象 ID）。位置和尺寸是 **CSS px，96 px = 1 inch**；图片只设置宽或高时保持比例，同时设置宽高时允许拉伸。对齐和分布只接受未旋转的对象；旋转对象可用 `set` 精确定位。指定 `gap` 时从最前面的对象起等距排列，不指定时保留整体两端位置。
+
+锁定对象会拒绝整批修改；过期 revision、正在拖拽／输入文字／绘图／执行文件操作或打开的模态窗口也会拒绝冲突操作。先完成当前编辑，再读取最新状态。刷新、暂停和重新打开页面会产生新的 session；若命令超时且已投递，其结果可能未知，应先查询状态，避免重复执行。
+
+MCP 不会打开原生文件选择器或请求新的文件权限。首次保存项目需要在页面点击一次 **Save** 并授权；已有文件保存继续检查外部修改冲突。AutoSave 开关保持用户设置。`destination=draft`、静态导出和真正写回 `.figure.json` 是不同结果，工具会明确区分。
+
+预览／导出复用现有渲染器和格式限制：HTML 图表使用已保存快照，视频使用封面；PDF 文字仍需 macOS 本地轮廓服务。AI 桥单次导出最多 **24 MiB**，更大的文件使用页面 Export。第一版不提供素材导入、原始 SVG 内部编辑或任意 JavaScript 执行。桥仅监听 loopback，复用同源、Host 与随机 token 检查，不提供远程公网端点。
+
+验证：`npm test`；`python3 -m unittest discover -s tests -p 'test_automation.py'`；`npm run test:automation`。最后一项需要 Playwright 和 Chrome（可用 `PLAYWRIGHT_MODULE` 指定已安装模块），会自动启动随机测试端口，使用隔离浏览器、合成项目和临时导出目录，不连接你的日常编辑页面。
+
 ### 交互式 HTML 图表
 
 使用 **Import HTML chart** 选择 `.html` / `.htm`，或把文件拖入画布。文件夹导入也会保留 HTML 素材；点击 **Place** 放置。HTML 原文嵌入 `.figure.json` 项目，保存、重新打开、复制对象和复制 slide 都会保留。

@@ -24,6 +24,7 @@ from xml.parsers import expat
 from pdf_text import MAX_PDF_TEXT_BODY, PdfTextError, PdfTextOutliner
 from pptx_import import MAX_PPTX_BODY, PptxImportError, import_pptx
 from pptx_clipboard import clipboard_available, clipboard_ready, start_clipboard_helper, read_powerpoint_clipboard
+from automation_bridge import AutomationBridge, AutomationError, MAX_AUTOMATION_BODY
 
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".tif", ".tiff", ".bmp", ".avif", ".heic", ".heif", ".ico", ".mp4", ".html", ".htm"}
@@ -449,6 +450,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                                          "pptxImport": True,
                                          "pptxPaste": True, "pptxClipboard": clipboard_available(),
                                          "pptxClipboardReady": clipboard_ready(),
+                                         "automation": True,
                                          "token": self.server.token})
             elif path.startswith("/api/"):
                 self.json_response(404, {"error": "Unknown local API."})
@@ -479,13 +481,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         try:
             self.trusted_request(require_origin=True)
             path = urlsplit(self.path).path
-            if path not in {"/api/locate", "/api/clipboard-image", "/api/pdf-text", "/api/pptx-import", "/api/pptx-paste", "/api/pptx-clipboard"}:
+            automation = path.startswith('/api/automation/')
+            if not automation and path not in {"/api/locate", "/api/clipboard-image", "/api/pdf-text", "/api/pptx-import", "/api/pptx-paste", "/api/pptx-clipboard"}:
                 raise LocateError(404, "Unknown local API.")
             clipboard = path == "/api/clipboard-image"
             pdf_text = path == "/api/pdf-text"
             pptx = path in {"/api/pptx-import", "/api/pptx-paste"}
-            label = "PPTX import" if pptx else "PDF text" if pdf_text else "clipboard image" if clipboard else "Locate"
-            limit = MAX_PPTX_BODY if pptx else MAX_PDF_TEXT_BODY if pdf_text else MAX_CLIPBOARD_BODY if clipboard else MAX_BODY
+            label = "automation" if automation else "PPTX import" if pptx else "PDF text" if pdf_text else "clipboard image" if clipboard else "Locate"
+            limit = (MAX_AUTOMATION_BODY if path == '/api/automation/result' else 1024 * 1024) if automation else MAX_PPTX_BODY if pptx else MAX_PDF_TEXT_BODY if pdf_text else MAX_CLIPBOARD_BODY if clipboard else MAX_BODY
             tokens = self.headers.get_all("X-Figure-Token", [])
             if len(tokens) != 1 or not secrets.compare_digest(tokens[0].encode(), self.server.token.encode()):
                 raise LocateError(403, "Reload the local Figure Editor before using local files.")
@@ -502,7 +505,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 data = json.loads(body)
             except (OSError, ValueError, RecursionError):
                 raise LocateError(400, "The " + label + " request is not valid JSON.")
-            if path == "/api/pptx-clipboard":
+            if automation:
+                result = self.server.automation.handle(path.removeprefix('/api/automation/'), data)
+            elif path == "/api/pptx-clipboard":
                 if not isinstance(data,dict) or set(data)-{'previewSha256'}:
                     raise LocateError(400, "Send an optional clipboard image fingerprint.")
                 digest=data.get('previewSha256')
@@ -529,7 +534,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     raise LocateError(400, "An asset descriptor is required.")
                 result = self.server.locator.locate(descriptor(data.get("asset")))
             self.json_response(200, result)
-        except (LocateError, PdfTextError, PptxImportError) as error:
+        except (LocateError, PdfTextError, PptxImportError, AutomationError) as error:
             self.json_response(error.status, {"error": str(error)})
 
 
@@ -543,6 +548,7 @@ def create_server(root, port=8766):
     server.locator = Locator(root)
     server.clipboard_images = ClipboardImages(root)
     server.pdf_text = PdfTextOutliner(root)
+    server.automation = AutomationBridge()
     if (root / 'scripts' / 'pptx_clipboard.swift').is_file():
         start_clipboard_helper()
     return server

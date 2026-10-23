@@ -37,6 +37,7 @@ import { selectionToPNG } from './clipboard-image.js';
 
 import { formatTitle, formatSection, formatInspectorMarkup, bindFormatInspector } from './format-inspector.js';
 import { createObjectContextMenu } from './object-context-menu.js';
+import { connectAutomation, describeProject, prepareBatch, renderAutomation } from './automation.js';
 
 const $ = id => document.getElementById(id);
 const ns = 'http://www.w3.org/2000/svg';
@@ -760,8 +761,9 @@ function positionShapesMenu(){
 $('shapes-menu').addEventListener('toggle',event=>{if(event.newState==='open')positionShapesMenu();});
 $('shapes-menu').addEventListener('keydown',event=>event.stopPropagation());
 window.addEventListener('resize',()=>{if($('shapes-menu').matches(':popover-open'))positionShapesMenu();});
-$('undo').onclick=()=>{const keepSlideFocus=slideClipboardTarget(document.activeElement);flushText();if(!undoStack.length)return;redoStack.push(snapshot());project=undoStack.pop();restoreSlideSelection(project);selected.clear();changed();render();fit();if(keepSlideFocus)focusCurrentSlide();status('Undone');};
-$('redo').onclick=()=>{const keepSlideFocus=slideClipboardTarget(document.activeElement);flushText();if(!redoStack.length)return;undoStack.push(snapshot());project=redoStack.pop();restoreSlideSelection(project);selected.clear();changed();render();fit();if(keepSlideFocus)focusCurrentSlide();status('Redone');};
+function undoEdit(){const keepSlideFocus=slideClipboardTarget(document.activeElement);flushText();if(!undoStack.length)return;redoStack.push(snapshot());project=undoStack.pop();restoreSlideSelection(project);selected.clear();changed();render();fit();if(keepSlideFocus)focusCurrentSlide();status('Undone');}
+function redoEdit(){const keepSlideFocus=slideClipboardTarget(document.activeElement);flushText();if(!redoStack.length)return;undoStack.push(snapshot());project=redoStack.pop();restoreSlideSelection(project);selected.clear();changed();render();fit();if(keepSlideFocus)focusCurrentSlide();status('Redone');}
+$('undo').onclick=undoEdit;$('redo').onclick=redoEdit;
 $('duplicate').onclick=()=>{if(!selected.size)return;change(()=>{const copies=chosen().filter(i=>!i.locked).map(i=>({...i,...cloneShape(i),...(i.crop?{crop:{...i.crop}}:{}),id:uid(),name:i.name+' copy',x:i.x+20,y:i.y+20}));slide().items.push(...copies);selected=new Set(copies.map(i=>i.id));});};
 $('delete-item').onclick=()=>{if(!selected.size)return;change(()=>{slide().items=slide().items.filter(i=>!selected.has(i.id)||i.locked);selected=new Set(chosen().map(i=>i.id));});};
 function reorder(direction){if(!selected.size)return;change(()=>{if(direction>0){for(let j=slide().items.length-2;j>=0;j--)if(selected.has(slide().items[j].id)&&!slide().items[j].locked&&!selected.has(slide().items[j+1].id))[slide().items[j],slide().items[j+1]]=[slide().items[j+1],slide().items[j]];}else{for(let j=1;j<slide().items.length;j++)if(selected.has(slide().items[j].id)&&!slide().items[j].locked&&!selected.has(slide().items[j-1].id))[slide().items[j],slide().items[j-1]]=[slide().items[j-1],slide().items[j]];}});}
@@ -813,16 +815,17 @@ function renderFileActions(){
  $('save-project').setAttribute('aria-busy',String(fileOperation));
  recentMenu.renderBusy();renderAutosave();
 }
-async function saveProject(saveAs=false,{automatic=false}={}){
- if(fileOperation)return;
+async function saveProject(saveAs=false,{automatic=false,agent=false}={}){
+ if(fileOperation){if(agent)throw new Error('A file operation is in progress. Read state and retry.');return;}
+ if(agent&&!projectFileHandle)throw new Error('No project file is authorized. Click Save in the page once to choose a file, or save destination=draft for browser recovery only.');
  if(automatic&&(!autosaveEnabled||!dirty||!projectFileHandle||autosaveError))return;
  if(!automatic)flushText();
  clearTimeout(autosaveTimer);
  const savedProject=snapshot(),epoch=projectEpoch,revision=editRevision;
  fileOperation=true;autosaveWriting=automatic;renderFileActions();if(!automatic)status('Saving project…');
  try{
-  const result=await writeProjectFile(savedProject,{handle:projectFileHandle,revision:projectFileRevision,name:saveAs?filename()+'.figure.json':projectFileName||filename()+'.figure.json',saveAs,automatic});
-  if(epoch!==projectEpoch)return;
+  const result=await writeProjectFile(savedProject,{handle:projectFileHandle,revision:projectFileRevision,name:saveAs?filename()+'.figure.json':projectFileName||filename()+'.figure.json',saveAs,automatic:automatic||agent});
+  if(epoch!==projectEpoch){if(agent)throw new Error('The project changed while saving. Read state before continuing.');return;}
   projectFileHandle=result.handle;projectFileName=result.name;projectFileRevision=result.revision??null;
   // Drag geometry changes before its undo/revision entry is committed on pointerup.
   dirty=result.downloaded||revision!==editRevision||Boolean(gesture?.moved&&gesture.mode!=='select');
@@ -830,8 +833,9 @@ async function saveProject(saveAs=false,{automatic=false}={}){
   if(!automatic)status(result.downloaded?'Project download started. This browser cannot save back to the original file. Use Chrome or Edge for direct Save.':`Saved to ${projectFileName}.${!dirty?'':autosaveEnabled?' Newer changes will save automatically.':' Newer changes are still unsaved; use Save again.'}`);
   await recentProjects.remember({...result,projectName:savedProject.name});recentMenu.render();
   await saveDraft();
+  return {saved:!result.downloaded,destination:'file',name:result.name,savedRevision:`${epoch}:${revision}`,newerChangesPending:dirty,draftSaved:!draftError};
  }catch(error){
-  if(epoch!==projectEpoch)return;
+  if(epoch!==projectEpoch){if(agent)throw error;return;}
   if(error.name==='ProjectFileConflictError'){
    dirty=true;autosaveError={state:'conflict',label:'File changed — Save As',detail:error.message};
    status(error.message,true);await saveDraft();
@@ -839,6 +843,7 @@ async function saveProject(saveAs=false,{automatic=false}={}){
    ?{state:'permission',label:'Click Save to allow',detail:'AutoSave needs write access. Click Save to grant permission. Local draft recovery remains on.'}
    :{state:'error',label:'AutoSave failed',detail:`Could not save to ${projectFileName}: ${error.message} Click Save to retry; local draft recovery remains on.`};
   else status(error.name==='AbortError'?'Save canceled. Your changes are still in the editor.':`Could not save project: ${error.message}`,error.name!=='AbortError');
+  if(agent)throw error;
  }finally{fileOperation=false;autosaveWriting=false;renderFileActions();scheduleAutosave();}
 }
 $('save-project').onclick=()=>saveProject();
@@ -1174,6 +1179,53 @@ $('demo-project').onclick=async()=>{
  try{const {makeDemo}=await import('./demo.js');const example=await makeDemo();if(revision!==editRevision&&dirty&&!confirm('Replace the current draft with the example?'))return;replaceProject(example);status('Example loaded. Use Save to choose its file location.');}catch(e){status(e.message,true);}
  finally{fileOperation=false;renderFileActions();}
 };
+function automationRevision(){return `${projectEpoch}:${editRevision}`;}
+function automationBusy(){
+ return fileOperation?'A file operation is in progress.':gesture?'Finish the current drag.':pendingText?'Finish editing text and click outside the field.'
+  :exporting?'An export is in progress.':document.querySelector('dialog[open]')?'Close the open dialog first.'
+  :$('workspace').classList.contains('shape-drawing')?'Finish drawing the shape first.'
+  :libraryImports||readingSlideClipboard?'An import operation is in progress.':null;
+}
+function automationState(slideId){
+ return {...describeProject(project,slideId),revision:automationRevision(),selectedItemIds:[...selected],selectedSlideIds:[...selectedSlideIds],
+  busy:automationBusy(),history:{undo:undoStack.length,redo:redoStack.length},
+  save:{dirty,autoSave:autosaveEnabled,fileName:projectFileName||null,hasFile:Boolean(projectFileHandle),
+   savedToFile:Boolean(projectFileHandle)&&!dirty,draftCurrent:draftRevision===editRevision&&!draftError,draftError,
+   error:autosaveError?.detail??null,status:$('autosave-status').textContent}};
+}
+async function executeAutomation(method,params){
+ const allowed={get_state:['slideId'],batch_edit:['expectedRevision','operations'],history:['expectedRevision','action'],save:['expectedRevision','destination'],preview:['slideId','maxSize'],export:['slideId','format','dpi']}[method];
+ if(!allowed||!params||typeof params!=='object'||Array.isArray(params)||Object.keys(params).some(key=>!allowed.includes(key)))throw new Error('Invalid editor command arguments.');
+ if(method==='get_state')return automationState(params.slideId);
+ const busy=automationBusy();if(busy)throw new Error(`Editor busy: ${busy}`);
+ if(['batch_edit','history','save'].includes(method)&&params.expectedRevision!==automationRevision())throw new Error('The project revision changed. Read state and rebuild the operation before retrying.');
+ if(method==='batch_edit'){
+  const prepared=prepareBatch(project,params.operations);
+  if(!change(()=>{project.slides=prepared.project.slides;}))throw new Error('The edit failed validation and was rolled back.');
+  status(`AI updated ${prepared.changedItemIds.length} objects. Undo restores the whole batch.`);
+  return {...automationState(),changedItemIds:prepared.changedItemIds,createdItemIds:prepared.createdItemIds};
+ }
+ if(method==='history'){
+  if(!['undo','redo'].includes(params.action))throw new Error('action must be undo or redo.');
+  if(!(params.action==='undo'?undoStack:redoStack).length)throw new Error(`Nothing to ${params.action}.`);
+  if(params.action==='undo')undoEdit();else redoEdit();
+  return automationState();
+ }
+ if(method==='save'){
+  if(params.destination==='draft'){
+   const savedRevision=automationRevision();await saveDraft();
+   if(draftError)throw new Error(`Browser draft was not saved: ${draftError}`);
+   return {saved:true,destination:'draft',savedRevision,state:automationState()};
+  }
+  if(params.destination!=='file')throw new Error('destination must be file or draft.');
+  const result=await saveProject(false,{agent:true});
+  return {...result,state:automationState()};
+ }
+ const renderedRevision=automationRevision(),source=clone(project);
+ const result=await renderAutomation(source,params,method==='preview');
+ return {...result,renderedRevision,currentRevision:automationRevision()};
+}
 render();panelWindows=initWindows({onLayoutChange:fit});requestAnimationFrame(fit);await Promise.all([loadDraft(),recentProjects.load()]);recentMenu.render();fileOperation=false;renderFileActions();scheduleAutosave();
+connectAutomation({execute:executeAutomation,summary:()=>({name:project.name,projectId:project.id,slideId:project.activeSlideId,revision:automationRevision()}),button:$('ai-control-toggle')});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){if(dirty)void saveDraft();if(!fileOperation&&!gesture)void saveProject(false,{automatic:true});}});
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
