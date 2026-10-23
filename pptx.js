@@ -164,7 +164,7 @@ function shape(item, id, layout) {
   const fillOpacity = item.opacity * (item.fillOpacity ?? 1);
   const paint = isLineShape(item) ? '<a:noFill/>' : item.fillGradient
     ? gradientFill(item.fillGradient, fillOpacity) : fill(item.fill, fillOpacity);
-  return `<p:sp>${nonVisual(id, item.name)}<p:spPr>${transform(item, layout)}${geometry}${paint}${line(item, layout.scale)}${imageShadow(item, layout)}</p:spPr></p:sp>`;
+  return `<p:sp>${nonVisual(id, item.name)}<p:spPr>${transform(item, layout)}${geometry}${paint}${line(item, layout.scale)}${objectEffects(item, layout)}</p:spPr></p:sp>`;
 }
 function fontFamily(value) {
   const family = value.split(',')[0].trim().replace(/^(['"])(.*)\1$/, '$2');
@@ -187,11 +187,12 @@ function textShape(item, id, layout) {
   const runContent = `${fill(item.color, item.opacity)}<a:latin typeface="${typeface}"/><a:ea typeface="${typeface}"/><a:cs typeface="${typeface}"/>`;
   const alignment = { left: 'l', center: 'ctr', right: 'r' }[item.align];
   const paragraphs = item.text.split('\n').map(text => `<a:p><a:pPr algn="${alignment}" marL="0" marR="0" indent="0"><a:lnSpc><a:spcPts val="${spacing}"/></a:lnSpc><a:spcBef><a:spcPts val="0"/></a:spcBef><a:spcAft><a:spcPts val="0"/></a:spcAft><a:buNone/><a:defRPr ${runStyle}>${runContent}</a:defRPr></a:pPr><a:r><a:rPr ${runStyle}>${runContent}</a:rPr><a:t xml:space="preserve">${escapeXML(text)}</a:t></a:r><a:endParaRPr ${runStyle}>${runContent}</a:endParaRPr></a:p>`).join('');
-  return `<p:sp>${nonVisual(id, item.name, true)}<p:spPr>${transform(item, layout)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln>${imageShadow(item, layout)}</p:spPr><p:txBody><a:bodyPr wrap="none" lIns="0" tIns="0" rIns="0" bIns="0" anchor="t" anchorCtr="0" horzOverflow="overflow" vertOverflow="overflow">${autofit}</a:bodyPr><a:lstStyle/>${paragraphs}</p:txBody></p:sp>`;
+  return `<p:sp>${nonVisual(id, item.name, true)}<p:spPr>${transform(item, layout)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln>${objectEffects(item, layout)}</p:spPr><p:txBody><a:bodyPr wrap="none" lIns="0" tIns="0" rIns="0" bIns="0" anchor="t" anchorCtr="0" horzOverflow="overflow" vertOverflow="overflow">${autofit}</a:bodyPr><a:lstStyle/>${paragraphs}</p:txBody></p:sp>`;
 }
-function imageShadow(item, layout) {
+function objectEffects(item, layout) {
   const shadow = item.shadow;
-  if (!shadow?.enabled) return '';
+  const softEdge = item.softEdge > 0 ? `<a:softEdge rad="${Math.round(item.softEdge * EMU_PER_PT * layout.scale)}"/>` : '';
+  if (!shadow?.enabled) return softEdge ? `<a:effectLst>${softEdge}</a:effectLst>` : '';
   // Native DrawingML keeps the effect editable in PowerPoint's Shadow panel.
   // Shadow lengths are points; percentages and clockwise angles are independent
   // of canvas fitting. Center alignment scales the shadow about the picture.
@@ -203,7 +204,7 @@ function imageShadow(item, layout) {
   // The native effect already inherits alphaModFix from the picture's blip;
   // multiplying item.opacity here would attenuate the shadow a second time.
   const alpha = Math.round((1 - shadow.transparency / 100) * 100000);
-  return `<a:effectLst><a:outerShdw blurRad="${blur}" dist="${distance}" dir="${direction}" sx="${size}" sy="${size}" algn="${shadow.alignment || 'ctr'}" rotWithShape="${shadow.rotateWithShape === false ? 0 : 1}"><a:srgbClr val="${hex}"><a:alpha val="${alpha}"/></a:srgbClr></a:outerShdw></a:effectLst>`;
+  return `<a:effectLst><a:outerShdw blurRad="${blur}" dist="${distance}" dir="${direction}" sx="${size}" sy="${size}" algn="${shadow.alignment || 'ctr'}" rotWithShape="${shadow.rotateWithShape === false ? 0 : 1}"><a:srgbClr val="${hex}"><a:alpha val="${alpha}"/></a:srgbClr></a:outerShdw>${softEdge}</a:effectLst>`;
 }
 function imageShape(item, asset, id, relationship, layout, svgRelationship) {
   const svgExtension = svgRelationship ? `<a:extLst><a:ext uri="{96DAC541-7B7A-43D3-8B79-37D633B846F1}"><asvg:svgBlip xmlns:asvg="http://schemas.microsoft.com/office/drawing/2016/SVG/main" r:embed="${svgRelationship}"/></a:ext></a:extLst>` : '';
@@ -211,7 +212,7 @@ function imageShape(item, asset, id, relationship, layout, svgRelationship) {
   const c = item.crop, percent = value => Math.max(0, Math.round(value * 100000));
   const left = c ? Math.min(99999, percent(c.x)) : 0, top = c ? Math.min(99999, percent(c.y)) : 0;
   const crop = c ? `<a:srcRect l="${left}" t="${top}" r="${Math.min(99999 - left, percent(1 - c.x - c.width))}" b="${Math.min(99999 - top, percent(1 - c.y - c.height))}"/>` : '';
-  return `<p:pic><p:nvPicPr><p:cNvPr id="${id}" name="${escapeXML(item.name)}" descr="${escapeXML(asset.name)}"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="${relationship}">${alpha === 100000 ? '' : `<a:alphaModFix amt="${alpha}"/>`}${svgExtension}</a:blip>${crop}<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>${transform(item, layout)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${item.strokeWidth>0 ? line(item,layout.scale) : '<a:ln><a:noFill/></a:ln>'}${imageShadow(item, layout)}</p:spPr></p:pic>`;
+  return `<p:pic><p:nvPicPr><p:cNvPr id="${id}" name="${escapeXML(item.name)}" descr="${escapeXML(asset.name)}"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="${relationship}">${alpha === 100000 ? '' : `<a:alphaModFix amt="${alpha}"/>`}${svgExtension}</a:blip>${crop}<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>${transform(item, layout)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${item.strokeWidth>0 ? line(item,layout.scale) : '<a:ln><a:noFill/></a:ln>'}${objectEffects(item, layout)}</p:spPr></p:pic>`;
 }
 
 function videoShape(item, asset, id, links, layout) {

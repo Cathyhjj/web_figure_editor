@@ -11,11 +11,12 @@ export const formatTitle = item => item?.type === 'image' ? 'Format Picture' : '
 export function formatSection(key, title, content, defaultOpen = true) {
   return `<details class="format-section" data-format-section="${key}" ${(expanded.get(key) ?? defaultOpen) ? 'open' : ''}><summary>${title}</summary><div class="format-section-body">${content}</div></details>`;
 }
-export function formatInspectorMarkup(item, { geometry, opacity, appearance, picture, effects, properties }) {
+export function formatInspectorMarkup(item, { geometry, opacity, appearance, picture, effects, softEdges, properties }) {
   const kind = item.type === 'image' ? 'picture' : 'shape';
+  const effectSections = (softEdges ? formatSection('soft-edges', 'Soft Edges', softEdges) : '') + formatSection('shadow', 'Shadow', effects);
   const tabs = kind === 'picture'
-    ? [['picture', 'Picture', formatSection('picture-transparency', 'Picture Transparency', opacity) + formatSection('crop', 'Crop & Source', picture)], ['effects', 'Effects', formatSection('shadow', 'Shadow', effects)]]
-    : [['paint', 'Fill & Line', appearance + formatSection('object-transparency', 'Object Transparency', opacity)], ['effects', 'Effects', formatSection('shadow', 'Shadow', effects)]];
+    ? [['picture', 'Picture', formatSection('picture-transparency', 'Picture Transparency', opacity) + formatSection('crop', 'Crop & Source', picture)], ['effects', 'Effects', effectSections]]
+    : [['paint', 'Fill & Line', appearance + formatSection('object-transparency', 'Object Transparency', opacity)], ['effects', 'Effects', effectSections]];
   tabs.push(['size', 'Size & Properties', geometry + formatSection('properties', 'Properties', properties)]);
   const selected = tabs.some(([key]) => key === preferences.get(kind)) ? preferences.get(kind) : tabs[0][0];
   return `<div class="format-inspector" data-format-kind="${kind}">

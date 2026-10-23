@@ -91,7 +91,7 @@ function originalPNG(selection) {
   const items = selection.items.filter(item => !item.hidden);
   if (items.length !== 1 || items[0].type !== 'image') return null;
   const item = items[0], asset = selection.assets.find(value => value.id === item.assetId);
-  if (asset.mime !== 'image/png' || item.rotation % 360 !== 0 || item.opacity !== 1 || isCropped(item) || item.shadow?.enabled || item.strokeWidth > 0) return null;
+  if (asset.mime !== 'image/png' || item.rotation % 360 !== 0 || item.opacity !== 1 || isCropped(item) || item.softEdge > 0 || item.shadow?.enabled || item.strokeWidth > 0) return null;
   if (Math.abs(item.width / item.height / (asset.width / asset.height) - 1) > 1e-9) return null;
   if (asset.width > MAX_SIDE || asset.height > MAX_SIDE || asset.width * asset.height > MAX_PIXELS) return null;
   const binary = atob(asset.dataUrl.slice(asset.dataUrl.indexOf(',') + 1));

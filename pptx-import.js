@@ -7,7 +7,7 @@ import { shadowBounds } from './shadow.js';
 
 const launchHint = 'PPTX import needs the local Figure Editor server. Restart with start.command (or npm start), then reload this page.';
 const MAX_BYTES = 100 * 1024 * 1024;
-const styleKeys = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'color'];
+const styleKeys = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'color', 'softEdge'];
 const sameStyle = (a, b) => styleKeys.every(k => a[k] === b[k]) && a.baseline === b.baseline && JSON.stringify(a.shadow) === JSON.stringify(b.shadow);
 function textStyle(run) { return { ...Object.fromEntries(styleKeys.map(key => [key, run[key]])), ...(run.shadow ? {shadow:{...run.shadow}} : {}) }; }
 
@@ -26,6 +26,7 @@ function positionText(block, item, x, y) {
   const cx = x + item.width / 2 - block.width / 2, cy = y + item.height / 2 - block.height / 2;
   return { ...item, id: uid(), type: 'text', name: block.name, rotation: block.rotation,
     ...(block.shadow && !item.shadow ? {shadow:{...block.shadow}} : {}),
+    ...(block.softEdge !== undefined && item.softEdge === undefined ? {softEdge:block.softEdge} : {}),
     opacity: block.opacity, locked: false, hidden: false,
     x: block.x + block.width / 2 + cx * cs - cy * sn - item.width / 2,
     y: block.y + block.height / 2 + cx * sn + cy * cs - item.height / 2 };
@@ -202,13 +203,13 @@ export async function preparePPTXSlide(converted, signal) {
       const local={format:'figure-editor',version:1,id:uid(),name:item.name,canvas:{width,height,background:'transparent'},assets:prepared.deck.assets,
         items:children.map(child=>({...child,x:child.x-left,y:child.y-top}))};
       const result=await importFiles([new File([groupSVG(local)],item.name+'.svg',{type:'image/svg+xml'})]);
-      if(result.errors.length||!result.assets.length)throw new Error('Could not preserve group shadow: '+result.errors.map(e=>e.message).join('; '));
+      if(result.errors.length||!result.assets.length)throw new Error('Could not preserve group effects: '+result.errors.map(e=>e.message).join('; '));
       const asset=(_flipX||_flipY)?await mirroredAsset(result.assets[0],_flipX,_flipY):result.assets[0];accountAsset(asset);assets.push(asset);
       const r=item.rotation*Math.PI/180,dx=(left+right-item.width)/2*(_flipX?-1:1),dy=(top+bottom-item.height)/2*(_flipY?-1:1);
       items.push({id:uid(),type:'image',name:item.name,assetId:asset.id,width,height,
         x:item.x+item.width/2+dx*Math.cos(r)-dy*Math.sin(r)-width/2,
         y:item.y+item.height/2+dx*Math.sin(r)+dy*Math.cos(r)-height/2,
-        rotation:item.rotation,opacity:item.opacity,locked:false,hidden:false,shadow:item.shadow});
+        rotation:item.rotation,opacity:item.opacity,locked:false,hidden:false,...(item.shadow?{shadow:item.shadow}:{}),...(item.softEdge!==undefined?{softEdge:item.softEdge}:{})});
     }
     else if (item.type === 'textBlock') items.push(...layoutTextBlock(item, measure));
     else if (item.type === 'image') {

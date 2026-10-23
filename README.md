@@ -64,6 +64,11 @@ python3 server.py
 
 阴影随项目、自动草稿、复制和副本保存；PNG、SVG、PDF、HTML 报告和复制为图片均保留效果，PPT 导出保留为可继续调整的原生阴影。不同渲染器的模糊边缘和半透明图片叠加效果可能略有差异。与其他内容一样，整页导出会裁掉画布外的部分。
 
+选中图片或形状后，在 **Format Picture / Format Shape → Effects → Soft Edges** 设置羽化（柔化边缘）。提供 **1、2.5、5、10、25、50 pt** 预设，滑块和数值框可调 **0–100 pt**；选择 **No soft edges** 或设为 **0** 可移除。文字属性也提供 Soft Edges。羽化沿可见轮廓向内渐隐，保留内部细节和透明度，可与裁剪、边框、阴影组合；锁定对象时无法修改。支持撤销、重做、复制副本、项目保存和重新打开。
+
+PNG、SVG、PDF、HTML 报告及复制为图片均保留羽化；PDF 对带羽化的对象按所选 DPI 单独栅格化。PPTX 导入/导出保留原生可编辑的 **Soft Edges** 半径。浏览器的边缘衰减是近似效果，可能与 PowerPoint 原生渲染略有差异。
+
+
 PPTX 导入现在保留图片、原生形状、连接线和文字的外阴影，包括颜色、透明度、模糊、距离、大小、对齐和固定方向。形状也可在 **Format Shape → Effects → Shadow** 调整。带整组阴影的组合以可编辑 SVG 保存子图形与内部效果，外层阴影保持原生可调；不会把组阴影重复加到每个孩子。图片自身的实色或渐变描边可在 **Format Picture → Picture → Line** 编辑，并随 PNG/SVG/PDF/PPTX 导出保留。非均匀缩放、倾斜阴影及其他未支持效果会提示近似或省略；缺失的原始图片无法恢复其轮廓和阴影。
 
 ## 多页组图与面板
@@ -129,7 +134,7 @@ PPTX 导入现在保留图片、原生形状、连接线和文字的外阴影，
 | PPT (.pptx) | 按项目顺序导出全部 slides；文字和形状为 PowerPoint 原生可编辑对象，图片为可独立移动和缩放的内嵌图片。保留图层顺序、旋转和透明度，不导出隐藏对象。字体不嵌入。 |
 | HTML report | 按项目顺序包含全部 slides、页名和目录的单个 `.html` 文件；图像和样式均已内嵌，可离线打开。文本、编辑器形状和导入 SVG 保留为矢量，位图为内嵌栅格，字体不嵌入。报告为只读，不能代替可编辑项目。 |
 
-PNG 的栅格图宽度为 `画布宽度 × DPI / 96`，高度同理。PDF 页面按 `96 CSS px = 1 inch = 72 pt` 保留画布物理尺寸；**PDF shadow resolution** 控制 SVG 资源、渐变形状和带阴影图片的局部栅格化分辨率，不改变矢量文字、实色形状或其他图片的像素数。提高 DPI 不会补出原始图片中没有的细节；图片属性显示其当前排版下的有效分辨率。过大的阴影图像会被拒绝，请减小图片尺寸或阴影分辨率。
+PNG 的栅格图宽度为 `画布宽度 × DPI / 96`，高度同理。PDF 页面按 `96 CSS px = 1 inch = 72 pt` 保留画布物理尺寸；**PDF effects resolution** 控制 SVG 资源、渐变形状和带阴影或羽化的对象的局部栅格化分辨率，不改变矢量文字、实色形状或其他图片的像素数。提高 DPI 不会补出原始图片中没有的细节；图片属性显示其当前排版下的有效分辨率。过大的阴影图像会被拒绝，请减小图片尺寸或阴影分辨率。
 
 PDF 的文字轮廓通过本地 macOS 服务和系统 CoreText/CoreGraphics 字体框架生成，需要 macOS 与 Swift 命令行工具（Xcode Command Line Tools）。请使用 `start.command`、`npm start` 或 `python3 server.py` 启动，更新后重启旧服务。使用本机安装的字体和系统字体回退，希腊字母、中文等随字体轮廓写入 PDF。普通静态服务器、不支持的系统或文字轮廓服务不可用时，会显示导出错误，不会自动把整页转成位图。只含形状和图片、没有编辑器文字对象的页面无需文字轮廓服务；导出过程不会将项目或字体发送到远程服务。
 
@@ -284,3 +289,5 @@ SVG 编辑检查：在隔离测试端口运行 `python3 server.py --port 18768`�
 原生阴影检查：在隔离测试服务打开 `tests/native-shadow.html`，点击 **Run shadow checks**。覆盖旋转对象的固定方向阴影、超框文字、图片渐变边框、PPTX 往返、PDF 和包含嵌套 SVG 的组合阴影。页面提供合成 PDF 样张供独立渲染核对。
 
 PowerPoint 粘贴验证：在隔离测试服务中打开 `tests/pptx-paste.html`，验证 Office 数据导入、独立对象编辑、保存重开、撤销重做、取消，以及普通 PNG 回退。测试使用合成 PPTX，不读取系统剪贴板。
+
+羽化开发验证：`node --test tests/soft-edge.test.mjs`、`python3 -m unittest discover -s tests -p 'test_soft_edge.py'`。启动 `python3 server.py --port 18792` 后运行 `node tests/soft-edge-browser.mjs`（可用 `PLAYWRIGHT_MODULE` 指定 Playwright 路径）；使用独立 Chrome 上下文和合成图片检查控件、保存重开、撤销、透明/裁剪图片像素及导出，产物保存在系统临时目录。

@@ -106,7 +106,7 @@ run.onclick = async () => {
     get('export-open').click();
     check('PDF appears beside the existing export formats', ['png', 'svg', 'pdf', 'pptx', 'html'].every(format => [...get('export-format').options].some(option => option.value === format)));
     choose('pdf'); setDPI(150);
-    check('PDF describes vector outlines, current-slide scope, and shadow-only resolution', get('export-title').textContent === 'Export current slide' && get('export-slide-name').textContent.includes('Slide 2 of 2') && get('export-dpi-label').textContent === 'PDF shadow resolution' && !get('export-dpi').disabled && /outlines/.test(get('export-info').textContent) && /not searchable/.test(get('export-info').textContent) && /only to images with shadows/.test(get('export-info').textContent));
+    check('PDF describes vector outlines, current-slide scope, and rasterized SVG/gradient/effect resolution', get('export-title').textContent === 'Export current slide' && get('export-slide-name').textContent.includes('Slide 2 of 2') && /^PDF (?:shadow|effects) resolution$/.test(get('export-dpi-label').textContent) && !get('export-dpi').disabled && /outlines/.test(get('export-info').textContent) && /not searchable/.test(get('export-info').textContent) && /DPI applies to SVG assets, gradient shapes/.test(get('export-info').textContent) && /shadows/.test(get('export-info').textContent));
     get('export-cancel').click();
     check('Cancel leaves both slides intact and produces no download', !get('export-dialog').open && downloads.length === 0 && doc.querySelectorAll('.slide-card').length === 2);
     get('export-open').click();

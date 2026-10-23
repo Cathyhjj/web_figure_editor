@@ -3,7 +3,8 @@ import { validateSVGDocument, svgDataURL, svgDimensions } from './svg-vector.js'
 import { isMP4, isMediaItem, posterSource } from './video.js';
 import { HTML_MIME, looksLikeHTML, requireHTMLSnapshots, validateSnapshot } from './html-chart.js';
 import { validateCrop, imageCrop } from './crop.js';
-import { validateShadow, imageShadowSVG, objectShadowSVG, imageBorderSVG } from './shadow.js';
+import { validateShadow, imageShadowSVG, objectShadowSVG, imageBorderSVG, objectBounds } from './shadow.js';
+import { softEdgeSVG, MAX_SOFT_EDGE } from './soft-edge.js';
 import { validateShape, validateGradient, shapeSVG as vectorShapeSVG } from './shape.js';
 import { SHAPE_TYPES, isLineShape, shapeSVG as presetShapeSVG } from './shapes.js';
 const LIMITS = Object.freeze({ assets: 500, items: 2000, assetBytes: 40 * 1024 * 1024, totalBytes: 160 * 1024 * 1024 });
@@ -181,7 +182,7 @@ function validateProjectInternal(input, assetCache) {
       const asset = project.assets.find(a => a.id === canonical.assetId);
       if ((type === 'video') !== (asset.mime === 'video/mp4')) fail(`item ${itemID} has an incompatible asset type.`);
       if ((type === 'html') !== (asset.mime === HTML_MIME)) fail(`item ${itemID} has an incompatible asset type.`);
-      if (['video', 'html'].includes(type) && (item.crop !== undefined || item.shadow !== undefined)) fail('video and HTML crop and shadow are not supported.');
+      if (['video', 'html'].includes(type) && (item.crop !== undefined || item.shadow !== undefined || item.softEdge !== undefined)) fail('video and HTML crop, shadow and soft edges are not supported.');
       if (item.crop !== undefined) canonical.crop = validateCrop(item.crop);
       if (item.shadow !== undefined) canonical.shadow = validateShadow(item.shadow);
       if(type==='image' && ['stroke','strokeWidth','strokeGradient'].some(key=>item[key]!==undefined)){
@@ -221,6 +222,7 @@ function validateProjectInternal(input, assetCache) {
       if (type === 'roundRect') canonical.cornerRadius = number(item.cornerRadius, 'item.cornerRadius', 0, 0.5, 1 / 6);
     }
     if (item.shadow !== undefined) canonical.shadow = validateShadow(item.shadow);
+    if (item.softEdge !== undefined) canonical.softEdge = number(item.softEdge, 'item.softEdge', 0, MAX_SOFT_EDGE);
     project.items.push(canonical);
   }
   return project;
@@ -271,6 +273,7 @@ function svgFromCanonical(project, { gradientRotation } = {}) {
   const assets = new Map(project.assets.map(a => [a.id, a]));
   const usedIDs = new Set(project.items.map(item => item.id));
   let shadowIndex = 0;
+  const effectID = prefix => { let id; do { id = `${prefix}-${shadowIndex++}`; } while (usedIDs.has(id)); usedIDs.add(id); return id; };
   const lines = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     `<svg xmlns="http://www.w3.org/2000/svg" width="${n(width / 96 * 25.4)}mm" height="${n(height / 96 * 25.4)}mm" viewBox="0 0 ${n(width)} ${n(height)}">`,
@@ -286,11 +289,6 @@ function svgFromCanonical(project, { gradientRotation } = {}) {
     lines.push(`<g id="${xml(item.id)}" transform="translate(${n(item.x)} ${n(item.y)}) rotate(${n(item.rotation)} ${n(w / 2)} ${n(h / 2)})" opacity="${n(item.opacity)}">`);
     const contentStart = lines.length;
     if (isMediaItem(item)) {
-      let filterID;
-      do { filterID = `figure-shadow-${project.id}-${item.id}-${shadowIndex++}`; } while (usedIDs.has(filterID));
-      usedIDs.add(filterID);
-      const shadowSVG = imageShadowSVG(item, assets.get(item.assetId), filterID);
-      if (shadowSVG) lines.push(shadowSVG);
       const c = imageCrop(item);
       if (item.crop) lines.push(`<svg width="${n(w)}" height="${n(h)}" viewBox="${c.x} ${c.y} ${c.width} ${c.height}" preserveAspectRatio="none" overflow="hidden">`);
       lines.push(`<image x="0" y="0" width="${item.crop ? '1' : n(w)}" height="${item.crop ? '1' : n(h)}" preserveAspectRatio="none" href="${xml(posterSource(assets.get(item.assetId)))}"/>`);
@@ -307,9 +305,12 @@ function svgFromCanonical(project, { gradientRotation } = {}) {
     } else {
       lines.push(presetShapeSVG(paintItem, `preset-${project.id}-${item.id}`));
     }
-    if (!isMediaItem(item) && item.shadow) {
-      const content = lines.splice(contentStart).join('\n');
-      lines.push(objectShadowSVG(item, content, `figure-native-shadow-${project.id}-${item.id}`));
+    if (item.shadow || item.softEdge > 0) {
+      const source = lines.splice(contentStart).join('\n');
+      const content = item.softEdge > 0 ? softEdgeSVG(item, source, effectID(`figure-soft-edge-${project.id}-${item.id}`), objectBounds(item)) : source;
+      lines.push(item.type === 'image'
+        ? imageShadowSVG(item, assets.get(item.assetId), effectID(`figure-shadow-${project.id}-${item.id}`)) + content
+        : objectShadowSVG(item, content, effectID(`figure-native-shadow-${project.id}-${item.id}`)));
     }
     lines.push('</g>');
   }

@@ -17,6 +17,8 @@
 !/core.js
 !/shadow.js
 !/shadow-editor.js
+!/soft-edge.js
+!/soft-edge-editor.js
 !/shapes.js
 !/shape-editor.js
 !/format-inspector.js
@@ -183,6 +185,8 @@
 
 # Native PPTX shadows and picture borders.
 !/tests/test_native_shadow.py
+!/tests/test_soft_edge.py
+!/tests/soft-edge-browser.mjs
 !/tests/native-shadow.html
 !/tests/native-shadow-browser.js
 

@@ -20,8 +20,10 @@ import { POWERPOINT_MIME, initPowerPointPaste } from './pptx-clipboard.js';
 import { exportPDF } from './pdf.js';
 import { initWindows } from './windows.js';
 import { initSlideDrag } from './slide-drag.js';
-import { imageShadowSVG, objectShadowSVG, imageBorderSVG } from './shadow.js';
+import { imageShadowSVG, objectShadowSVG, imageBorderSVG, objectBounds } from './shadow.js';
 import { shadowEditorMarkup, bindShadowEditor } from './shadow-editor.js';
+import { softEdgeSVG } from './soft-edge.js';
+import { softEdgeEditorMarkup, bindSoftEdgeEditor } from './soft-edge-editor.js';
 import { isShapeItem, isLineShape, shapeSVG, shapeBounds } from './shapes.js';
 import { opacityEditorMarkup, shapeEditorMarkup, bindShapeEditor } from './shape-editor.js';
 import { imageCrop, isCropped, cropImage } from './crop.js';
@@ -146,10 +148,6 @@ $('html-chart-done').onclick=()=>{closeHTMLChart();$('workspace').focus({prevent
 $('html-chart-snapshot').onclick=()=>saveHTMLSnapshot();
 $('html-chart-controls').onpointerdown=e=>e.stopPropagation();
 function appendItemContent(g,item,context='stage'){
-  if(item.type==='image'){
-   const a=assetById(item.assetId);
-   if(a)g.innerHTML=imageShadowSVG(item,a,`shadow-${context}-${item.id}`);
-  }
   if(item.type==='image'){const a=assetById(item.assetId);if(a){const c=imageCrop(item),parent=item.crop?svg('svg',{width:item.width,height:item.height,viewBox:`${c.x} ${c.y} ${c.width} ${c.height}`,preserveAspectRatio:'none',overflow:'hidden'}):g;parent.append(svg('image',{href:a.dataUrl,width:item.crop?1:item.width,height:item.crop?1:item.height,preserveAspectRatio:'none'}));if(parent!==g)g.append(parent);}}
   else if(item.type==='html'){const a=assetById(item.assetId);if(a)g.append(svg('image',{href:a.posterDataUrl,width:item.width,height:item.height,preserveAspectRatio:'none'}));}
   else if(item.type==='video'){const a=assetById(item.assetId);if(a){g.append(svg('image',{href:a.posterDataUrl,width:item.width,height:item.height,preserveAspectRatio:'none'}));const r=Math.min(item.width,item.height)*.09;g.append(svg('circle',{cx:item.width/2,cy:item.height/2,r,fill:'#111827b3'}));g.append(svg('path',{d:`M ${item.width/2-r*.3} ${item.height/2-r*.5} L ${item.width/2+r*.55} ${item.height/2} L ${item.width/2-r*.3} ${item.height/2+r*.5} Z`,fill:'#fff'}));}}
@@ -158,8 +156,10 @@ function appendItemContent(g,item,context='stage'){
    String(item.text).split('\n').forEach((line,j)=>text.append(svg('tspan',{x:item.align==='center'?item.width/2:item.align==='right'?item.width:0,dy:j?item.fontSize*1.2:0},line||' ')));g.append(text);
   }else if(item.type==='shape')g.innerHTML=vectorShapeSVG(item,`vector-${context}-${item.id}`);
   else if(isShapeItem(item))g.innerHTML=shapeSVG(item,`preset-${context}-${item.id}`);
-  if(!isMediaItem(item)&&item.shadow)g.innerHTML=objectShadowSVG(item,g.innerHTML,`native-shadow-${context}-${item.id}`);
   if(item.type==='image')g.insertAdjacentHTML('beforeend',imageBorderSVG(item,`picture-border-${context}-${item.id}`));
+  if(item.softEdge>0)g.innerHTML=softEdgeSVG(item,g.innerHTML,`soft-edge-${context}-${item.id}`,objectBounds(item));
+  if(item.type==='image'&&item.shadow){const a=assetById(item.assetId);if(a)g.insertAdjacentHTML('afterbegin',imageShadowSVG(item,a,`shadow-${context}-${item.id}`));}
+  if(!isMediaItem(item)&&item.shadow)g.innerHTML=objectShadowSVG(item,g.innerHTML,`native-shadow-${context}-${item.id}`);
 }
 function previewVideo(asset){
  if(!asset||asset.mime!=='video/mp4')return;
@@ -398,7 +398,7 @@ function renderInspector(){
  if(i.type==='image'){const a=assetById(i.assetId),c=imageCrop(i);const effectiveDPI=a?Math.round(Math.min(a.width*c.width/i.width,a.height*c.height/i.height)*96):0;box.innerHTML+=`<div class="image-crop-actions"><button id="crop-image" class="button" ${i.locked?'disabled':''}>${isCropped(i)?'Edit crop':'Crop'}</button><button id="restore-image" class="button" ${i.locked||!isCropped(i)?'disabled':''}>Restore original</button></div><p class="hint">Source: ${escapeHTML(a?.name)}<br>Original size: ${a?.width} × ${a?.height} px${isCropped(i)?`<br>Cropped area: ${Math.round(a.width*c.width)} × ${Math.round(a.height*c.height)} px`:''}${a?.mime==='image/svg+xml'?'<br>Vector SVG · resolution independent':`<br>Effective resolution: ${effectiveDPI} DPI`}<br>Drag the bottom-right corner to keep proportions; hold Shift to resize freely. Drag side handles to stretch width or height. Width and height fields keep proportions.</p>`;}
  if(i.type==='video'){const a=assetById(i.assetId);box.innerHTML+=`<div class="image-crop-actions"><button id="preview-video" class="button">▶ Preview video</button></div><p class="hint">MP4 · ${a.width} × ${a.height} px · ${a.duration.toFixed(1)} s<br>Embedded in PowerPoint; click the video during Slide Show to play. H.264 video with AAC audio is recommended.<br>PNG, SVG, PDF, and HTML reports use the poster frame.</p>`;}
  if(i.type==='image'&&editableSVGAsset(assetById(i.assetId)))box.innerHTML+=`<button id="edit-svg" class="button" ${i.locked?'disabled':''}>${assetById(i.assetId).mime==='image/svg+xml'?'Edit SVG elements':'Restore editable SVG'}</button>`;
- if(!['video','html'].includes(i.type))box.innerHTML+=shadowEditorMarkup(i);
+ if(!['video','html'].includes(i.type))box.innerHTML+=shadowEditorMarkup(i)+formatSection('soft-edges','Soft Edges',softEdgeEditorMarkup(i));
  box.innerHTML+=shapeEditorMarkup(i);
  box.innerHTML+=`<label class="field inline"><input id="object-locked" type="checkbox" ${i.locked?'checked':''}> Lock object</label>`;
  if(canFormat(i)){
@@ -409,6 +409,7 @@ function renderInspector(){
    appearance:shapeEditorMarkup(i),
    picture:crop?crop.outerHTML+crop.nextElementSibling.outerHTML+(box.querySelector('#edit-svg')?.outerHTML||'')+shapeEditorMarkup(i):'',
    effects:shadowEditorMarkup(i),
+   softEdges:softEdgeEditorMarkup(i),
    properties:field('Name','name',i.name,'text')+`<label class="field inline"><input id="object-locked" type="checkbox" ${i.locked?'checked':''}> Lock object</label>`,
   });
   bindFormatInspector(box,{beforeSwitch:flushText});
@@ -453,6 +454,7 @@ function renderInspector(){
   change,
  };
  bindShadowEditor(i,box,styleBindings);
+ bindSoftEdgeEditor(i,box,styleBindings);
  bindShapeEditor(i,box,styleBindings);
  $('object-locked').onchange=e=>change(()=>i.locked=e.target.checked);
  const text=$('text-content');if(text){text.disabled=i.locked;text.oninput=()=>{if(!pendingText)pendingText=snapshot();i.text=text.value.slice(0,20000);i.height=Math.max(i.fontSize*1.2*i.text.split('\n').length,i.height);changed();renderStage();};text.onblur=()=>{flushText();renderLayers();renderToolbar();};}
@@ -864,7 +866,7 @@ function exportInfo(){
  $('export-title').textContent=ppt?'Export as PPT':report?'Export HTML report':'Export current slide';
  $('export-slide-name').textContent=report||ppt?`All ${project.slides.length} slide${project.slides.length===1?'':'s'} · ${project.name}`:`Slide ${project.slides.indexOf(slide())+1} of ${project.slides.length}: ${slide().name}`;
  $('export-dpi').disabled=!(png||pdf);
- $('export-dpi-label').textContent=pdf?'PDF shadow resolution':'PNG resolution';
+ $('export-dpi-label').textContent=pdf?'PDF effects resolution':'PNG resolution';
  $('export-submit').disabled=false;
  if(ppt){
   try{
@@ -873,7 +875,7 @@ function exportInfo(){
   }catch(e){$('export-info').textContent=e.message;$('export-submit').disabled=true;}
   return;
  }
- $('export-info').textContent=report?'One self-contained HTML file with all slides and a contents list. Open it offline in a browser or print it. Text and shapes remain vector; images are embedded. The report is read-only, and fonts are not embedded.':pdf?`Single-page PDF · ${Number((slide().canvas.width*25.4/96).toFixed(2))} × ${Number((slide().canvas.height*25.4/96).toFixed(2))} mm. Text and shapes remain vector; text becomes outlines and is not searchable. Bitmap images remain raster. ${dpi} DPI applies to SVG assets, gradient shapes and shadows. Text outlines require the local macOS server.`:png?`${Math.round(slide().canvas.width*dpi/96)} × ${Math.round(slide().canvas.height*dpi/96)} px · ${dpi} DPI. All content is rasterized with transparency preserved. Higher DPI does not add detail to source images.`:'SVG keeps text, shapes and imported SVGs as vectors. Bitmap images remain raster. Fonts are not embedded; recipients need the same fonts installed.';
+ $('export-info').textContent=report?'One self-contained HTML file with all slides and a contents list. Open it offline in a browser or print it. Text and shapes remain vector; images are embedded. The report is read-only, and fonts are not embedded.':pdf?`Single-page PDF · ${Number((slide().canvas.width*25.4/96).toFixed(2))} × ${Number((slide().canvas.height*25.4/96).toFixed(2))} mm. Text and shapes remain vector; text becomes outlines and is not searchable. Bitmap images remain raster. ${dpi} DPI applies to SVG assets, gradient shapes, shadows and soft edges. Text outlines require the local macOS server.`:png?`${Math.round(slide().canvas.width*dpi/96)} × ${Math.round(slide().canvas.height*dpi/96)} px · ${dpi} DPI. All content is rasterized with transparency preserved. Higher DPI does not add detail to source images.`:'SVG keeps text, shapes and imported SVGs as vectors. Bitmap images remain raster. Fonts are not embedded; recipients need the same fonts installed.';
  if(project.slides.some(page=>page.items.some(i=>i.type==='video'&&!i.hidden)))$('export-info').textContent+=' Videos appear as static poster frames in this format.';
 }
 $('export-open').onclick=()=>{flushText();exportInfo();$('export-dialog').showModal();};

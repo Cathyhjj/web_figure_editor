@@ -244,16 +244,31 @@ class Converter:
             line=ET.Element('{'+NS['a']+'}ln',w='12700');line.append(solid);return line
         return solid
 
-    def shadow_style(self, shape, chain, name, scale=1):
+    def effect_list(self, shape, chain):
         """Nearest explicit effect list (including an empty list) overrides the theme."""
         containers = [el if el is not None and tag(el) in ('rPr','defRPr','endParaRPr') else first(find(el,'p:spPr'), find(el,'p:grpSpPr')) for el in [shape,*chain]]
         containers.append(self.theme_style(shape,chain,'effect'))
-        effects = first(*(first(find(el,'a:effectLst'),find(el,'a:effectDag')) for el in containers))
+        return first(*(first(find(el,'a:effectLst'),find(el,'a:effectDag')) for el in containers))
+
+    def soft_edge_style(self, shape, chain, name, scale=1):
+        effects = self.effect_list(shape, chain)
+        if effects is None:
+            return None
+        node = find(effects,'a:softEdge')
+        if node is None:
+            return 0
+        radius = num(node,'rad') / 12700 * scale
+        if not 0 <= radius <= 100:
+            self.warn('Soft edge radius exceeds editable limits and is clamped.',name)
+        return max(0,min(100,radius))
+
+    def shadow_style(self, shape, chain, name, scale=1):
+        effects = self.effect_list(shape, chain)
         if effects is None:
             return None
         node = find(effects,'a:outerShdw')
-        if any(tag(child) != 'outerShdw' for child in effects):
-            self.warn('Effects other than outer shadow are not retained.',name)
+        if any(tag(child) not in ('outerShdw','softEdge') for child in effects):
+            self.warn('Effects other than outer shadow and soft edges are not retained.',name)
         if node is None:
             return None
         color = self.color(node)
@@ -370,7 +385,8 @@ class Converter:
         if baseline:
             size *= .65
         shadow = self.shadow_style(nodes[-1],list(reversed(nodes[:-1])),'Text',scale) if nodes else None
-        return {**({'shadow':shadow} if shadow else {}), 'fontFamily': family[:200] or 'Arial', 'fontSize': max(1, min(2000, size)),
+        soft_edge = self.soft_edge_style(nodes[-1],list(reversed(nodes[:-1])),'Text',scale) if nodes else None
+        return {**({'shadow':shadow} if shadow else {}), **({'softEdge':soft_edge} if soft_edge is not None else {}), 'fontFamily': family[:200] or 'Arial', 'fontSize': max(1, min(2000, size)),
                 'fontWeight': 700 if props.get('b') in ('1', 'true') else 400,
                 'fontStyle': 'italic' if props.get('i') in ('1', 'true') else 'normal',
                 'color': self.color(fill), 'baseline': baseline,
@@ -503,7 +519,8 @@ class Converter:
             rot = (*rot[:4],cx-rot[0]*cx-rot[2]*cy,cy-rot[1]*cx-rot[3]*cy)
             group_geometry = self.geometry(xf,matrix,name)
             group_shadow = self.shadow_style(shape,[],name,group_geometry['_scaleY'])
-            if group_shadow and group_shadow['transparency'] < 100:
+            group_soft_edge = self.soft_edge_style(shape,[],name,group_geometry['_scaleY'])
+            if (group_shadow and group_shadow['transparency'] < 100) or group_soft_edge:
                 # Keep the composited group alpha, including each child's own effects.
                 # The browser stores this bounded group as an editable SVG asset.
                 start = len(self.items)
@@ -519,7 +536,9 @@ class Converter:
                         child['shadow']['angle']=angle%360
                 if group_items:
                     item=self.base(name,group_geometry,'shadowGroup')
-                    item.update(items=group_items,shadow=group_shadow,_flipX=group_geometry['_flipX'],_flipY=group_geometry['_flipY'])
+                    item.update(items=group_items,_flipX=group_geometry['_flipX'],_flipY=group_geometry['_flipY'])
+                    if group_shadow:item['shadow']=group_shadow
+                    if group_soft_edge is not None:item['softEdge']=group_soft_edge
                     self.items.append(item)
                 return
             for child in shape: self.shape(child,path,multiply(matrix,multiply(rot,mapping)),inherited)
@@ -535,6 +554,7 @@ class Converter:
             return
         g = self.geometry(xf,matrix,name)
         native_shadow = self.shadow_style(shape,chain,name,g['_scaleY'])
+        native_soft_edge = self.soft_edge_style(shape,chain,name,g['_scaleY'])
         if typ == 'graphicFrame':
             self.warn('Chart, table, SmartArt or embedded object was omitted. Export it as an image in PowerPoint to include it.', name)
             return
@@ -562,6 +582,7 @@ class Converter:
                     self.media[target]['fallbackId'] = fallback_mid
             item = self.base(name,g,'image'); item['assetId'] = mid
             if native_shadow:item['shadow']=native_shadow
+            if native_soft_edge is not None:item['softEdge']=native_soft_edge
             border=self.line_style(shape,chain)
             if border is not None and find(border,'a:noFill') is None:
                 gradient=self.stroke_gradient(find(border,'a:gradFill'),g,name)
@@ -674,6 +695,9 @@ class Converter:
                     imported['strokeGradient'] = paint
             text_start=len(self.items)
             self.text(shape,chain,g,name)
+            if native_soft_edge is not None:
+                for imported in self.items[first_shape_index:]:
+                    imported['softEdge']=native_soft_edge
             if native_shadow:
                 # Filled geometry already casts the shape shadow; an unfilled text box
                 # instead casts its visible glyphs. Run-level shadows remain independent.

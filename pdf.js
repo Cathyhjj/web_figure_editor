@@ -252,7 +252,7 @@ export async function exportPDF(input, dpi = 300) {
     // Raster patches use unrotated local axes; preserve fixed world shadow direction.
     const localShadow = item.shadow?.rotateWithShape === false ? {shadow:{...item.shadow,angle:((item.shadow.angle-item.rotation)%360+360)%360,rotateWithShape:true}} : {};
     let drawing;
-    if (item.type !== 'image' && (item.shadow?.enabled || item.strokeGradient || item.fillGradient)) {
+    if (item.type !== 'image' && (item.softEdge > 0 || item.shadow?.enabled || item.strokeGradient || item.fillGradient)) {
       const bounds = shadowBounds(item);
       if (bounds.width <= 0 || bounds.height <= 0) continue;
       // The raster canvas requires at least 1 CSS px; keep thin strokes centered.
@@ -267,7 +267,7 @@ export async function exportPDF(input, dpi = 300) {
     else if (item.type !== 'image') drawing = shape(pdf, item);
     else {
       const asset = assets.get(item.assetId), shadow = item.shadow;
-      if (asset.mime === 'image/svg+xml' || item.strokeWidth > 0 || (shadow?.enabled && shadow.transparency < 100 && shadow.size > 0)) {
+      if (asset.mime === 'image/svg+xml' || item.softEdge > 0 || item.strokeWidth > 0 || (shadow?.enabled && shadow.transparency < 100 && shadow.size > 0)) {
         const bounds = shadowBounds(item);
         checkPixels(Math.max(1, Math.round(bounds.width * dpi / 96)), Math.max(1, Math.round(bounds.height * dpi / 96)));
         const local = { ...project, canvas: { width: bounds.width, height: bounds.height, background: 'transparent' }, assets: [asset], items: [{ ...item, ...localShadow, x: -bounds.x, y: -bounds.y, rotation: 0, opacity: 1 }] };
