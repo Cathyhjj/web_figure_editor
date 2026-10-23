@@ -1,9 +1,10 @@
-import { SHAPE_CATEGORIES, PRESET_PATHS } from './shape-presets.js';
+import { SHAPE_CATEGORIES as PRESET_CATEGORIES, PRESET_PATHS } from './shape-presets.js';
+import { ARROW_PRESETS, ARROW_DRAWING_TOOLS, createArrowPreset } from './vector-arrow.js';
 import { shapeSVG as vectorSVG } from './shape.js';
 import { shapeSVG as basicSVG } from './shapes.js';
 
-export { SHAPE_CATEGORIES };
-export const DRAWING_TOOLS = ['curve', 'freeform', 'scribble'];
+export const SHAPE_CATEGORIES = [{name:'Custom Arrows',shapes:ARROW_PRESETS},...PRESET_CATEGORIES];
+export const DRAWING_TOOLS = ['curve', 'freeform', 'scribble',...ARROW_DRAWING_TOOLS];
 const entries = new Map(SHAPE_CATEGORIES.flatMap(group => group.shapes.map(shape => [shape.id, shape])));
 const connectors = {
   bentConnector3: ['line', 'elbow'], elbowArrow: ['arrow', 'elbow'], elbowDoubleArrow: ['doubleArrow', 'elbow'],
@@ -14,6 +15,7 @@ const connectors = {
 export function createCatalogShape(key) {
   const entry = entries.get(key);
   if (!entry || DRAWING_TOOLS.includes(key) || key === 'textBox') throw new Error('Choose an insertable shape.');
+  if(ARROW_PRESETS.some(p=>p.id===key))return createArrowPreset(key);
   const [type, connector] = connectors[key] || [key === 'circle' ? 'ellipse' : PRESET_PATHS[key] ? 'shape' : key];
   const line = ['line', 'arrow', 'doubleArrow'].includes(type);
   return {
@@ -26,6 +28,8 @@ export function createCatalogShape(key) {
 }
 
 const drawingIcons = {
+  drawCurveArrow: 'M3 25 C8 2 27 2 33 21 M26 17 L33 21 L35 13',
+  drawPolylineArrow: 'M3 7 H17 V24 H35 M29 18 L35 24 L29 30',
   curve: 'M3 24 C10 -8 16 -8 22 13 C26 28 30 29 35 25',
   freeform: 'M3 27 L3 10 L12 3 L27 3 L20 12 L24 17 L35 17 L35 27 Z',
   scribble: 'M7 3 C-5 17 6 18 18 11 C34 1 37 13 23 20 C9 27 23 32 33 25',

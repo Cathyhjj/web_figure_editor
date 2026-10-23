@@ -1,11 +1,13 @@
 import { shapeSVG } from './shape.js';
+import { ARROW_DRAWING_TOOLS, createVectorArrow } from './vector-arrow.js';
 
-const names = { curve: 'Curve', freeform: 'Freeform', scribble: 'Scribble' };
+const names = { curve: 'Curve', freeform: 'Freeform', scribble: 'Scribble',drawCurveArrow:'Curved arrow',drawPolylineArrow:'Polyline arrow' };
 const distance = (a,b) => Math.hypot(a.x-b.x,a.y-b.y);
 
 /** Turn a completed gesture into bounded, editable project geometry. */
 export function createDrawingShape(tool, input, closed = false) {
   if (!names[tool]) throw new Error('Unknown drawing tool.');
+  if(ARROW_DRAWING_TOOLS.includes(tool))return createVectorArrow(tool==='drawCurveArrow'?'curve':'polyline',input.slice(0,32));
   const points = input.filter((p,i) => !i || distance(p,input[i-1]) > .01);
   if (points.length < 2) return null;
   if (points.length > 1024 || points.some(p => !Number.isFinite(p.x) || !Number.isFinite(p.y))) throw new Error('Invalid drawing points.');
@@ -50,6 +52,7 @@ export function initShapeDrawing({workspace,stage,point,context,insert,status,pr
   }
   function append(p){
     if(!state.points.length||distance(p,state.points.at(-1))>=1){
+      if(ARROW_DRAWING_TOOLS.includes(state.tool)&&state.points.length>=32){status('Arrow point limit reached. Press Enter to finish, or Backspace to remove a point.');return;}
       if(state.points.length>=1000)state.points=state.points.filter((_,i)=>i%2===0);
       state.points.push(p);
     }
@@ -63,7 +66,7 @@ export function initShapeDrawing({workspace,stage,point,context,insert,status,pr
   workspace.addEventListener('pointermove',event=>{
     if(!current())return;consume(event);
     const p=point(event);
-    if(state.pointerId===event.pointerId&&state.tool!=='curve')append(p);
+    if(state.pointerId===event.pointerId&&['freeform','scribble'].includes(state.tool))append(p);
     state.hover=state.tool==='scribble'?null:p;preview();
   },true);
   workspace.addEventListener('pointerup',event=>{

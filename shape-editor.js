@@ -1,6 +1,7 @@
 import { isShapeItem, isLineShape, shapeColor } from './shapes.js';
 import { formatSection } from './format-inspector.js';
 import { defaultGradient, gradientEditorMarkup, bindGradientEditors } from './gradient-editor.js';
+import { arrowEditorMarkup, bindArrowEditor } from './vector-arrow-editor.js';
 
 const paints = new WeakMap();
 const transparent = value => value === 'none' || value === 'transparent';
@@ -30,10 +31,11 @@ export function shapeEditorMarkup(item) {
       ${[['solid', 'Solid'], ['dash', 'Dashed'], ['dot', 'Dotted']].map(([key, label]) => `<option value="${key}" ${(item.strokeDash ?? 'solid') === key ? 'selected' : ''}>${label}</option>`).join('')}
     </select></label></div>`;
   const hasFill = item.type !== 'image' && !isLineShape(item) && !(item.type === 'shape' && item.paths.every(path => path.fillMode === 'none'));
-  return `<section class="shape-style" aria-label="Shape appearance">${hasFill ? formatSection('fill', 'Fill', paint('fill', 'Fill')) : ''}${formatSection('line', 'Line', line, !hasFill)}</section>`;
+  return `<section class="shape-style" aria-label="Shape appearance">${arrowEditorMarkup(item)}${hasFill ? formatSection('fill', 'Fill', paint('fill', 'Fill')) : ''}${formatSection('line', 'Line', line, !hasFill)}</section>`;
 }
 
 export function bindShapeEditor(item, box, bindings) {
+  bindArrowEditor(item,box,bindings);
   const { begin, preview, commit, change } = bindings;
   bindGradientEditors(item, box, bindings);
   box.querySelectorAll('[data-transparency]').forEach(input => {

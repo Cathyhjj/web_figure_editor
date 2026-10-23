@@ -142,6 +142,9 @@
 !/shape-catalog.js
 !/shape-presets.js
 !/shape-drawing.js
+!/vector-arrow.js
+!/vector-arrow-editor.js
+!/tests/vector-arrow-browser.mjs
 !/shape.js
 !/pptx_geometry.py
 !/scripts/build_shape_catalog.py

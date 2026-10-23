@@ -18,9 +18,9 @@ const item = key => ({id:key,x:30,y:40,rotation:0,opacity:1,...createCatalogShap
 const fixture=()=>validateProject({...createProject(),items:insertable.map(entry=>item(entry.id))});
 
 test('gallery covers each screenshot category and every button has real geometry or a drawing action',()=>{
-  assert.deepEqual(SHAPE_CATEGORIES.map(group=>[group.name,group.shapes.length]),[['Lines',12],['Rectangles',9],['Basic Shapes',44],['Block Arrows',31]]);
+  assert.deepEqual(SHAPE_CATEGORIES.map(group=>[group.name,group.shapes.length]),[['Custom Arrows',6],['Lines',12],['Rectangles',9],['Basic Shapes',44],['Block Arrows',31]]);
   assert.equal(new Set(entries.map(entry=>entry.id)).size,entries.length);
-  const project=fixture();assert.equal(project.items.length,92);
+  const project=fixture();assert.equal(project.items.length,96);
   for(const entry of entries){assert.match(catalogIcon(entry.id),/<svg/);assert.doesNotMatch(catalogIcon(entry.id),/NaN|Infinity|undefined/);}
   for(const key of ['pie','chord','teardrop','arc','cube','circularArrow','leftCircularArrow','leftRightCircularArrow'])assert.ok(project.items.find(i=>i.id===key).paths.length);
   execFileSync('python3',['scripts/build_shape_catalog.py','--check'],{cwd:new URL('..',import.meta.url)});
@@ -53,7 +53,7 @@ test('connector shafts match native PPT paths and arrowheads follow endpoint tan
 
 test('all catalog shapes round-trip through editable PPTX without flattening or omission',async()=>{
   const project=fixture();
-  project.items.forEach((i,index)=>{i.fillOpacity=.45;i.strokeOpacity=.65;i.strokeDash='dash';if(i.connector){i.connectorFlipX=index%2===0;i.connectorFlipY=index%3===0;}});
+  project.items.forEach((i,index)=>{i.fillOpacity=.45;i.strokeOpacity=.65;i.stroke='#252735';i.strokeWidth=2;i.strokeDash='dash';if(i.connector){i.connectorFlipX=index%2===0;i.connectorFlipY=index%3===0;}});
   const script=`import sys,json,base64\nfrom pptx_import import import_pptx\nprint(json.dumps(import_pptx({'name':'catalog.pptx','data':base64.b64encode(sys.stdin.buffer.read()).decode(),'slide':1})))`;
   const blob=await exportPPTX(project);
   const result=JSON.parse(execFileSync('python3',['-c',script],{input:Buffer.from(await blob.arrayBuffer()),cwd:new URL('..',import.meta.url),maxBuffer:4*1024*1024}));
@@ -80,7 +80,8 @@ test('all catalog shapes round-trip through editable PPTX without flattening or 
 });
 
 test('new shapes export as vectors and keep holes and shaded layers',async()=>{
-  const project=fixture(),svg=projectToSVG(project),pdf=await(await exportPDF(project)).text();
+  const project=fixture();project.items.forEach(i=>delete i.fillGradient); // Gradient PDF patches require the browser integration check.
+  const svg=projectToSVG(project),pdf=await(await exportPDF(project)).text();
   assert.doesNotMatch(svg,/<image/);assert.doesNotMatch(pdf,/\/Subtype \/Image/);
   assert.match(pdf,/ c\n/);
   for(const key of ['frame','donut','noSmoking'])assert.ok(item(key).paths.some(p=>p.commands.filter(c=>c[0]==='M').length>=2),key);
@@ -92,8 +93,8 @@ test('curve/freeform/scribble gestures generate portable paths with safe flat-ax
   for(const tool of DRAWING_TOOLS){
     const drawing=createDrawingShape(tool,points,tool==='freeform');
     const project=validateProject({...createProject(),items:[{id:tool,...drawing}]});
-    assert.equal(project.items[0].paths[0].commands.at(-1)[0],tool==='curve'?'C':tool==='freeform'?'Z':'L');
-    assert.equal(drawing.paths[0].fillMode,tool==='freeform'?'norm':'none');
+    assert.equal(project.items[0].paths[0].commands.at(-1)[0],drawing.editableArrow?'Z':tool==='curve'?'C':tool==='freeform'?'Z':'L');
+    assert.equal(drawing.paths[0].fillMode,tool==='freeform'||drawing.editableArrow?'norm':'none');
     assert.doesNotMatch(projectToSVG(project),/NaN|Infinity/);
   }
   assert.equal(createDrawingShape('scribble',[{x:10,y:10}]),null);

@@ -78,7 +78,9 @@ python3 server.py
 
 画布和字号的单位为 CSS px，按 **96 px / inch** 计算物理尺寸。预设为约 85 × 64 mm 单栏、180 × 120 mm 双栏和 120 × 120 mm 方形，整数像素会带来少量尺寸舍入。画布缩放只改变屏幕显示。
 
-点击顶部 **Shapes**，按 **Lines / Rectangles / Basic Shapes / Block Arrows** 分类浏览或搜索，共 92 个可直接插入的形状，另有文本框和 3 个绘图工具。包含 9 种矩形、多边形、饼形、弦形、泪滴、框架、圆环、括号、心形、云、星形、立方体及 31 种块箭头；线条支持直线、肘形、曲线连接线，以及单向/双向箭头。拖动边缘控制点调整宽高；按住 **Shift** 拖动右下角可保持封闭形状的比例。圆仍可拉伸为椭圆。线箭头尖端随线宽调整，旋转字段可改变指向。
+点击顶部 **Shapes**，按 **Custom Arrows / Lines / Rectangles / Basic Shapes / Block Arrows** 分类浏览或搜索，共 96 个可直接插入的形状，另有文本框和 5 个绘图工具。包含 9 种矩形、多边形、饼形、弦形、泪滴、框架、圆环、括号、心形、云、星形、立方体及 31 种块箭头；线条支持直线、肘形、曲线连接线，以及单向/双向箭头。拖动边缘控制点调整宽高；按住 **Shift** 拖动右下角可保持封闭形状的比例。圆仍可拉伸为椭圆。线箭头尖端随线宽调整，旋转字段可改变指向。
+
+**Custom Arrows** 提供 **Arc arrow / Sweeping arrow / Fading curved arrow / Polyline arrow** 四种可编辑的实心矢量箭头。选择 **Draw curved arrow / Draw polyline arrow** 后，在画布逐点点击，按 **Enter** 或双击完成，**Esc** 取消；每条箭头最多 32 个节点。选中后拖动橙色节点改变路径，点击 **+** 增加节点，**Alt/Option + 点击节点** 删除（至少保留两个）。拖动节点时按 **Esc** 可取消本次修改。**Format Shape → Fill & Line → Arrow** 可以切换曲线/折线、单向/双向、三角/凹口尖端，并调整箭身、尾部及箭头尺寸；**Fade tail** 添加透明渐变，**Solid color** 恢复纯色，颜色和渐变在 **Fill** 中修改。拉伸箭头时箭身和尖端一起拉伸。节点与参数随 `.figure.json`、复制和撤销保存；PPTX 保留可编辑的封闭矢量路径，但重新导入 PPTX 不恢复此编辑器专用的节点参数。渐变或阴影的 PDF 导出沿用局部栅格化，SVG 和 PPTX 保留矢量几何。
 
 **Curve / Freeform**：在画布依次点击控制点，双击或按 **Enter** 完成；Freeform 点击起点可闭合并填充，也可拖动绘制线段。**Scribble**：按住鼠标绘制，松开完成。**Esc** 取消，未完成的绘制不会写入项目。完成后可调整大小、旋转、样式，或撤销/重做。新增预设使用 PPT 几何生成的矢量路径，支持缩放；暂不提供 PowerPoint 的黄色几何调节手柄，连接线也不自动吸附到其他形状。
 
@@ -91,6 +93,8 @@ python3 server.py
 矩形、圆角矩形、椭圆及预设/导入的矢量形状均支持 **Gradient fill**。渐变控件包括预设、**Linear / Radial** 类型、方向、线性渐变角度、2–16 个可增删/拖动的色标，以及所选色标的颜色、位置、透明度、亮度和 **Rotate with shape**。色标支持左右方向键微调，Shift 加快，Home/End 移至两端；双击色带可插入色标。**Line → Gradient line** 使用同一套控件。图片或纹理、图案、幻灯片背景填充不在此面板提供。PPTX 导入/导出保留原生可编辑的线性/径向渐变、亮度和旋转设置；SVG 与 HTML 报告保持矢量，PDF 按所选 DPI 单独渲染渐变对象。浏览器径向渐变尚未经过 PowerPoint 原生像素比对；非圆形路径渐变、区域焦点、不缩放方向及部分斜线投影仍会近似转换，并在 **Import notes** 提示。
 
 形状菜单的数据由 `python3 scripts/build_shape_catalog.py` 从仓库内固定版本的 DrawingML 定义生成，`--check` 可检查生成结果。出处和许可证见 `resources/NOTICE-preset-shapes.txt`；生成器只在副本中修正三个环形箭头定义已知的多余操作数，不更改导入器的严格校验或上游资源。
+
+自定义箭头检查：`node --test tests/vector-arrow.test.mjs tests/shape-catalog.test.mjs`；`node tests/vector-arrow-browser.mjs` 自动启动独立临时端口和 Chrome 上下文，验证绘图、节点拖动、撤销、复制、锁定、重新打开和导出（可用 `PLAYWRIGHT_MODULE` 指定 Playwright 路径）。
 
 选中图片后，在 **Format Picture → Effects → Shadow** 勾选开关即可添加阴影。可以选择柔和、右下、下方或硬边预设，也可以用滑块或数值框调整颜色、透明度、大小、模糊、角度和距离。模糊与距离使用与 PPT 相同的 **pt** 单位，角度 `0°` 向右、`90°` 向下。默认效果为黑色、60% 透明、100% 大小、5 pt 模糊、0 pt 距离的居中柔和阴影；透明图片按实际轮廓投影。取消开关或选择 **No shadow** 可移除效果并保留参数。支持撤销、重做，锁定图片时无法调整。
 

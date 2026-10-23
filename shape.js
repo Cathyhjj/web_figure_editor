@@ -1,3 +1,4 @@
+import { validateEditableArrow, arrowPaths } from './vector-arrow.js';
 /** Bounded, portable vector geometry. Coordinates are relative to the object's size. */
 const MODES = ['norm', 'none', 'darkenLess', 'darken', 'lightenLess', 'lighten'];
 const COLORS = { black:'#000000', white:'#ffffff', red:'#ff0000', green:'#008000', blue:'#0000ff', gray:'#808080', grey:'#808080', none:'#00000000', transparent:'#00000000' };
@@ -5,9 +6,11 @@ const invalid = () => { throw new Error('Invalid figure shape geometry or gradie
 const finite = (n, min, max) => typeof n === 'number' && Number.isFinite(n) && n >= min && n <= max;
 const colorOK = c => typeof c === 'string' && (/^#[\da-f]{3,4}$|^#[\da-f]{6}(?:[\da-f]{2})?$/i.test(c) || Object.hasOwn(COLORS,c.toLowerCase()));
 export function validateShape(item) {
-  if (!Array.isArray(item.paths) || !item.paths.length || item.paths.length > 32) invalid();
+  const editableArrow=item.editableArrow===undefined?undefined:validateEditableArrow(item.editableArrow);
+  const sourcePaths=editableArrow?arrowPaths(editableArrow):item.paths;
+  if (!Array.isArray(sourcePaths) || !sourcePaths.length || sourcePaths.length > 32) invalid();
   let count = 0;
-  const paths = item.paths.map(path => {
+  const paths = sourcePaths.map(path => {
     if (!path || !MODES.includes(path.fillMode) || typeof path.stroke !== 'boolean' || !Array.isArray(path.commands) || !path.commands.length || path.commands[0]?.[0] !== 'M') invalid();
     const commands = path.commands.map(command => {
       if (++count > 2048 || !Array.isArray(command) || !Object.hasOwn({M:3,L:3,C:7,Z:1},command[0]) || command.length !== ({M:3,L:3,C:7,Z:1})[command[0]] || !command.slice(1).every(n => finite(n,-100,100))) invalid();
@@ -15,7 +18,7 @@ export function validateShape(item) {
     });
     return { commands, fillMode:path.fillMode, stroke:path.stroke };
   });
-  return {paths,...(item.fillGradient !== undefined ? {fillGradient:validateGradient(item.fillGradient)} : {})};
+  return {paths,...(editableArrow?{editableArrow}:{}),...(item.fillGradient !== undefined ? {fillGradient:validateGradient(item.fillGradient)} : {})};
 }
 export function validateGradient(g) {
   if (!g || !finite(g.angle,-36000,36000) || !Array.isArray(g.stops) || g.stops.length < 2 || g.stops.length > 16) invalid();
@@ -35,6 +38,7 @@ export function validateGradient(g) {
 }
 export function cloneShape(item) {
   return {
+    ...(item.editableArrow ? {editableArrow:{...item.editableArrow,points:item.editableArrow.points.map(p=>({...p}))}} : {}),
     ...(item.type==='shape' ? {paths:item.paths.map(p=>({...p,commands:p.commands.map(c=>[...c])}))} : {}),
     ...Object.fromEntries(['fillGradient','strokeGradient'].filter(key=>item[key]).map(key=>[key,{...item[key],...(item[key].center ? {center:{...item[key].center}} : {}),stops:item[key].stops.map(s=>({...s}))}])),
   };
