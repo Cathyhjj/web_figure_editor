@@ -53,7 +53,7 @@ test('brightness changes HSL luminance non-destructively and retains stop transp
 test('radial SVG uses the DrawingML circumscribing circle and fixed orientation for rotated shapes',()=>{
   const svg=gradientSVG(item(),radial,'unsafe" paint');
   assert.match(svg,/id="unsafe--paint"/);
-  assert.match(svg,/cx="100" cy="50" r="111.803399" fx="44.098301" fy="105.901699"/);
+  assert.match(svg,/cx="100" cy="50" r="145.465646" fx="44.19873" fy="96.650635"/);
   assert.match(svg,/gradientTransform="rotate\(-30 100 50\)"/);
   assert.match(svg,/stop-color="#ff404080"/);
   const defaultRadial=gradientSVG(item(),{...legacy,type:'radial'},'radial');

@@ -1,3 +1,4 @@
+import { gradientBounds } from './shape-geometry.js';
 import { validateEditableArrow, arrowPaths } from './vector-arrow.js';
 /** Bounded, portable vector geometry. Coordinates are relative to the object's size. */
 const MODES = ['norm', 'none', 'darkenLess', 'darken', 'lightenLess', 'lighten'];
@@ -74,19 +75,55 @@ export function shapeBounds(item) {
   return {x:l-pad,y:t-pad,width:r-l+2*pad,height:b-t+2*pad};
 }
 const n = v => Number(v.toFixed(6));
+export function gradientColorAt(g, offset, mode='norm') {
+  const left=[...g.stops].reverse().find(s=>s.offset<=offset)??g.stops[0];
+  const right=g.stops.find(s=>s.offset>=offset)??g.stops.at(-1);
+  const t=left.offset===right.offset ? 0 : (offset-left.offset)/(right.offset-left.offset);
+  const channels=s=>{
+    const c=shadeColor(gradientStopColor(s),mode);
+    return [1,3,5,7].map(i=>i===7 && c.length===7 ? 255 : parseInt(c.slice(i,i+2),16));
+  };
+  const a=channels(left),b=channels(right);
+  const nativeBlend=g.stops.length===2 && g.stops[0].offset===0 && g.stops[1].offset===1;
+  return '#'+a.map((v,j)=>{
+    const blend=!nativeBlend || j===3 ? t : b[j]>v ? 1-(1-t)**1.875 : t**1.875;
+    return Math.round(v+(b[j]-v)*blend).toString(16).padStart(2,'0');
+  }).join('');
+}
+/** PowerPoint's full-range two-stop blend, measured against native PNG exports.
+ * These extra stops are paint only: editable/project/PPTX stops stay unchanged.
+ * See tests/fixtures/powerpoint-radial/README.md for the reference measurements.
+ */
+export function gradientStopsSVG(g, mode='norm') {
+  let stops=g.stops.map(s=>({offset:s.offset,color:shadeColor(gradientStopColor(s),mode)}));
+  if(stops.length===2 && stops[0].offset===0 && stops[1].offset===1) {
+    stops=Array.from({length:33},(_,i)=>{
+      if(i===0)return stops[0];
+      if(i===32)return stops[1];
+      return {offset:i/32,color:gradientColorAt(g,i/32,mode)};
+    });
+  }
+  return stops.map(s=>`<stop offset="${n(s.offset)}" stop-color="${s.color}"/>`).join('');
+}
 /** User-space paint servers also work on horizontal and vertical zero-area lines. */
 export function gradientSVG(item,g,id,mode='norm',stroke=false) {
   id=String(id).replace(/[^a-zA-Z0-9_-]/g,'-');
   const w=Math.max(item.width,stroke?item.strokeWidth:0,.01),h=Math.max(item.height,stroke?item.strokeWidth:0,.01);
-  const stops=g.stops.map(s=>`<stop offset="${n(s.offset)}" stop-color="${shadeColor(gradientStopColor(s),mode)}"/>`).join('');
+  const stops=gradientStopsSVG(g,mode);
   // PDF raster patches keep geometry local, but must retain the original slide orientation.
   const rotation=g.rotateWithShape===false ? -(item.gradientRotation??item.rotation??0) : 0;
   const rotate=rotation ? `rotate(${n(rotation)} ${n(item.width/2)} ${n(item.height/2)})` : '';
   if (g.type==='radial') {
-    // DrawingML circle gradients use a circumscribing circle; fillToRect is
-    // relative to its square bounds, rather than stretching a circle to an ellipse.
-    const center=g.center??{x:.5,y:.5},radius=Math.hypot(w,h)/2,cx=item.width/2,cy=item.height/2;
-    return `<radialGradient id="${id}" gradientUnits="userSpaceOnUse" cx="${n(cx)}" cy="${n(cy)}" r="${n(radius)}" fx="${n(cx+radius*(2*center.x-1))}" fy="${n(cy+radius*(2*center.y-1))}"${rotate ? ` gradientTransform="${rotate}"` : ''}>${stops}</radialGradient>`;
+    // Native PowerPoint positions fillToRect in the actual path bounds. A fixed
+    // gradient uses the rotated path's world-aligned bounds, then transforms back.
+    const box=gradientBounds(item,-rotation),center=g.center??{x:.5,y:.5};
+    const bw=Math.max(box.width,stroke?item.strokeWidth:0,.01),bh=Math.max(box.height,stroke?item.strokeWidth:0,.01);
+    const cx=box.x+box.width/2,cy=box.y+box.height/2,fx=box.x+box.width*center.x,fy=box.y+box.height*center.y;
+    let radius=Math.hypot(bw,bh)/2;
+    // PowerPoint expands degenerate corner-focus bounds by one point (96/72 px)
+    // so the focus stays inside the circle; SVG otherwise produces a hard seam.
+    if(Math.hypot(fx-cx,fy-cy)>=radius-1e-6)radius=Math.hypot(bw/2+4/3,bh/2+4/3);
+    return `<radialGradient id="${id}" gradientUnits="userSpaceOnUse" cx="${n(cx)}" cy="${n(cy)}" r="${n(radius)}" fx="${n(fx)}" fy="${n(fy)}"${rotate ? ` gradientTransform="${rotate}"` : ''}>${stops}</radialGradient>`;
   }
   const a=g.angle*Math.PI/180,dx=Math.cos(a),dy=Math.sin(a),norm=Math.max(Math.abs(dx),Math.abs(dy));
   return `<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${n(item.width/2-dx/norm*w/2)}" y1="${n(item.height/2-dy/norm*h/2)}" x2="${n(item.width/2+dx/norm*w/2)}" y2="${n(item.height/2+dy/norm*h/2)}"${rotate ? ` gradientTransform="${rotate}"` : ''}>${stops}</linearGradient>`;

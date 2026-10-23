@@ -1,0 +1,1978 @@
+{
+  "producer": "Microsoft PowerPoint for Mac 16.114.1",
+  "captured": "2026-10-23",
+  "canvas": [
+    800,
+    600
+  ],
+  "sourceCommit": "e759b2a39cf6fccff1268e03c5247df11119ec98",
+  "cases": [
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "p0",
+        "name": "center-square",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "shape0",
+            "name": "center-square",
+            "type": "rect",
+            "x": 200,
+            "y": 100,
+            "width": 400,
+            "height": 400,
+            "rotation": 0,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ffffff"
+                },
+                {
+                  "offset": 1,
+                  "color": "#000000"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "center-square.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "04a45256a965cdf653fadaa25471120b96e1c1b217fc1848bcf77bb5e45fddf0",
+      "nativeGeometry": [
+        200.0,
+        200.0,
+        0.0,
+        200.0,
+        200.0,
+        282.8427296587927
+      ]
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "p1",
+        "name": "center-wide",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "shape1",
+            "name": "center-wide",
+            "type": "rect",
+            "x": 150,
+            "y": 200,
+            "width": 500,
+            "height": 200,
+            "rotation": 0,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ffffff"
+                },
+                {
+                  "offset": 1,
+                  "color": "#000000"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "center-wide.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "bbeac302b5552fe0bfb53a55413b9efca65f7c07772cbcd56d3348905bff55e9",
+      "nativeGeometry": [
+        250.0,
+        100.0,
+        0.0,
+        250.0,
+        100.0,
+        269.25826771653544
+      ]
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "p2",
+        "name": "center-tall",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "shape2",
+            "name": "center-tall",
+            "type": "rect",
+            "x": 300,
+            "y": 100,
+            "width": 200,
+            "height": 400,
+            "rotation": 0,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ffffff"
+                },
+                {
+                  "offset": 1,
+                  "color": "#000000"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "center-tall.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "a3a232e157db9647d32388337386601e9ccfcc2974f7546cc76ccf1d389a6570",
+      "nativeGeometry": [
+        100.0,
+        200.0,
+        0.0,
+        100.0,
+        200.0,
+        223.60682414698164
+      ]
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "p3",
+        "name": "left-wide",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "shape3",
+            "name": "left-wide",
+            "type": "rect",
+            "x": 150,
+            "y": 200,
+            "width": 500,
+            "height": 200,
+            "rotation": 0,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0,
+                "y": 0.5
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ffffff"
+                },
+                {
+                  "offset": 1,
+                  "color": "#000000"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "left-wide.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "63ff738b0cfa3b1472dcc1f98a1bbaaa73d21e908e53fdc3ac42360f60d3856d",
+      "nativeGeometry": [
+        0.0,
+        100.0,
+        0.0,
+        250.0,
+        100.0,
+        269.25826771653544
+      ]
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "p4",
+        "name": "top-wide",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "shape4",
+            "name": "top-wide",
+            "type": "rect",
+            "x": 150,
+            "y": 200,
+            "width": 500,
+            "height": 200,
+            "rotation": 0,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0.5,
+                "y": 0
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ffffff"
+                },
+                {
+                  "offset": 1,
+                  "color": "#000000"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "top-wide.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "d0ae54da0642bc2b0ab591918b73851d800abf32affb9aca40f601660c8cf844",
+      "nativeGeometry": [
+        250.0,
+        0.0,
+        0.0,
+        250.0,
+        100.0,
+        269.25826771653544
+      ]
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "p5",
+        "name": "top-left-wide",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "shape5",
+            "name": "top-left-wide",
+            "type": "rect",
+            "x": 150,
+            "y": 200,
+            "width": 500,
+            "height": 200,
+            "rotation": 0,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0,
+                "y": 0
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ffffff"
+                },
+                {
+                  "offset": 1,
+                  "color": "#000000"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "top-left-wide.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "95377026e1df944d22a3c8ab67b6a942396df29db7514b87f94a66d64340ca35",
+      "nativeGeometry": [
+        0.0,
+        0.0,
+        0.0,
+        250.0,
+        100.0,
+        270.9924409448819
+      ]
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "p6",
+        "name": "offset-wide",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "shape6",
+            "name": "offset-wide",
+            "type": "rect",
+            "x": 150,
+            "y": 200,
+            "width": 500,
+            "height": 200,
+            "rotation": 0,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0.25,
+                "y": 0.75
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ffffff"
+                },
+                {
+                  "offset": 1,
+                  "color": "#000000"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "offset-wide.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "b6228f7f803ef270ac2cef1f2d6823a33efcf38c771cad980199632e7c380198",
+      "nativeGeometry": [
+        125.0,
+        150.0,
+        0.0,
+        250.0,
+        100.0,
+        269.25826771653544
+      ]
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "p7",
+        "name": "bottom-right-square",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "shape7",
+            "name": "bottom-right-square",
+            "type": "rect",
+            "x": 200,
+            "y": 100,
+            "width": 400,
+            "height": 400,
+            "rotation": 0,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 1,
+                "y": 1
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ffffff"
+                },
+                {
+                  "offset": 1,
+                  "color": "#000000"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "bottom-right-square.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "4cb5897a70daf9d26fa9cd8fcb8563a75d173831435ba35caa7649cd327f0a23",
+      "nativeGeometry": [
+        400.0,
+        400.0,
+        0.0,
+        200.0,
+        200.0,
+        284.7282939632546
+      ]
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "p8",
+        "name": "ellipse-center",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "shape8",
+            "name": "ellipse-center",
+            "type": "ellipse",
+            "x": 150,
+            "y": 200,
+            "width": 500,
+            "height": 200,
+            "rotation": 0,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ffffff"
+                },
+                {
+                  "offset": 1,
+                  "color": "#000000"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "ellipse-center.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "75f34e234015587d0259702b25c628fb8f374a3ec6ed26826dffd92ac8125233",
+      "nativeGeometry": [
+        250.0,
+        100.0,
+        0.0,
+        250.0,
+        100.0,
+        269.25826771653544
+      ]
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "p9",
+        "name": "ellipse-left",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "shape9",
+            "name": "ellipse-left",
+            "type": "ellipse",
+            "x": 150,
+            "y": 200,
+            "width": 500,
+            "height": 200,
+            "rotation": 0,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0,
+                "y": 0.5
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ffffff"
+                },
+                {
+                  "offset": 1,
+                  "color": "#000000"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "ellipse-left.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "ee027d30bf91b06ab1fa491bfd2dbbb629f1e4b3c9ceb5f066bda013dc12ba82",
+      "nativeGeometry": [
+        0.0,
+        100.0,
+        0.0,
+        250.0,
+        100.0,
+        269.25826771653544
+      ]
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "p10",
+        "name": "rotated-follow",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "shape10",
+            "name": "rotated-follow",
+            "type": "rect",
+            "x": 150,
+            "y": 200,
+            "width": 500,
+            "height": 200,
+            "rotation": 45,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0,
+                "y": 0.5
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ffffff"
+                },
+                {
+                  "offset": 1,
+                  "color": "#000000"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "rotated-follow.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "5b98d7558e819a17f15959ececdd2b70c0f796d54b78d315478aab5605830b52",
+      "nativeGeometry": [
+        0.0,
+        100.0,
+        0.0,
+        250.0,
+        100.0,
+        269.25826771653544
+      ]
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "p11",
+        "name": "rotated-fixed",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "shape11",
+            "name": "rotated-fixed",
+            "type": "rect",
+            "x": 150,
+            "y": 200,
+            "width": 500,
+            "height": 200,
+            "rotation": 45,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0,
+                "y": 0.5
+              },
+              "rotateWithShape": false,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ffffff"
+                },
+                {
+                  "offset": 1,
+                  "color": "#000000"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "rotated-fixed.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "89b42d8b80ea903b4a3f9d0766754406d918006e9aff6fac3b88a47f187e9686",
+      "nativeGeometry": [
+        75.0,
+        275.0,
+        0.0,
+        250.0,
+        99.99997900262467,
+        350.0
+      ]
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "p12",
+        "name": "color",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "shape12",
+            "name": "color",
+            "type": "rect",
+            "x": 150,
+            "y": 200,
+            "width": 500,
+            "height": 200,
+            "rotation": 0,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ff0000"
+                },
+                {
+                  "offset": 1,
+                  "color": "#0000ff"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "color.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "9193be436119caec7346f3a9ce566b06c6ae6078d9d5af6bf9d388b9c75cef38",
+      "nativeGeometry": [
+        250.0,
+        100.0,
+        0.0,
+        250.0,
+        100.0,
+        269.25826771653544
+      ]
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "p13",
+        "name": "alpha-brightness",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "shape13",
+            "name": "alpha-brightness",
+            "type": "rect",
+            "x": 150,
+            "y": 200,
+            "width": 500,
+            "height": 200,
+            "rotation": 0,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#80000080",
+                  "brightness": 50
+                },
+                {
+                  "offset": 1,
+                  "color": "#4488cc",
+                  "brightness": -25
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "alpha-brightness.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "8cd9e434c1c40bf4a0728dd3468c36681397f50c70d4bb5e9b20fa10d6516589"
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "p14",
+        "name": "multistop",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "shape14",
+            "name": "multistop",
+            "type": "rect",
+            "x": 150,
+            "y": 200,
+            "width": 500,
+            "height": 200,
+            "rotation": 0,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#123456"
+                },
+                {
+                  "offset": 0.3,
+                  "color": "#eacb7a"
+                },
+                {
+                  "offset": 0.8,
+                  "color": "#198745"
+                },
+                {
+                  "offset": 1,
+                  "color": "#8c34ba"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "multistop.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "c865131f1a64e19143b0cac536ce05b3faab6d0a7ef72b54175bfdf261eaf0a7",
+      "nativeGeometry": [
+        250.0,
+        100.0,
+        0.0,
+        250.0,
+        100.0,
+        269.25826771653544
+      ]
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "p15",
+        "name": "custom-inset",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "shape15",
+            "name": "custom-inset",
+            "type": "shape",
+            "x": 150,
+            "y": 200,
+            "width": 500,
+            "height": 200,
+            "rotation": 0,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ffffff"
+                },
+                {
+                  "offset": 1,
+                  "color": "#000000"
+                }
+              ]
+            },
+            "paths": [
+              {
+                "fillMode": "norm",
+                "stroke": false,
+                "commands": [
+                  [
+                    "M",
+                    0.2,
+                    0.2
+                  ],
+                  [
+                    "L",
+                    0.8,
+                    0.2
+                  ],
+                  [
+                    "L",
+                    0.5,
+                    0.8
+                  ],
+                  [
+                    "Z"
+                  ]
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "reference": "custom-inset.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "e48a968aba82137be9e696d444e5c260895f7b7d221831dd6b99b39f2d606d31",
+      "nativeGeometry": [
+        250.0,
+        100.0,
+        0.0,
+        250.0,
+        99.99998950131234,
+        161.55496062992125
+      ]
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "extra0",
+        "name": "two-mixed",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "extra-shape0",
+            "name": "two-mixed",
+            "type": "rect",
+            "x": 150,
+            "y": 200,
+            "width": 500,
+            "height": 200,
+            "rotation": 0,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#123456"
+                },
+                {
+                  "offset": 1,
+                  "color": "#eacb7a"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "two-mixed.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "ac03aed1a80f8198d3fe0195a5c73ff644a27e225f8e35d1247bad314b82f660",
+      "nativeGeometry": [
+        250.0,
+        100.0,
+        0.0,
+        250.0,
+        100.0,
+        269.25826771653544
+      ]
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "extra1",
+        "name": "two-inset",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "extra-shape1",
+            "name": "two-inset",
+            "type": "rect",
+            "x": 150,
+            "y": 200,
+            "width": 500,
+            "height": 200,
+            "rotation": 0,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0.1,
+                  "color": "#ffffff"
+                },
+                {
+                  "offset": 0.9,
+                  "color": "#000000"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "two-inset.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "f0f478a70c8668de8af85cf3d4b46937d5191b8758284c8e934922a0eac73a58",
+      "nativeGeometry": [
+        250.0,
+        100.0,
+        0.0,
+        250.0,
+        100.0,
+        269.25826771653544
+      ]
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "extra2",
+        "name": "three-gray",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "extra-shape2",
+            "name": "three-gray",
+            "type": "rect",
+            "x": 150,
+            "y": 200,
+            "width": 500,
+            "height": 200,
+            "rotation": 0,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ffffff"
+                },
+                {
+                  "offset": 0.5,
+                  "color": "#808080"
+                },
+                {
+                  "offset": 1,
+                  "color": "#000000"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "three-gray.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "48aa4f4432f93c9e41fbff91e1459d21b3afb4479ac2dd50cb2e105ce5a259af",
+      "nativeGeometry": [
+        250.0,
+        100.0,
+        0.0,
+        250.0,
+        100.0,
+        269.25826771653544
+      ]
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "extra3",
+        "name": "alpha-white",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "extra-shape3",
+            "name": "alpha-white",
+            "type": "rect",
+            "x": 150,
+            "y": 200,
+            "width": 500,
+            "height": 200,
+            "rotation": 0,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ffffff00"
+                },
+                {
+                  "offset": 1,
+                  "color": "#000000"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "alpha-white.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "354cf2c2f9181de90fe8600480558ded311fa81e0e168f899c42bedfc827a667"
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "extra4",
+        "name": "radial-line",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "extra-shape4",
+            "name": "radial-line",
+            "type": "line",
+            "x": 150,
+            "y": 200,
+            "width": 500,
+            "height": 200,
+            "rotation": 0,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 12,
+            "fill": "none",
+            "strokeGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ffffff"
+                },
+                {
+                  "offset": 1,
+                  "color": "#000000"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "radial-line.png",
+      "meanErrorLimit": 6,
+      "referenceSHA256": "aee1a1c064d366d1a00c4e694ecd77025af2fb4294807336d9ed2273fb865379"
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "extra5",
+        "name": "round-fixed",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "extra-shape5",
+            "name": "round-fixed",
+            "type": "roundRect",
+            "x": 150,
+            "y": 200,
+            "width": 500,
+            "height": 200,
+            "rotation": 45,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0.25,
+                "y": 0.75
+              },
+              "rotateWithShape": false,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ffffff"
+                },
+                {
+                  "offset": 1,
+                  "color": "#000000"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "round-fixed.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "e3fb29c24e9d5b1c4321c21dfa25444ea3041bc8daef7e8287cf2f692fbce9a3",
+      "nativeGeometry": [
+        250.02131233595802,
+        265.25805774278217,
+        0.0,
+        250.042624671916,
+        100.04260367454069,
+        330.4308661417323
+      ]
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "extra6",
+        "name": "ellipse-fixed",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "extra-shape6",
+            "name": "ellipse-fixed",
+            "type": "ellipse",
+            "x": 150,
+            "y": 200,
+            "width": 500,
+            "height": 200,
+            "rotation": 45,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0,
+                "y": 0.5
+              },
+              "rotateWithShape": false,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ffffff"
+                },
+                {
+                  "offset": 1,
+                  "color": "#000000"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "ellipse-fixed.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "e10d3cfa3f508a708dd832341d6c9a7b8bc88af6e234c38c0205a9c20e4c66e4",
+      "nativeGeometry": [
+        115.33501312335957,
+        234.66498687664043,
+        0.0,
+        250.0,
+        99.99998950131234,
+        269.3298687664042
+      ]
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "extra7",
+        "name": "corner-3",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "extra-shape7",
+            "name": "corner-3",
+            "type": "rect",
+            "x": 150,
+            "y": 200,
+            "width": 500,
+            "height": 200,
+            "rotation": 0,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0,
+                "y": 0
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ff0000"
+                },
+                {
+                  "offset": 0.5,
+                  "color": "#00ff00"
+                },
+                {
+                  "offset": 1,
+                  "color": "#0000ff"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "corner-3.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "7a3ac6c9619636d4bc833ec021130aa78cc267403bef29b9933f50a47ea77b63",
+      "nativeGeometry": [
+        0.0,
+        0.0,
+        0.0,
+        250.0,
+        100.0,
+        270.9924409448819
+      ]
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "extra8",
+        "name": "custom-offset",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "extra-shape8",
+            "name": "custom-offset",
+            "type": "shape",
+            "x": 150,
+            "y": 200,
+            "width": 500,
+            "height": 200,
+            "rotation": 0,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0.25,
+                "y": 0.75
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ffffff"
+                },
+                {
+                  "offset": 1,
+                  "color": "#000000"
+                }
+              ]
+            },
+            "paths": [
+              {
+                "fillMode": "norm",
+                "stroke": false,
+                "commands": [
+                  [
+                    "M",
+                    0.1,
+                    0.1
+                  ],
+                  [
+                    "L",
+                    0.7,
+                    0.1
+                  ],
+                  [
+                    "L",
+                    0.4,
+                    0.7
+                  ],
+                  [
+                    "Z"
+                  ]
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "reference": "custom-offset.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "766dd85464ce5b83e704ebee9e38786a3c9f0be4efa6b5848648e1007d0ca330",
+      "nativeGeometry": [
+        125.0,
+        110.0,
+        0.0,
+        200.0,
+        79.99998950131234,
+        161.55496062992125
+      ]
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "extra9",
+        "name": "custom-curve",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "extra-shape9",
+            "name": "custom-curve",
+            "type": "shape",
+            "x": 150,
+            "y": 200,
+            "width": 500,
+            "height": 200,
+            "rotation": 0,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ffffff"
+                },
+                {
+                  "offset": 1,
+                  "color": "#000000"
+                }
+              ]
+            },
+            "paths": [
+              {
+                "fillMode": "norm",
+                "stroke": false,
+                "commands": [
+                  [
+                    "M",
+                    0,
+                    0
+                  ],
+                  [
+                    "C",
+                    0,
+                    2,
+                    1,
+                    2,
+                    1,
+                    0
+                  ],
+                  [
+                    "Z"
+                  ]
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "reference": "custom-curve.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "a5577ef4e3d2a2f75ddbcc11f90c4fa06441e1a210dbc705fd7659383de20f1f",
+      "nativeGeometry": [
+        250.0,
+        150.0,
+        0.0,
+        250.0,
+        150.0,
+        291.5476115485564
+      ]
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "extra10",
+        "name": "corner-tiny",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "extra-shape10",
+            "name": "corner-tiny",
+            "type": "rect",
+            "x": 370,
+            "y": 290,
+            "width": 60,
+            "height": 20,
+            "rotation": 0,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0,
+                "y": 0
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ffffff"
+                },
+                {
+                  "offset": 1,
+                  "color": "#000000"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "corner-tiny.png",
+      "meanErrorLimit": 5,
+      "referenceSHA256": "de46c69589a7fab66174b481d7250b3704dc9cb14621a7665f249cec05de920e",
+      "nativeGeometry": [
+        0.0,
+        0.0,
+        0.0,
+        30.0,
+        9.999998950131234,
+        33.32
+      ]
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "extra11",
+        "name": "corner-large",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "extra-shape11",
+            "name": "corner-large",
+            "type": "rect",
+            "x": 50,
+            "y": 75,
+            "width": 700,
+            "height": 450,
+            "rotation": 0,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0,
+                "y": 0
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ffffff"
+                },
+                {
+                  "offset": 1,
+                  "color": "#000000"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "corner-large.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "3bd7dd43ce5f0b3a9ad77bc3bef67eac96596063f566f892b82e86eb711cb63e",
+      "nativeGeometry": [
+        0.0,
+        0.0,
+        0.0,
+        350.0,
+        225.0,
+        417.9257742782152
+      ]
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "extra12",
+        "name": "linear-white",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "extra-shape12",
+            "name": "linear-white",
+            "type": "rect",
+            "x": 150,
+            "y": 200,
+            "width": 500,
+            "height": 200,
+            "rotation": 0,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "linear",
+              "center": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ffffff"
+                },
+                {
+                  "offset": 1,
+                  "color": "#000000"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "linear-white.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "cf864a3009109a2584aa2a66bd3e4fdcbbab7f32ff2c639e70c19c4b29649781"
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "extra13",
+        "name": "two-reverse",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "extra-shape13",
+            "name": "two-reverse",
+            "type": "rect",
+            "x": 150,
+            "y": 200,
+            "width": 500,
+            "height": 200,
+            "rotation": 0,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#000000"
+                },
+                {
+                  "offset": 1,
+                  "color": "#ffffff"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "two-reverse.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "5e6a793397df15c2f591a26a4e6950460e261cdf70a49681d48caf210291dec6",
+      "nativeGeometry": [
+        250.0,
+        100.0,
+        0.0,
+        250.0,
+        100.0,
+        269.25826771653544
+      ]
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "extra14",
+        "name": "alpha-redblue",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "extra-shape14",
+            "name": "alpha-redblue",
+            "type": "rect",
+            "x": 150,
+            "y": 200,
+            "width": 500,
+            "height": 200,
+            "rotation": 0,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ff000000"
+                },
+                {
+                  "offset": 1,
+                  "color": "#0000ff"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "alpha-redblue.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "659e5f595f67019aaded858fc85bc69d06880c5a7908a7478e7e2740f51c4018"
+    },
+    {
+      "project": {
+        "format": "figure-editor",
+        "version": 1,
+        "id": "extra15",
+        "name": "constant-alpha",
+        "canvas": {
+          "width": 800,
+          "height": 600,
+          "background": "#ffffff"
+        },
+        "assets": [],
+        "items": [
+          {
+            "id": "extra-shape15",
+            "name": "constant-alpha",
+            "type": "rect",
+            "x": 150,
+            "y": 200,
+            "width": 500,
+            "height": 200,
+            "rotation": 0,
+            "opacity": 1,
+            "stroke": "none",
+            "strokeWidth": 0,
+            "fill": "none",
+            "fillGradient": {
+              "angle": 0,
+              "type": "radial",
+              "center": {
+                "x": 0.5,
+                "y": 0.5
+              },
+              "rotateWithShape": true,
+              "stops": [
+                {
+                  "offset": 0,
+                  "color": "#ff000080"
+                },
+                {
+                  "offset": 1,
+                  "color": "#0000ff80"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "reference": "constant-alpha.png",
+      "meanErrorLimit": 1.2,
+      "referenceSHA256": "712b8377fd5234d09745556d44747284ad69e0624126f62ec2d0602ce05dda2d"
+    }
+  ]
+}

@@ -200,10 +200,10 @@ run.onclick = async () => {
     tab('paint');
     check('Fill shows exactly the three requested PowerPoint fill modes and a separate Line section', doc.querySelectorAll('[data-shape-paint="fill"]').length === 3 && Boolean(doc.querySelector('[data-format-section="fill"]')) && Boolean(doc.querySelector('[data-format-section="line"]')) && !/Picture or texture fill|Pattern fill|Slide background fill/.test(get('inspector').textContent));
     find('[data-shape-paint="fill"][value="gradient"]').click();
-    check('Native rectangle can create an editable gradient without converting its geometry', Boolean(item('format-rect').querySelector('rect[fill^="url("]')) && item('format-rect').querySelectorAll('linearGradient stop').length === 2);
+    check('Native rectangle can create an editable gradient without converting its geometry', Boolean(item('format-rect').querySelector('rect[fill^="url("]')) && doc.querySelectorAll('[data-gradient-editor="fillGradient"] [data-gradient-stop]').length === 2);
     set('[data-gradient-editor="fillGradient"] [data-gradient-action="type"]', 'radial');
     set('[data-gradient-editor="fillGradient"] [data-gradient-action="direction"]', '0,0');
-    check('Radial type disables Angle and Direction changes the actual gradient focus', find('[data-gradient-field="angle"]').disabled && Number(item('format-rect').querySelector('radialGradient')?.getAttribute('fx')) < 0 && Number(item('format-rect').querySelector('radialGradient')?.getAttribute('fy')) < 0);
+    check('Radial type disables Angle and Direction changes the actual gradient focus', find('[data-gradient-field="angle"]').disabled && Number(item('format-rect').querySelector('radialGradient')?.getAttribute('fx')) === 0 && Number(item('format-rect').querySelector('radialGradient')?.getAttribute('fy')) === 0);
     find('[data-gradient-action="rotate"]').click();
     tab('size'); set('[data-property="rotation"]', '35'); tab('paint');
     check('Rotate with shape can keep gradient orientation fixed as the rectangle rotates', item('format-rect').querySelector('radialGradient').getAttribute('gradientTransform').includes('rotate(-35'));
@@ -232,14 +232,14 @@ run.onclick = async () => {
     key(find('.gradient-stop.is-selected'), 'ArrowLeft', { shiftKey: true });
     check('Keyboard moves the selected gradient stop without moving its shape', find('[data-gradient-field="offset"]').value === '70' && item('format-vector').getAttribute('transform') === beforeStopKeyboard);
     find('[data-gradient-action="remove"]').click();
-    check('Removing the selected stop preserves the original endpoints', item('format-vector').querySelectorAll('stop').length === 2 && Boolean(item('format-vector').querySelector('stop[stop-color^="#00aa66"]')));
+    check('Removing the selected stop preserves the original endpoints', doc.querySelectorAll('[data-gradient-editor="fillGradient"] [data-gradient-stop]').length === 2 && Boolean(item('format-vector').querySelector('stop[stop-color^="#00aa66"]')));
     get('undo').click();
     check('Undo restores the removed gradient stop with its brightness and transparency', item('format-vector').querySelectorAll('stop').length === 3);
     get('redo').click(); select('format-vector');
     set('[data-gradient-action="type"]', 'radial');
     set('[data-gradient-action="direction"]', '1,1');
     find('[data-gradient-action="rotate"]').click();
-    check('Imported vector retains its native paths with an editable radial gradient', Number(item('format-vector').querySelector('radialGradient')?.getAttribute('fx')) > 180 && Number(item('format-vector').querySelector('radialGradient')?.getAttribute('fy')) > 120 && Boolean(item('format-vector').querySelector('path')));
+    check('Imported vector retains its native paths with an editable radial gradient', Number(item('format-vector').querySelector('radialGradient')?.getAttribute('fx')) === 180 && Number(item('format-vector').querySelector('radialGradient')?.getAttribute('fy')) === 120 && Boolean(item('format-vector').querySelector('path')));
 
     rightClick('format-picture');
     check('Picture context menu selects the picture and offers Format Picture and Crop', selected()?.dataset.item === 'format-picture' && /Format Picture/.test(action('format').textContent) && !action('crop').disabled);

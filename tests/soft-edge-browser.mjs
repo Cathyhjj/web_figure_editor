@@ -26,7 +26,8 @@ try{
   });
   async function open(deck){
     await page.locator('#project-input').setInputFiles({name:'soft-edge.figure.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(deck))});
-    await page.waitForFunction(()=>document.getElementById('project-name').value==='Soft edges verification');
+    // Reopening the same project keeps its name; wait for the asynchronous import to finish.
+    await page.waitForFunction(()=>document.getElementById('project-input').files.length===0&&!document.getElementById('open-project').disabled&&document.getElementById('project-name').value==='Soft edges verification');
     await page.locator('#workspace').focus();await page.keyboard.press('Meta+a');
     await page.locator('#format-tab-effects').click();
   }

@@ -1,3 +1,4 @@
+import { shapePath } from './shape-geometry.js';
 import { gradientSVG } from './shape.js';
 /** Shared vector geometry for the editor, thumbnails and exports. Units are CSS px. */
 export const SHAPE_TYPES = Object.freeze(['rect', 'roundRect', 'ellipse', 'line', 'arrow', 'doubleArrow']);
@@ -27,29 +28,7 @@ export function arrowHeads(item) {
     .map(points => points.map(([x,y]) => [item.connectorFlipX ? item.width-x : x, item.connectorFlipY ? item.height-y : y]));
 }
 
-/** M/L/C/Z commands shared with PDF and native PowerPoint custom arrow paths. */
-export function shapePath(item) {
-  const w = item.width, h = item.height, k = 0.5522847498307936;
-  if (isLineShape(item)) {
-    const commands = item.connector === 'elbow' ? [['M',0,0],['L',w/2,0],['L',w/2,h],['L',w,h]]
-      : item.connector === 'curved' ? [['M',0,0],['C',w/4,0,w/2,h/4,w/2,h/2],['C',w/2,3*h/4,3*w/4,h,w,h]] : [['M', 0, 0], ['L', w, h]];
-    return commands.map(([op,...values]) => [op,...values.map((v,i) => i%2 ? (item.connectorFlipY ? h-v : v) : (item.connectorFlipX ? w-v : v))]);
-  }
-  if (item.type === 'ellipse') {
-    const x = w / 2, y = h / 2;
-    return [['M', w, y], ['C', w, y + k * y, x + k * x, h, x, h],
-      ['C', x - k * x, h, 0, y + k * y, 0, y],
-      ['C', 0, y - k * y, x - k * x, 0, x, 0],
-      ['C', x + k * x, 0, w, y - k * y, w, y], ['Z']];
-  }
-  const r = item.type === 'roundRect' ? Math.min(w, h) * (item.cornerRadius ?? 1 / 6) : 0;
-  if (!r) return [['M', 0, 0], ['L', w, 0], ['L', w, h], ['L', 0, h], ['Z']];
-  const c = r * (1 - k);
-  return [['M', r, 0], ['L', w - r, 0], ['C', w - c, 0, w, c, w, r],
-    ['L', w, h - r], ['C', w, h - c, w - c, h, w - r, h],
-    ['L', r, h], ['C', c, h, 0, h - c, 0, h - r],
-    ['L', 0, r], ['C', 0, c, c, 0, r, 0], ['Z']];
-}
+export { shapePath } from './shape-geometry.js';
 
 export const pathData = commands => commands.map(([op, ...values]) => [op, ...values.map(n)].join(' ')).join(' ');
 

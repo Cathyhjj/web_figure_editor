@@ -212,6 +212,18 @@
 !/tests/test_automation.py
 !/tests/automation-browser.mjs
 
+# Synthetic native PowerPoint radial references and rendering regression checks.
+!/shape-geometry.js
+!/scripts/create-radial-reference.mjs
+!/tests/powerpoint-radial.html
+!/tests/powerpoint-radial-browser.js
+!/tests/fixtures/powerpoint-radial/
+!/tests/fixtures/powerpoint-radial/*.png
+!/tests/fixtures/powerpoint-radial/cases.json
+!/tests/fixtures/powerpoint-radial/README.md
+!/tests/fixtures/powerpoint-radial/reference.pptx
+!/tests/fixtures/powerpoint-radial/extra.pptx
+
 # Precision layout and non-printing guide browser regressions.
 !/tests/precision-layout-browser.mjs
 !/tests/precision-guides-browser.mjs

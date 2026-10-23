@@ -1,4 +1,4 @@
-import { gradientStopColor, shadeColor } from './shape.js';
+import { gradientStopColor, gradientStopsSVG, gradientColorAt } from './shape.js';
 import { shapeColor } from './shapes.js';
 
 const selections = new WeakMap();
@@ -26,7 +26,7 @@ function chooseStop(item, key, stop) { selections.set(item, { ...selections.get(
 const transparency = stop => Math.round((1 - shapeColor(stop.color).alpha) * 100);
 const stopColor = (color, opacity) => shapeColor(color).hex + Math.round(clamp(opacity, 0, 1) * 255).toString(16).padStart(2, '0');
 const disabled = value => value ? 'disabled' : '';
-const previewSVG = (g, key) => `<svg viewBox="0 0 256 32" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="${key}-stop-preview">${g.stops.map(s => `<stop offset="${s.offset}" stop-color="${gradientStopColor(s)}"/>`).join('')}</linearGradient></defs><rect width="256" height="32" fill="url(#${key}-stop-preview)"/></svg>`;
+const previewSVG = (g, key) => `<svg viewBox="0 0 256 32" preserveAspectRatio="none" aria-hidden="true"><defs><linearGradient id="${key}-stop-preview">${gradientStopsSVG(g)}</linearGradient></defs><rect width="256" height="32" fill="url(#${key}-stop-preview)"/></svg>`;
 const presetId = g => presets.find(([, , colors]) => colors.length === g.stops.length && g.stops.every((s, i) => s.offset === i / (colors.length - 1) && !(s.brightness ?? 0) && shapeColor(s.color).hex.toLowerCase() === shapeColor(colors[i]).hex.toLowerCase() && shapeColor(s.color).alpha === shapeColor(colors[i]).alpha))?.[0] ?? '';
 
 function handles(item, key) {
@@ -60,12 +60,7 @@ export function gradientEditorMarkup(item, key) {
 
 /** Interpolate the rendered stop colors, including alpha, for a newly inserted stop. */
 export function interpolatedStop(g, offset) {
-  const left = [...g.stops].reverse().find(s => s.offset <= offset) ?? g.stops[0];
-  const right = g.stops.find(s => s.offset >= offset) ?? g.stops.at(-1);
-  const t = left.offset === right.offset ? 0 : (offset - left.offset) / (right.offset - left.offset);
-  const rgba = stop => { const c = shadeColor(gradientStopColor(stop)); return [1, 3, 5].map(i => parseInt(c.slice(i, i + 2), 16)).concat(shapeColor(c).alpha * 255); };
-  const a = rgba(left), b = rgba(right);
-  return { offset, color: '#' + a.map((v, i) => Math.round(v + (b[i] - v) * t).toString(16).padStart(2, '0')).join('') };
+  return { offset, color: gradientColorAt(g, offset) };
 }
 
 export function bindGradientEditors(item, box, bindings) {
