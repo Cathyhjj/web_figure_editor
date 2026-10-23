@@ -357,3 +357,11 @@ dialog{border:1px solid var(--drx-border);border-radius:15px;padding:0;width:min
 .file-actions{flex-wrap:wrap;min-width:0}
 @media(min-width:951px){.app-header{min-height:76px;padding-block:10px}}
 @media(min-width:1051px){.drx-ui{grid-template-rows:auto 54px minmax(0,1fr) 30px}}
+/* Physical measurements, exact spacing, and editor-only layout guides. */
+.precision-menu{position:fixed;inset:auto;margin:0;width:300px;max-width:calc(100vw - 24px);max-height:calc(100vh - 24px);overflow:auto;padding:16px;border:1px solid var(--drx-border);border-radius:9px;background:var(--drx-surface,#fff);color:var(--drx-text);box-shadow:0 8px 30px #30203930}
+.precision-menu h2{font-size:14px;margin:0 0 14px}.precision-menu .hint{font-size:11px;line-height:1.6;margin:10px 0}.precision-actions{display:flex;gap:8px;flex-wrap:wrap}.precision-actions .button{flex:1;font-size:11px;padding:7px}
+.precision-menu .field{display:flex;flex-direction:column;gap:6px;margin:12px 0;font-size:12px}.precision-menu input[type=number],.precision-menu select{width:100%;min-width:0;border:1px solid var(--drx-control-border);border-radius:5px;padding:7px;background:#fff}
+.guide-option{display:flex;align-items:center;gap:8px;font-size:12px;margin:12px 0}.guide-option input{accent-color:var(--drx-accent)}
+#measurement-unit{height:31px;border:1px solid var(--drx-control-border);border-radius:5px;background:#fff;font-size:12px;padding:3px}
+.layout-guide{stroke:#21a0b3;stroke-dasharray:5 4;stroke-width:1;vector-effect:non-scaling-stroke;pointer-events:none}.layout-guide.is-active{stroke:#b63e8d;stroke-width:1.5}.layout-guide-hit{stroke:transparent;stroke-width:10;vector-effect:non-scaling-stroke;pointer-events:stroke;touch-action:none}
+#stage:focus{outline:none}

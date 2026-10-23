@@ -1,3 +1,4 @@
+import { fromPixels, toPixels, showMeasurement, readMeasurement } from './units.js';
 // Font sizes use the same CSS-pixel bounds as the portable project model.
 export const MIN_FONT_SIZE = 1;
 export const MAX_FONT_SIZE = 2000;
@@ -27,7 +28,15 @@ export function steppedFontSize(size, direction) {
     : SIZE_STEPS.findLast(step => step < size) ?? MIN_FONT_SIZE;
 }
 
-export function initFontTools({ getItems, change }) {
+export function steppedDisplayFontSize(size, direction, unit = 'px') {
+  const display = fromPixels(size, unit);
+  const next = direction > 0
+    ? SIZE_STEPS.find(value => value > display) ?? fromPixels(MAX_FONT_SIZE, unit)
+    : SIZE_STEPS.findLast(value => value < display) ?? fromPixels(MIN_FONT_SIZE, unit);
+  return Math.max(MIN_FONT_SIZE, Math.min(MAX_FONT_SIZE, toPixels(next, unit)));
+}
+
+export function initFontTools({ getItems, change, getUnit = () => 'px' }) {
   const family = document.getElementById('font-family');
   const size = document.getElementById('font-size');
   const increase = document.getElementById('font-increase');
@@ -41,8 +50,12 @@ export function initFontTools({ getItems, change }) {
     for (const [input, property] of [[family, 'fontFamily'], [size, 'fontSize']]) {
       input.disabled = !items.length;
       input.value = display.length && display.every(item => item[property] === display[0][property]) ? display[0][property] : '';
+      if (input === size && input.value !== '') showMeasurement(size, display[0].fontSize, getUnit());
       input.placeholder = display.length ? 'Mixed' : input === family ? 'Select text' : '—';
     }
+    size.min = fromPixels(MIN_FONT_SIZE, getUnit()); size.max = fromPixels(MAX_FONT_SIZE, getUnit());
+    size.title = `Font size in ${getUnit()}`; size.setAttribute('aria-label', size.title);
+    size.parentElement.querySelector('span').textContent = getUnit();
     increase.disabled = !items.some(item => item.fontSize < MAX_FONT_SIZE);
     decrease.disabled = !items.some(item => item.fontSize > MIN_FONT_SIZE);
     const families = [...new Set([...text.map(item => item.fontFamily), ...FONT_FAMILIES])];
@@ -59,13 +72,18 @@ export function initFontTools({ getItems, change }) {
   }
 
   for (const [input, property] of [[family, 'fontFamily'], [size, 'fontSize']]) {
-    input.onchange = () => { const value = fontValue(property, input.value); apply(property, () => value); };
+    input.onchange = () => {
+      let value = input.value;
+      if (property === 'fontSize') { try { value = readMeasurement(input, getUnit()); } catch { render(); return; } }
+      value = fontValue(property, value); apply(property, () => value);
+    };
     input.onkeydown = event => {
       if (event.key === 'Enter') { event.preventDefault(); input.onchange(); input.blur(); }
       if (event.key === 'Escape') { event.preventDefault(); render(); input.blur(); }
     };
   }
-  increase.onclick = () => apply('fontSize', item => steppedFontSize(item.fontSize, 1));
-  decrease.onclick = () => apply('fontSize', item => steppedFontSize(item.fontSize, -1));
+  const step = (item, direction) => steppedDisplayFontSize(item.fontSize, direction, getUnit());
+  increase.onclick = () => apply('fontSize', item => step(item, 1));
+  decrease.onclick = () => apply('fontSize', item => step(item, -1));
   return { render };
 }

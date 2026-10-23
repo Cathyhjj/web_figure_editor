@@ -55,3 +55,26 @@ test('single media dimension preserves aspect ratio; state excludes embedded ass
   assert.equal(JSON.stringify(state).includes('base64'), false);
   assert.equal('dataUrl' in state.assets[0], false);
 });
+
+test('shared layout supports right/bottom alignment and vertical fixed spacing without expanding the AI vocabulary', () => {
+  const deck = fixture();
+  const aligned = prepareBatch(deck, [op(deck, { op: 'align', itemIds: ['a', 'b', 'c'], alignment: 'right' }),
+    op(deck, { op: 'align', itemIds: ['b', 'c'], alignment: 'bottom' })]).project.slides[0].items;
+  assert.deepEqual(aligned.map(item => item.x), [200, 200, 200]);
+  assert.deepEqual(aligned.map(item => item.y), [0, 60, 60]);
+  const spaced = prepareBatch(deck, [op(deck, { op: 'distribute', itemIds: ['c', 'a', 'b'], axis: 'y', gap: 3 * 96 / 25.4 })]).project.slides[0].items;
+  assert.equal(spaced[0].y, 0);
+  assert.ok(Math.abs(spaced[1].y - spaced[0].y - spaced[0].height - 3 * 96 / 25.4) < 1e-9);
+  assert.ok(Math.abs(spaced[2].y - spaced[1].y - spaced[1].height - 3 * 96 / 25.4) < 1e-9);
+  assert.throws(() => prepareBatch(deck, [op(deck, { op: 'match_size', itemIds: ['a', 'b'] })]), /Supported operations/);
+});
+
+test('single AI alignment still aligns to the canvas and invalid spacing leaves the source unchanged', () => {
+  const deck = fixture(), before = structuredClone(deck);
+  const aligned = prepareBatch(deck, [op(deck, { op: 'align', itemIds: ['a'], alignment: 'right' }),
+    op(deck, { op: 'align', itemIds: ['a'], alignment: 'bottom' })]).project.slides[0].items[0];
+  assert.equal(aligned.x + aligned.width, deck.slides[0].canvas.width);
+  assert.equal(aligned.y + aligned.height, deck.slides[0].canvas.height);
+  assert.throws(() => prepareBatch(deck, [op(deck, { op: 'distribute', itemIds: ['a', 'b', 'c'], axis: 'x', gap: 100000 })]), /between/);
+  assert.deepEqual(deck, before);
+});

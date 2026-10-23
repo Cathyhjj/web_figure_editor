@@ -5,6 +5,7 @@ import { exportPPTX } from './pptx.js';
 import { generateHTMLReport } from './report.js';
 import { isMediaItem } from './video.js';
 import { resizeMediaDimension } from './resize.js';
+import { applyLayout } from './layout.js';
 
 // Small, explicit editing vocabulary. Neither document replacement nor arbitrary
 // JavaScript/asset writes are accepted through the live control interface.
@@ -75,28 +76,10 @@ export function prepareBatch(project, operations) {
     const items = targets(slide, op.itemIds);
     if (op.op === 'set') for (const item of items) properties(item, op.properties);
     else {
-      // Bounds of rotated shapes are visually ambiguous; exact placement remains
-      // possible with set. Alignment uses unrotated boxes, just like the toolbar.
+      // Keep the live-control contract stable; the toolbar additionally supports
+      // arranging rotated frames through the shared layout implementation.
       if (items.some(item => item.rotation % 360 !== 0)) fail('Align/distribute requires unrotated objects. Use set for rotated objects.');
-      if (op.op === 'align') {
-        if (!['left', 'center', 'right', 'top', 'middle', 'bottom'].includes(op.alignment)) fail('Invalid alignment.');
-        const horizontal = ['left', 'center', 'right'].includes(op.alignment);
-        const axis = horizontal ? 'x' : 'y', size = horizontal ? 'width' : 'height';
-        const start = items.length === 1 ? 0 : Math.min(...items.map(item => item[axis]));
-        const end = items.length === 1 ? slide.canvas[size] : Math.max(...items.map(item => item[axis] + item[size]));
-        for (const item of items) item[axis] = ['left', 'top'].includes(op.alignment) ? start
-          : ['right', 'bottom'].includes(op.alignment) ? end - item[size] : (start + end - item[size]) / 2;
-      } else {
-        if (!['x', 'y'].includes(op.axis)) fail('axis must be x or y.');
-        if (items.length < 2 || (op.gap === undefined && items.length < 3)) fail('Distribute needs 3 objects, or 2 with an explicit gap.');
-        if (op.gap !== undefined && (typeof op.gap !== 'number' || !Number.isFinite(op.gap) || op.gap < 0 || op.gap > 100000)) fail('gap must be between 0 and 100000 px.');
-        const size = op.axis === 'x' ? 'width' : 'height';
-        items.sort((a, b) => a[op.axis] - b[op.axis]);
-        const start = items[0][op.axis], end = items.at(-1)[op.axis] + items.at(-1)[size];
-        const gap = op.gap ?? (end - start - items.reduce((sum, item) => sum + item[size], 0)) / (items.length - 1);
-        let position = start;
-        for (const item of items) { item[op.axis] = position; position += item[size] + gap; }
-      }
+      applyLayout(slide, op.itemIds, op);
     }
     for (const item of items) changed.add(item.id);
   }

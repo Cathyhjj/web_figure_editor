@@ -12,6 +12,10 @@
 !/automation_bridge.py
 !/figure_mcp.py
 !/font-tools.js
+!/units.js
+!/layout.js
+!/guides.js
+!/guide-editor.js
 !/assets.js
 !/asset-tree.js
 !/locate.js
@@ -207,3 +211,7 @@
 # Live editor MCP integration checks.
 !/tests/test_automation.py
 !/tests/automation-browser.mjs
+
+# Precision layout and non-printing guide browser regressions.
+!/tests/precision-layout-browser.mjs
+!/tests/precision-guides-browser.mjs

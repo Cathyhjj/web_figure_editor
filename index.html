@@ -96,9 +96,15 @@
       <span class="toolbar-label">Align</span>
       <button id="align-left" class="icon-button" title="Align left" aria-label="Align left"><svg><use href="#i-left"/></svg></button>
       <button id="align-center" class="icon-button" title="Center horizontally" aria-label="Center horizontally"><svg><use href="#i-center"/></svg></button>
+      <button id="align-right" class="icon-button" title="Align right" aria-label="Align right"><svg style="transform:scaleX(-1)"><use href="#i-left"/></svg></button>
       <button id="align-top" class="icon-button" title="Align top" aria-label="Align top"><svg><use href="#i-top"/></svg></button>
       <button id="align-middle" class="icon-button" title="Center vertically" aria-label="Center vertically"><svg><use href="#i-middle"/></svg></button>
+      <button id="align-bottom" class="icon-button" title="Align bottom" aria-label="Align bottom"><svg style="transform:scaleY(-1)"><use href="#i-top"/></svg></button>
       <button id="distribute-x" class="icon-button" title="Distribute horizontally (at least 3 objects)" aria-label="Distribute horizontally"><svg><use href="#i-distribute"/></svg></button>
+      <button id="distribute-y" class="icon-button" title="Distribute vertically (at least 3 objects)" aria-label="Distribute vertically"><svg style="transform:rotate(90deg)"><use href="#i-distribute"/></svg></button>
+      <button id="precision-toggle" class="button quiet" popovertarget="precision-menu">Size &amp; spacing</button>
+      <button id="guides-toggle" class="button quiet" popovertarget="guides-menu">Guides</button>
+      <select id="measurement-unit" aria-label="Measurement unit" title="Units for position, size, spacing and font size"><option value="px">px</option><option value="mm">mm</option><option value="pt">pt</option></select>
     </div>
     <div class="toolbar-group arrange-tools">
       <button id="bring-forward" class="icon-button" title="Bring forward" aria-label="Bring forward"><svg><use href="#i-up"/></svg></button>
@@ -108,6 +114,25 @@
     </div>
     <div class="toolbar-group layout-tools"><button id="reset-layout" class="button quiet" title="Show all panels and restore default positions and sizes">Reset layout</button></div>
     <span class="toolbar-tip">Drag headers to move · Drag panel edges to resize</span>
+  </div>
+
+  <div id="precision-menu" class="precision-menu" popover aria-label="Size and spacing">
+    <h2>Size &amp; spacing</h2>
+    <div class="precision-actions"><button id="equal-width" class="button">Equal width</button><button id="equal-height" class="button">Equal height</button></div>
+    <p class="hint">Match the first selected object. Images and media keep their proportions.</p>
+    <label class="field"><span>Gap / <span data-layout-unit>px</span></span><input id="layout-gap" type="number" min="0" step="any" value="16"></label>
+    <div class="precision-actions"><button id="space-x" class="button">Horizontal gap</button><button id="space-y" class="button">Vertical gap</button></div>
+    <p class="hint">Select at least two unlocked, visible objects. Spacing starts at the leftmost or topmost object.</p>
+  </div>
+  <div id="guides-menu" class="precision-menu" popover aria-label="Layout guides">
+    <h2>Layout guides</h2>
+    <div class="precision-actions"><button id="guide-add-x" class="button">Add vertical</button><button id="guide-add-y" class="button">Add horizontal</button></div>
+    <label class="guide-option"><input id="guides-visible" type="checkbox" checked> Show guides</label>
+    <label class="guide-option"><input id="guides-snap" type="checkbox" checked> Snap objects to guides</label>
+    <label class="field"><span>Guide on this slide</span><select id="guide-select" aria-label="Selected guide"></select></label>
+    <label class="field"><span>Position / <span data-layout-unit>px</span></span><input id="guide-position" type="number" step="any"></label>
+    <button id="guide-delete" class="button">Delete guide</button>
+    <p class="hint">Drag a guide on the canvas or enter a position from the left/top edge. Hold Alt while moving objects to skip snapping. Guides are saved per slide and excluded from exports.</p>
   </div>
 
   <main class="editor-layout">
@@ -162,7 +187,7 @@
       <section class="canvas-properties" data-window="canvas" data-window-title="Canvas settings">
         <div class="section-heading" data-window-handle><h2>Canvas settings</h2><span class="unit-badge">px</span></div>
         <label class="field"><span>Size preset</span><select id="canvas-preset"><option value="custom">Custom size</option><option value="single">Single · ≈ 85 × 64 mm</option><option value="double">Double · ≈ 180 × 120 mm</option><option value="square">Square · ≈ 120 × 120 mm</option></select></label>
-        <div class="field-row"><label class="field"><span>Width</span><input id="canvas-width" type="number" min="100" max="10000" value="960" step="1"></label><label class="field"><span>Height</span><input id="canvas-height" type="number" min="100" max="10000" value="640" step="1"></label></div>
+        <div class="field-row"><label class="field"><span>Width</span><input id="canvas-width" type="number" min="64" max="8000" value="960" step="any"></label><label class="field"><span>Height</span><input id="canvas-height" type="number" min="64" max="8000" value="640" step="any"></label></div>
         <div class="background-field"><label for="canvas-background">Background color</label><input id="canvas-background" type="color" value="#ffffff" title="Canvas background color"></div>
         <button id="apply-canvas" class="button apply-button">Apply canvas settings</button>
         <p class="hint canvas-note">Layout uses 96 px per inch. Choose the output resolution when exporting.</p>

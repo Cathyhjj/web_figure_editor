@@ -1,5 +1,6 @@
 import { isMediaItem } from './video.js';
 import { cloneShape } from './shape.js';
+import { cloneGuides, validateGuides } from './guides.js';
 /** Multi-slide projects. The asset registry is shared; each slide owns its canvas and items. */
 import { createProject, uid, validateProject, validateProjectBatch, sourceManifest } from './core.js';
 
@@ -41,12 +42,14 @@ export function validateDeck(input) {
   const name = safeName(p.name, 'project.name', 'Untitled figure');
   if (!Array.isArray(p.slides) || !p.slides.length || p.slides.length > MAX_SLIDES) fail(`projects must contain 1–${MAX_SLIDES} slides.`);
   const slideIDs = new Set();
+  const guides = [];
   let itemCount = 0;
   const views = p.slides.map((raw, index) => {
     const slide = object(raw, `slide ${index + 1}`);
     const slideId = safeId(slide.id, 'slide.id');
     if (slideIDs.has(slideId)) fail(`duplicate slide ID ${slideId}.`);
     slideIDs.add(slideId);
+    guides.push(slide.guides === undefined ? undefined : validateGuides(slide.guides));
     if (!Array.isArray(slide.items)) fail('slide.items must be an array.');
     itemCount += slide.items.length;
     if (itemCount > MAX_ITEMS) fail(`projects may contain at most ${MAX_ITEMS.toLocaleString('en-US')} objects across all slides.`);
@@ -63,13 +66,13 @@ export function validateDeck(input) {
   }
   return {
     format: 'figure-editor', version: 2, id: deckId, name, assets: validated[0].assets,
-    slides: validated.map(slide => ({ id: slide.id, name: slide.name, canvas: slide.canvas, items: slide.items })), activeSlideId,
+    slides: validated.map((slide, index) => ({ id: slide.id, name: slide.name, canvas: slide.canvas, items: slide.items, ...(guides[index] !== undefined ? { guides: guides[index] } : {}) })), activeSlideId,
   };
 }
 
 /** Cheap independent undo snapshot of an already validated deck; binary data are immutable strings. */
 export function cloneDeck(deck) {
-  return { ...deck, assets: deck.assets.map(asset => ({ ...asset })), slides: deck.slides.map(slide => ({ ...slide, canvas: { ...slide.canvas }, items: slide.items.map(item => ({ ...item, ...cloneShape(item), ...(item.crop ? { crop: { ...item.crop } } : {}), ...(item.shadow ? { shadow: { ...item.shadow } } : {}) })) })) };
+  return { ...deck, assets: deck.assets.map(asset => ({ ...asset })), slides: deck.slides.map(slide => ({ ...slide, canvas: { ...slide.canvas }, ...(slide.guides !== undefined ? { guides: cloneGuides(slide.guides) } : {}), items: slide.items.map(item => ({ ...item, ...cloneShape(item), ...(item.crop ? { crop: { ...item.crop } } : {}), ...(item.shadow ? { shadow: { ...item.shadow } } : {}) })) })) };
 }
 
 export function currentSlide(deck) {
@@ -106,7 +109,7 @@ export function addSlide(deck) {
 export function duplicateSlide(deck) {
   const active = currentSlide(deck);
   ensureRoom(deck, active.items.length);
-  const slide = { id: uid(), name: `${active.name.slice(0, 295)} copy`, canvas: { ...active.canvas }, items: active.items.map(item => ({ ...item, ...cloneShape(item), ...(item.crop ? { crop: { ...item.crop } } : {}), ...(item.shadow ? { shadow: { ...item.shadow } } : {}), id: uid() })) };
+  const slide = { id: uid(), name: `${active.name.slice(0, 295)} copy`, canvas: { ...active.canvas }, ...(active.guides !== undefined ? { guides: cloneGuides(active.guides, { newIds: true }) } : {}), items: active.items.map(item => ({ ...item, ...cloneShape(item), ...(item.crop ? { crop: { ...item.crop } } : {}), ...(item.shadow ? { shadow: { ...item.shadow } } : {}), id: uid() })) };
   deck.slides.splice(deck.slides.indexOf(active) + 1, 0, slide);
   deck.activeSlideId = slide.id;
   return slide;

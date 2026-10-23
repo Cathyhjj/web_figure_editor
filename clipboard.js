@@ -2,6 +2,7 @@ import { isMediaItem } from './video.js';
 /** Portable editable selections and whole slides for the browser clipboard. */
 import { uid, validateProject } from './core.js';
 import { cloneDeck, currentSlide, validateDeck } from './deck.js';
+import { cloneGuides, validateGuides } from './guides.js';
 
 export const CLIPBOARD_MIME = 'application/x-figure-editor-selection';
 export const SLIDE_CLIPBOARD_MIME = 'application/x-figure-editor-slide';
@@ -10,6 +11,14 @@ const PREFIX = 'Figure Editor selection v1\n';
 const SLIDE_PREFIX = 'Figure Editor slide v1\n';
 const SLIDES_PREFIX = 'Figure Editor slides v1\n';
 const MAX_TEXT_LENGTH = 240 * 1024 * 1024;
+
+// Legacy single-slide clipboard payloads are v1 projects with optional guides.
+// Selection validation deliberately ignores these non-object layout records.
+function validateSlidePayload(input) {
+  const source = validateProject(input);
+  if (input.guides !== undefined) source.guides = validateGuides(input.guides);
+  return source;
+}
 
 /** Capture independent records in layer order, retaining only used original assets. */
 export function createSelection(view, selected) {
@@ -40,14 +49,15 @@ export function createSlideClipboard(deck, slideId = deck.activeSlideId) {
   const slide = deck.slides.find(value => value.id === slideId);
   if (!slide) throw new Error('The slide to copy does not exist.');
   const assetIds = new Set(slide.items.filter(item => isMediaItem(item)).map(item => item.assetId));
-  return validateProject({
+  return validateSlidePayload({
     format: 'figure-editor', version: 1, id: slide.id, name: slide.name,
     canvas: slide.canvas, items: slide.items, assets: deck.assets.filter(asset => assetIds.has(asset.id)),
+    ...(slide.guides !== undefined ? { guides: slide.guides } : {}),
   });
 }
 
 export function encodeSlide(slidePayload) {
-  const text = SLIDE_PREFIX + JSON.stringify(validateProject(slidePayload));
+  const text = SLIDE_PREFIX + JSON.stringify(validateSlidePayload(slidePayload));
   if (text.length > MAX_TEXT_LENGTH) throw new Error('The copied slide exceeds the 240 MB clipboard limit. Reduce its embedded assets.');
   return text;
 }
@@ -59,7 +69,7 @@ export function decodeSlide(text) {
   let parsed;
   try { parsed = JSON.parse(text.slice(SLIDE_PREFIX.length)); }
   catch { throw new Error('The copied Figure Editor slide is damaged. Copy it again.'); }
-  return validateProject(parsed);
+  return validateSlidePayload(parsed);
 }
 
 /** Capture selected slides in deck order, sharing only the originals they actually use. */
@@ -87,7 +97,7 @@ export function encodeSlides(slidesPayload) {
 function singleSlideDeck(source) {
   return {
     format: 'figure-editor', version: 2, id: source.id, name: source.name, assets: source.assets,
-    slides: [{ id: source.id, name: source.name, canvas: source.canvas, items: source.items }], activeSlideId: source.id,
+    slides: [{ id: source.id, name: source.name, canvas: source.canvas, items: source.items, ...(source.guides !== undefined ? { guides: cloneGuides(source.guides) } : {}) }], activeSlideId: source.id,
   };
 }
 
@@ -169,7 +179,7 @@ export function pasteSelection(deck, selection, offset = 20) {
 
 /** Insert an independent slide after the active one, committing only a fully valid deck. */
 export function pasteSlide(deck, slidePayload) {
-  return pasteSlides(deck, singleSlideDeck(validateProject(slidePayload)))[0];
+  return pasteSlides(deck, singleSlideDeck(validateSlidePayload(slidePayload)))[0];
 }
 
 /** Insert an ordered block atomically; repeated pastes append after its last slide. */
@@ -187,6 +197,7 @@ export function pasteSlides(deck, slidesPayload) {
   const assetMap = importAssets(candidate, { assets: source.assets, items: sourceItems });
   const slides = source.slides.map(slide => ({
     id: freshId(slideIds), name: slide.name, canvas: slide.canvas,
+    ...(slide.guides !== undefined ? { guides: cloneGuides(slide.guides, { newIds: true }) } : {}),
     items: slide.items.map(item => ({
       ...item, id: freshId(itemIds),
       ...(isMediaItem(item) ? { assetId: assetMap.get(item.assetId) } : {}),
