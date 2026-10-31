@@ -145,6 +145,24 @@ class MCPTests(unittest.TestCase):
             with self.assertRaises(ValueError), patch.object(client, 'request', side_effect=AssertionError('must not connect')):
                 client.call(name, args)
 
+    def test_place_asset_accepts_project_asset_id_and_optional_placement(self):
+        schema = next(tool['inputSchema'] for tool in TOOLS if tool['name'] == 'figure_batch_edit')
+        place = {'op': 'place_asset', 'slideId': 'slide', 'assetId': 'asset'}
+        batch = {'sessionId': 's', 'expectedRevision': '1:0'}
+        validate({**batch, 'operations': [
+            place,
+            {**place, 'properties': {'width': 120}},
+            {**place, 'properties': {'name': 'Panel A', 'x': 10, 'y': 20, 'width': 240,
+                                     'height': 100, 'rotation': 10, 'opacity': .8}},
+        ]}, schema)
+        for invalid in ({'op': 'place_asset', 'slideId': 'slide'},
+                        {**place, 'assetId': ''}, {**place, 'path': '/tmp/figure.svg'},
+                        {**place, 'dataUrl': 'data:image/svg+xml;base64,PHN2Zy8+'},
+                        {**place, 'properties': {'text': 'label'}},
+                        {**place, 'properties': {'width': '120px'}}):
+            with self.subTest(operation=invalid), self.assertRaises(ValueError):
+                validate({**batch, 'operations': [invalid]}, schema)
+
     def test_exports_write_new_files_only_and_report_hash(self):
         with tempfile.TemporaryDirectory() as directory:
             client = EditorClient(1, directory)

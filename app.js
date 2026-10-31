@@ -7,7 +7,7 @@ import { appendArrowHandles, arrowMidpoints } from './vector-arrow-editor.js';
 import { isMediaItem, posterSource } from './video.js';
 import { createChartFrame } from './html-chart.js';
 import { uid, projectToSVG, exportPNG, downloadBlob } from './core.js';
-import { createDeck, validateDeck, cloneDeck, currentSlide, slideProject, deckSourceManifest, addSlide, moveSlides } from './deck.js';
+import { createDeck, validateDeck, cloneDeck, currentSlide, createAssetItem, slideProject, deckSourceManifest, addSlide, moveSlides } from './deck.js';
 import { pickProjectFile, readProjectFile, readProjectFileState, writeProjectFile, checkProjectFileRevision } from './project-files.js';
 import { createRecentProjects, openRecentProject } from './recent-projects.js';
 import { initRecentProjectMenu } from './recent-project-menu.js';
@@ -525,7 +525,16 @@ function selectAsset(a){
  if(switched)$('asset-list').querySelector(`[data-asset="${CSS.escape(a.id)}"] .asset-preview`)?.focus({preventScroll:true});
  status(`Selected ${item.name} on ${page.name}.${item.hidden?' This object is hidden; use Layers to show it.':''}${item.locked?' This object is locked.':''}`);
 }
-function placeAsset(a){change(()=>{const maxW=slide().canvas.width*.43,maxH=slide().canvas.height*.65,scale=Math.min(1,maxW/a.width,maxH/a.height);const offset=slide().items.length%6*18;const i={...base(a.mime==='text/html'?'html':a.mime==='video/mp4'?'video':'image',60+offset,60+offset,a.width*scale,a.height*scale),assetId:a.id,name:a.name};slide().items.push(i);selected=new Set([i.id]);});status(`Added ${a.name} to the canvas.`);if(a.mime==='text/html')openHTMLChart(chosen()[0]);}
+function placeAsset(asset) {
+ const page=slide();
+ if(!change(()=>{
+  const item=createAssetItem(page,asset);
+  page.items.push(item);
+  selected=new Set([item.id]);
+ }))return;
+ status(`Added ${asset.name} to the canvas.`);
+ if(asset.mime==='text/html')openHTMLChart(chosen()[0]);
+}
 const importTarget=()=>({project,slideId:project.activeSlideId});
 function insertPowerPointSlide(deck,warnings){
   const applied=change(()=>{const pages=pasteSlides(project,deck);selectedSlideIds=new Set(pages.map(page=>page.id));slideSelectionAnchor=pages[0].id;selected.clear();lastPaste=null;});
@@ -549,8 +558,7 @@ async function importResult(result,position,target,{libraryOnly=false}={}){
  if(result.assets.length){
   const applied=change(()=>{for(const [j,a] of result.assets.entries()){
    project.assets.push(a);if(libraryOnly)continue;
-   const scale=Math.min(1,page.canvas.width*.43/a.width,page.canvas.height*.65/a.height);
-   const i={...base(a.mime==='text/html'?'html':a.mime==='video/mp4'?'video':'image',(position?.x??60)+j*22,(position?.y??60)+j*22,a.width*scale,a.height*scale),assetId:a.id,name:a.name};
+   const i=createAssetItem(page,a,{x:(position?.x??60)+j*22,y:(position?.y??60)+j*22});
    page.items.push(i);if(page.id===project.activeSlideId)selected=new Set([i.id]);
   }});
   if(!applied)return;

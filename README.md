@@ -22,17 +22,19 @@ codex mcp add figure_editor -- python3 /absolute/path/web_figure_editor/figure_m
 
 其他 MCP 客户端配置 `command: "python3"`、`args: ["/absolute/path/web_figure_editor/figure_mcp.py"]` 即可。使用非默认服务端口时追加 `--port 8767`；导出目录默认是仓库内的 `output/mcp/`，可通过 `--output-dir /absolute/output/directory` 指定。注册后按客户端要求重新加载 MCP 工具。
 
-| 工具 | 第一版支持的操作 |
+| 工具 | 支持的操作 |
 | --- | --- |
 | `figure_sessions` | 列出已连接页面及项目摘要；每次明确选择 `sessionId`，不会自动猜测标签页。 |
 | `figure_get_state` | 当前项目、所有页摘要、指定页的对象 ID／文字／几何／锁定状态、选择、revision、Undo 数量和保存状态；素材只返回元数据。 |
-| `figure_batch_edit` | 批量 `set` 位置、尺寸、旋转、透明度和文字格式；`align` 对齐；`distribute` 等间距排版；`add_text` 创建标注。整批成功后对应一次 Undo，任何错误都不部分提交。 |
+| `figure_batch_edit` | 用 `place_asset` 放置素材、`add_text` 加标注、`set` 设置几何和文字格式、`align` 对齐、`distribute` 调整间距。整批成功后可一次撤销。 |
 | `figure_preview` | 当前或指定 slide 的 PNG 预览，最长边可设 256–1600 px；返回图片与渲染时的 revision。 |
 | `figure_export` | PNG／SVG／PDF 导出一页，PPTX／HTML 导出全部页；写入导出目录中的新文件，返回绝对路径、大小和 SHA-256，不覆盖已有文件。 |
 | `figure_history` | 一次 Undo 或 Redo，使用编辑器原有历史。 |
 | `figure_save` | `destination=file` 保存到已授权项目文件；`destination=draft` 只保存浏览器恢复草稿。 |
 
-典型流程：`figure_sessions` → `figure_get_state` → 将返回的 `revision` 作为 `expectedRevision` 传给 `figure_batch_edit`／`figure_history`／`figure_save` → `figure_preview` 检查效果。每个排版 operation 都要明确 `slideId` 和对象 `itemIds`（`add_text` 不需要已有对象 ID）。位置和尺寸是 **CSS px，96 px = 1 inch**；图片只设置宽或高时保持比例，同时设置宽高时允许拉伸。对齐和分布只接受未旋转的对象；旋转对象可用 `set` 精确定位。指定 `gap` 时从最前面的对象起等距排列，不指定时保留整体两端位置。
+用 `figure_sessions` 选择页面，再用 `figure_get_state` 读取素材、对象和 `revision`。调用 `figure_batch_edit`、`figure_history` 或 `figure_save` 时，把该版本传入 `expectedRevision`。每个操作都要指定 `slideId`。修改已有对象用 `itemIds`，从素材库放置图用 `assets[].id` 作为 `assetId`。位置和尺寸以 **CSS px（96 px = 1 inch）** 计。放置时省略 `properties` 会使用页面 Place 按钮的默认尺寸和位置。只指定宽或高会保持比例，同时指定两者允许拉伸。对齐和分布适用于未旋转的对象，旋转对象可用 `set` 定位。指定 `gap` 时从最前面的对象起等距排列，省略时保留整体两端位置。
+
+例如，先把四张 SVG 导入 Assets，然后告诉 AI：“按指定顺序排成 2×2，保持比例，在左上角分别标上 a–d，给我看预览。” 同一批次中，每张图用一个 `place_asset` 指定 `assetId` 和 `properties: {x, y, width}`，标签用 `add_text` 放在对应图层上方。用 `figure_preview` 查看结果，一次 Undo 可撤销全部八个对象。
 
 锁定对象会拒绝整批修改；过期 revision、正在拖拽／输入文字／绘图／执行文件操作或打开的模态窗口也会拒绝冲突操作。先完成当前编辑，再读取最新状态。刷新、暂停和重新打开页面会产生新的 session；若命令超时且已投递，其结果可能未知，应先查询状态，避免重复执行。
 

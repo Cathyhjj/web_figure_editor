@@ -1,10 +1,9 @@
-import { cloneDeck, validateDeck, slideProject } from './deck.js';
+import { cloneDeck, createAssetItem, validateDeck, slideProject } from './deck.js';
 import { uid, exportPNG, projectToSVG } from './core.js';
 import { exportPDF } from './pdf.js';
 import { exportPPTX } from './pptx.js';
 import { generateHTMLReport } from './report.js';
 import { isMediaItem } from './video.js';
-import { resizeMediaDimension } from './resize.js';
 import { applyLayout } from './layout.js';
 
 // Small, explicit editing vocabulary. Neither document replacement nor arbitrary
@@ -20,9 +19,9 @@ function keys(value, allowed, label) {
   object(value, label);
   for (const key of Object.keys(value)) if (!allowed.includes(key)) fail(`Unsupported ${label} field: ${key}.`);
 }
-function properties(item, patch) {
+function properties(item, patch, { allowEmpty = false } = {}) {
   keys(patch, fields, 'properties');
-  if (!Object.keys(patch).length) fail('Supply at least one property.');
+  if (!allowEmpty && !Object.keys(patch).length) fail('Supply at least one property.');
   for (const [key, value] of Object.entries(patch)) {
     if (textFields.includes(key) && item.type !== 'text') fail(`${key} is only supported on text objects.`);
     if ([...geometry, 'fontSize'].includes(key)) {
@@ -32,10 +31,10 @@ function properties(item, patch) {
       if (![400, 700, '400', '700'].includes(value)) fail('fontWeight must be 400 or 700.');
     } else if (typeof value !== 'string') fail(`${key} must be a string.`);
   }
-  // Match the inspector: a single media dimension preserves its aspect ratio.
+  // Keep the requested size exact. Deck validation rejects an out-of-range proportional dimension.
   if (isMediaItem(item) && (('width' in patch) !== ('height' in patch))) {
-    const dimension = 'width' in patch ? 'width' : 'height';
-    Object.assign(item, resizeMediaDimension(item, dimension, patch[dimension]));
+    if ('width' in patch) item.height = patch.width * (item.height / item.width);
+    else item.width = patch.height * (item.width / item.height);
   }
   Object.assign(item, patch);
 }
@@ -54,22 +53,31 @@ export function prepareBatch(project, operations) {
   if (!Array.isArray(operations) || !operations.length || operations.length > 200) fail('Supply 1–200 operations.');
   const next = cloneDeck(project), changed = new Set(), created = [];
   for (const op of operations) {
-    keys(op, ['op', 'slideId', 'itemIds', 'properties', 'alignment', 'axis', 'gap'], 'operation');
+    object(op, 'operation');
     const allowed = {
       set: ['op', 'slideId', 'itemIds', 'properties'],
       align: ['op', 'slideId', 'itemIds', 'alignment'],
       distribute: ['op', 'slideId', 'itemIds', 'axis', 'gap'],
       add_text: ['op', 'slideId', 'properties'],
+      place_asset: ['op', 'slideId', 'assetId', 'properties'],
     }[op.op];
-    if (!allowed) fail('Supported operations: set, align, distribute, add_text.');
+    if (!Array.isArray(allowed)) fail('Supported operations: set, align, distribute, add_text, place_asset.');
     keys(op, allowed, op.op);
     const slide = next.slides.find(slide => slide.id === op.slideId);
     if (!slide) fail(`Unknown slide: ${op.slideId}.`);
-    if (op.op === 'add_text') {
-      const item = { id: uid(), type: 'text', name: 'Text', x: 80, y: 80, width: 160, height: 40,
-        rotation: 0, opacity: 1, locked: false, hidden: false, text: '', fontSize: 24,
-        fontFamily: 'Arial', fontWeight: 400, fontStyle: 'normal', color: '#222222', align: 'left' };
-      properties(item, op.properties);
+    if (op.op === 'place_asset' || op.op === 'add_text') {
+      let item;
+      if (op.op === 'place_asset') {
+        const asset = next.assets.find(asset => asset.id === op.assetId);
+        if (!asset) fail(`Unknown asset: ${op.assetId}. Use an assetId from get_state.assets.`);
+        item = createAssetItem(slide, asset);
+        if (op.properties !== undefined) properties(item, op.properties, { allowEmpty: true });
+      } else {
+        item = { id: uid(), type: 'text', name: 'Text', x: 80, y: 80, width: 160, height: 40,
+          rotation: 0, opacity: 1, locked: false, hidden: false, text: '', fontSize: 24,
+          fontFamily: 'Arial', fontWeight: 400, fontStyle: 'normal', color: '#222222', align: 'left' };
+        properties(item, op.properties);
+      }
       slide.items.push(item); created.push(item.id); changed.add(item.id);
       continue;
     }

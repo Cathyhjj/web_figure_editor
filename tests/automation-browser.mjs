@@ -66,6 +66,62 @@ async function newPage() {
   await page.waitForFunction(() => !document.querySelector('#open-project').disabled);
   return { page, context };
 }
+async function checkPanelPlacement(page, sessionId) {
+  const folder = await mkdtemp(join(output, 'svg-sources-'));
+  const panels = [
+    { label: 'a', file: 'third.svg', color: '#a02828', x: 60, y: 50 },
+    { label: 'b', file: 'first.svg', color: '#187038', x: 320, y: 50 },
+    { label: 'c', file: 'fourth.svg', color: '#3040c0', x: 60, y: 210 },
+    { label: 'd', file: 'second.svg', color: '#cc8822', x: 320, y: 210 },
+  ];
+  for (const { file, color } of panels) {
+    await writeFile(join(folder, file), `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="150"><rect width="300" height="150" fill="${color}"/></svg>`);
+  }
+  await page.locator('#folder-input').setInputFiles(folder);
+  await page.waitForFunction(() => document.querySelectorAll('#asset-list .asset-card').length === 4
+    && document.querySelector('#assets-panel').getAttribute('aria-busy') === 'false');
+  const library = (await call('get_state', { sessionId })).structuredContent;
+  const slideId = library.activeSlideId;
+  assert.equal(library.slide.items.length, 0);
+  const assets = new Map(library.assets.map(asset => [asset.name, asset.id]));
+  const operations = panels.flatMap(({ file, label, x, y }) => [
+    { op: 'place_asset', slideId, assetId: assets.get(file), properties: { x, y, width: 200 } },
+    { op: 'add_text', slideId, properties: { x: x + 8, y: y + 4, width: 30, height: 30, text: label } },
+  ]);
+  const edited = (await call('batch_edit', { sessionId, expectedRevision: library.revision, operations })).structuredContent;
+  assert.equal(edited.history.undo, library.history.undo + 1);
+  assert.deepEqual(edited.assets, library.assets);
+  assert.deepEqual(edited.createdItemIds, edited.slide.items.map(item => item.id));
+  assert.equal(edited.slide.items.length, 8);
+  for (const [index, { file, label, x, y }] of panels.entries()) {
+    const [image, text] = edited.slide.items.slice(index * 2, index * 2 + 2);
+    assert.deepEqual([image.type, image.assetId, image.x, image.y, image.width, image.height],
+      ['image', assets.get(file), x, y, 200, 100]);
+    assert.deepEqual([text.type, text.text, text.x, text.y], ['text', label, x + 8, y + 4]);
+  }
+  const preview = await call('preview', { sessionId, slideId, maxSize: 1600 });
+  assert.equal(preview.structuredContent.renderedRevision, edited.revision);
+  assert.equal(preview.structuredContent.width, library.slide.canvas.width);
+  const data = preview.content.find(block => block.type === 'image').data;
+  await writeFile(join(output, 'panels-preview.png'), Buffer.from(data, 'base64'));
+  const colors = await page.evaluate(async ({ data, panels }) => {
+    const image = new Image();
+    image.src = 'data:image/png;base64,' + data;
+    await image.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = image.width; canvas.height = image.height;
+    const context = canvas.getContext('2d');
+    context.drawImage(image, 0, 0);
+    return panels.map(({ x, y }) => Array.from(context.getImageData(x + 100, y + 50, 1, 1).data.slice(0, 3)));
+  }, { data, panels });
+  assert.deepEqual(colors, panels.map(({ color }) => Array.from(Buffer.from(color.slice(1), 'hex'))));
+  const undone = (await call('history', { sessionId, expectedRevision: edited.revision, action: 'undo' })).structuredContent;
+  assert.deepEqual(undone.slide.items, library.slide.items);
+  assert.deepEqual(undone.assets, library.assets);
+  const redone = (await call('history', { sessionId, expectedRevision: undone.revision, action: 'redo' })).structuredContent;
+  assert.deepEqual(redone.slide.items, edited.slide.items);
+  pass('place four imported SVG assets and a–d labels as one undoable batch with a color-verified 2×2 preview');
+}
 try {
   assert.equal((await rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'integration-test', version: '1' } })).result.serverInfo.name, 'figure-editor');
   mcp.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
@@ -149,6 +205,7 @@ try {
   assert.equal((await call('get_state', { sessionId: secondId })).structuredContent.slide.items.length, 0);
   await call('batch_edit', setX(await state(), 456));
   assert.equal((await call('get_state', { sessionId: secondId })).structuredContent.slide.items.length, 0);
+  await checkPanelPlacement(second.page, secondId);
   await second.page.locator('#ai-control-toggle').click();
   await sessions(1);
   await call('get_state', { sessionId: secondId }, /disconnected|expired/);

@@ -19,8 +19,10 @@ STRING = {"type": "string", "minLength": 1, "maxLength": 300}
 NUMBER = {"type": "number"}
 SESSION = {"sessionId": STRING}
 REVISION = {**SESSION, "expectedRevision": STRING}
-PROPERTIES = obj({**{key: NUMBER for key in ("x", "y", "width", "height", "rotation", "opacity", "fontSize")},
-                  **{key: {"type": "string", "maxLength": 20000} for key in ("name", "text", "fontFamily", "fontStyle", "color", "align")},
+PLACEMENT_FIELDS = {**{key: NUMBER for key in ("x", "y", "width", "height", "rotation", "opacity")},
+                    "name": {"type": "string", "maxLength": 20000}}
+PROPERTIES = obj({**PLACEMENT_FIELDS, "fontSize": NUMBER,
+                  **{key: {"type": "string", "maxLength": 20000} for key in ("text", "fontFamily", "fontStyle", "color", "align")},
                   "fontWeight": {"enum": [400, 700, "400", "700"]}})
 TARGETS = {"slideId": STRING, "itemIds": {"type": "array", "items": STRING, "minItems": 1, "maxItems": 2000}}
 OPERATIONS = {"oneOf": [
@@ -28,6 +30,7 @@ OPERATIONS = {"oneOf": [
     obj({"op": {"const": "align"}, **TARGETS, "alignment": {"enum": ["left", "center", "right", "top", "middle", "bottom"]}}, ["op", "slideId", "itemIds", "alignment"]),
     obj({"op": {"const": "distribute"}, **TARGETS, "axis": {"enum": ["x", "y"]}, "gap": {"type": "number", "minimum": 0, "maximum": 100000}}, ["op", "slideId", "itemIds", "axis"]),
     obj({"op": {"const": "add_text"}, "slideId": STRING, "properties": PROPERTIES}, ["op", "slideId", "properties"]),
+    obj({"op": {"const": "place_asset"}, "slideId": STRING, "assetId": STRING, "properties": obj(PLACEMENT_FIELDS)}, ["op", "slideId", "assetId"]),
 ]}
 
 
@@ -39,7 +42,11 @@ def tool(name, description, schema, readonly=False):
 TOOLS = [
     tool("sessions", "List connected editor pages. Choose the exact session; never guess when multiple pages are open. Summary may lag; get_state reads live state.", obj({}), True),
     tool("get_state", "Read live project/slide/object IDs, geometry, text, selection, revision, busy and save status. Assets are metadata only. Defaults to active slide; pass slideId to inspect another slide.", obj({**SESSION, "slideId": STRING}, SESSION), True),
-    tool("batch_edit", "Apply 1–200 operations atomically as ONE Undo step. CSS px units. Requires revision from get_state. Locked objects reject the entire batch. A single image width/height preserves ratio; setting both allows stretching. Align/distribute use unrotated object boxes. Explicit gap anchors the first object; omitted gap preserves outer span. No partial commits.", obj({**REVISION, "operations": {"type": "array", "items": OPERATIONS, "minItems": 1, "maxItems": 200}}, [*REVISION, "operations"])),
+    tool("batch_edit", "Apply 1–200 operations atomically as one Undo step. Use the revision from get_state. "
+         "place_asset adds a slide object linked to a project asset. Use an assetId from get_state.assets. "
+         "Omit properties for the editor's Place defaults. Set only width or height to preserve media proportions, or both to stretch. Geometry uses CSS px. "
+         "Locked objects reject the entire batch. Align/distribute use unrotated object boxes. An explicit gap anchors the first object. Omit gap to preserve the outer span.",
+         obj({**REVISION, "operations": {"type": "array", "items": OPERATIONS, "minItems": 1, "maxItems": 200}}, [*REVISION, "operations"])),
     tool("preview", "Render a PNG preview of the selected slide from a fixed document snapshot. Returns an image plus renderedRevision. HTML charts use their saved snapshots, videos use posters.", obj({**SESSION, "slideId": STRING, "maxSize": {"type": "integer", "minimum": 256, "maximum": 1600}}, SESSION), True),
     tool("export", "Export through existing renderers to a NEW file in the configured local output directory (never overwrites). PNG/SVG/PDF export one slide; PPTX/HTML export all slides and reject slideId. PDF text needs the macOS outlining service. Bridge limit: 24 MiB. Returns absolute path, bytes and SHA-256. Does not save the editable project.", obj({**SESSION, "format": {"enum": ["png", "svg", "pdf", "pptx", "html"]}, "slideId": STRING, "dpi": {"enum": [150, 300, 600]}}, [*SESSION, "format"])),
     tool("history", "Undo or redo ONE existing editor history entry. Requires current revision. Read state after an uncertain/timeout result before considering another action.", obj({**REVISION, "action": {"enum": ["undo", "redo"]}}, [*REVISION, "action"])),

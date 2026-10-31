@@ -81,6 +81,18 @@ export function currentSlide(deck) {
   return slide;
 }
 
+/** Create a canvas object referencing an existing project asset, using the Place button's fit and stagger. */
+export function createAssetItem(slide, asset, position) {
+  const scale = Math.min(1, slide.canvas.width * 0.43 / asset.width, slide.canvas.height * 0.65 / asset.height);
+  const offset = 60 + (slide.items.length % 6) * 18;
+  const type = asset.mime === 'text/html' ? 'html' : asset.mime === 'video/mp4' ? 'video' : 'image';
+  return {
+    id: uid(), type, assetId: asset.id, name: asset.name,
+    x: position?.x ?? offset, y: position?.y ?? offset, width: asset.width * scale, height: asset.height * scale,
+    rotation: 0, opacity: 1, locked: false, hidden: false,
+  };
+}
+
 /** Lightweight live v1 view for the existing editor/exporter. Reassignments must be synced to the deck. */
 export function slideProject(deck, slideId = deck.activeSlideId) {
   const slide = deck.slides.find(value => value.id === slideId);
