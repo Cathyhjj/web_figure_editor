@@ -13,7 +13,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from automation_bridge import AutomationBridge, AutomationError
+from automation_bridge import AutomationBridge, AutomationError, METHODS
 from figure_mcp import EditorClient, MCPServer, TOOLS, validate
 import server
 
@@ -132,7 +132,12 @@ class MCPTests(unittest.TestCase):
         replies = [json.loads(line) for line in result.stdout.splitlines()]
         self.assertEqual(len(replies), 4)
         self.assertEqual(replies[0]['result']['protocolVersion'], '2025-11-25')
-        self.assertEqual(len(replies[1]['result']['tools']), 7)
+        tools = {tool['name']: tool for tool in replies[1]['result']['tools']}
+        self.assertEqual(len(tools), 10)
+        self.assertEqual(set(tools), {'figure_sessions'} | {'figure_' + method for method in METHODS})
+        self.assertTrue(tools['figure_preview_batch']['annotations']['readOnlyHint'])
+        self.assertTrue(tools['figure_check_export']['annotations']['readOnlyHint'])
+        self.assertFalse(tools['figure_duplicate_slide']['annotations']['readOnlyHint'])
         self.assertEqual(replies[2]['error']['code'], -32601)
         self.assertEqual(replies[3]['error']['code'], -32700)
         self.assertEqual(result.stderr, '')
@@ -174,6 +179,69 @@ class MCPTests(unittest.TestCase):
             self.assertEqual(Path(first['path']).read_bytes(), b'<svg/>')
             self.assertEqual(len(first['sha256']), 64)
             self.assertNotIn('data', first)
+
+    def test_swap_asset_requires_single_item_and_replacement_asset_ids(self):
+        schema = next(tool['inputSchema'] for tool in TOOLS if tool['name'] == 'figure_batch_edit')
+        swap = {'op': 'swap_asset', 'slideId': 'slide', 'itemId': 'panel', 'assetId': 'replacement'}
+        batch = {'sessionId': 's', 'expectedRevision': '1:0'}
+        validate({**batch, 'operations': [swap]}, schema)
+        invalid = [
+            {key: value for key, value in swap.items() if key != field}
+            for field in ('slideId', 'itemId', 'assetId')
+        ]
+        invalid.extend([{**swap, 'assetId': ''}, {**swap, 'itemId': ['panel']},
+                        {**swap, 'itemIds': ['panel']}, {**swap, 'properties': {'width': 100}},
+                        {**swap, 'path': '/tmp/replacement.svg'}, {**swap, 'dataUrl': 'data:image/png;base64,...'}])
+        for operation in invalid:
+            with self.subTest(operation=operation), self.assertRaises(ValueError):
+                validate({**batch, 'operations': [operation]}, schema)
+
+    def test_export_check_and_duplicate_slide_arguments(self):
+        schemas = {tool['name']: tool['inputSchema'] for tool in TOOLS}
+        check = schemas['figure_check_export']
+        args = {'sessionId': 's', 'format': 'pptx'}
+        validate(args, check)
+        validate({**args, 'slideId': 'slide', 'finalWidthMm': 85.5, 'minRasterDpi': .5}, check)
+        for key in ('finalWidthMm', 'minRasterDpi'):
+            for value in (0, -1, True, '300', float('inf'), float('nan'), 10**400):
+                with self.subTest(field=key, value=value), self.assertRaises(ValueError):
+                    validate({**args, key: value}, check)
+        with self.assertRaises(ValueError):
+            validate({**args, 'format': 'jpeg'}, check)
+        duplicate = schemas['figure_duplicate_slide']
+        args = {'sessionId': 's', 'expectedRevision': '1:0', 'slideId': 'slide'}
+        validate(args, duplicate)
+        validate({**args, 'name': '新' * 300}, duplicate)
+        for invalid in [{k: v for k, v in args.items() if k != 'expectedRevision'},
+                        {k: v for k, v in args.items() if k != 'slideId'},
+                        {**args, 'name': ' \t'}, {**args, 'name': 'x' * 301}]:
+            with self.subTest(operation=invalid), self.assertRaises(ValueError):
+                validate(invalid, duplicate)
+
+    def test_preview_batch_returns_proposed_png_and_never_writes_an_export(self):
+        operation = {'op': 'place_asset', 'slideId': 'slide', 'assetId': 'plot'}
+        args = {'sessionId': 's', 'expectedRevision': '1:0', 'operations': [operation], 'maxSize': 256}
+        schema = next(tool['inputSchema'] for tool in TOOLS if tool['name'] == 'figure_preview_batch')
+        validate({**args, 'operations': [operation] * 200, 'maxSize': 1600}, schema)
+        for invalid in [{**args, 'operations': []}, {**args, 'operations': [operation] * 201},
+                        {**args, 'operations': [{'op': 'replace_document'}]}, {**args, 'maxSize': 255},
+                        {**args, 'maxSize': 1601}, {k: v for k, v in args.items() if k != 'expectedRevision'}]:
+            with self.subTest(fields=invalid.keys()), self.assertRaises(ValueError):
+                validate(invalid, schema)
+        encoded = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nWQAAAAASUVORK5CYII='
+        preview = {'mimeType': 'image/png', 'proposed': True, 'data': encoded}
+        local = {'app': 'figure-editor-local', 'automation': True, 'token': 'test'}
+        with tempfile.TemporaryDirectory() as directory:
+            client = EditorClient(1, directory)
+            with patch.object(client, 'request', side_effect=[local, preview]) as request:
+                result = client.call('figure_preview_batch', args)
+            request.assert_called_with('/api/automation/command', {'sessionId': 's', 'method': 'preview_batch',
+                                       'params': {k: v for k, v in args.items() if k != 'sessionId'}}, 'test')
+            self.assertEqual(result['structuredContent'], {'mimeType': 'image/png', 'proposed': True})
+            self.assertEqual(result['content'][1], {'type': 'image', 'mimeType': 'image/png', 'data': encoded})
+            self.assertEqual(list(Path(directory).iterdir()), [])
+            with patch.object(client, 'request', side_effect=[local, {**preview, 'proposed': False}]), self.assertRaisesRegex(ValueError, 'proposal'):
+                client.call('figure_preview_batch', args)
 
 
 if __name__ == '__main__':

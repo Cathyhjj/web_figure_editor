@@ -17,6 +17,15 @@ export function validateCrop(value) {
 }
 
 export function imageCrop(item) { return item.crop || FULL_CROP; }
+
+/** Local bounds of the visible source pixels within the object's outer frame. */
+export function imageContentRect(item, asset) {
+  if (item.imageFit !== 'contain') return { x: 0, y: 0, width: item.width, height: item.height };
+  const crop = imageCrop(item), sourceWidth = asset.width * crop.width, sourceHeight = asset.height * crop.height;
+  const scale = Math.min(item.width / sourceWidth, item.height / sourceHeight);
+  const width = sourceWidth * scale, height = sourceHeight * scale;
+  return { x: (item.width - width) / 2, y: (item.height - height) / 2, width, height };
+}
 export function isCropped(item) {
   const c = imageCrop(item);
   return c.x !== 0 || c.y !== 0 || c.width !== 1 || c.height !== 1;
@@ -25,6 +34,11 @@ export function isCropped(item) {
 /** Preserve the source image's scale and world position, including after rotation. */
 export function cropImage(item, rectangle = FULL_CROP) {
   const crop = validateCrop(rectangle), previous = imageCrop(item);
+  if (item.imageFit === 'contain') {
+    const result = { ...item, crop };
+    if (!isCropped(result)) delete result.crop;
+    return result;
+  }
   const fullWidth = item.width / previous.width, fullHeight = item.height / previous.height;
   const width = fullWidth * crop.width, height = fullHeight * crop.height;
   const dx = (crop.x - previous.x) * fullWidth + (width - item.width) / 2;

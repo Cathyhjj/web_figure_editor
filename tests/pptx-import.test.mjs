@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { layoutTextBlock } from '../pptx-import.js';
+import { exportPPTX } from '../pptx.js';
 import { createDeck, validateDeck, cloneDeck } from '../deck.js';
 import { pasteSlides } from '../clipboard.js';
 
@@ -8,6 +10,32 @@ const run = (text, extra={}) => ({text,fontFamily:'Arial',fontSize:20,fontWeight
 const block = (runs=[run('Editable text')], extra={}) => ({name:'Text',x:100,y:200,width:300,height:100,rotation:0,opacity:1,insets:{left:10,right:10,top:5,bottom:5},anchor:'t',wrap:true,scaleY:1,
   paragraphs:[{runs,align:'left',marginLeft:0,marginRight:0,indent:0,spacing:{}}],...extra});
 const measure = (text,run) => ({width:[...text].length*run.fontSize*.5,ascent:run.fontSize*.8,descent:run.fontSize*.2});
+
+test('PPTX export and reimport retain contained image frames, native crop and editable effects', async () => {
+  const deck = createDeck();
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nWQAAAAASUVORK5CYII=';
+  deck.assets.push({ id:'source', name:'result.png', mime:'image/png', width:1, height:1, dataUrl:'data:image/png;base64,'+png });
+  const base = { type:'image', assetId:'source', x:90, y:70, width:190, height:100, rotation:30,
+    imageFit:'contain', opacity:.5, stroke:'#00ff0080', strokeWidth:3, strokeDash:'dash', softEdge:2 };
+  const crop = { x:.25, y:0, width:.5, height:1 };
+  deck.slides[0].items = [{ ...base, id:'one', name:'Full image' }, { ...base, id:'two', name:'Cropped image', crop }];
+  const exported = Buffer.from(await (await exportPPTX(deck)).arrayBuffer());
+  const script = "import sys,json,base64; from pptx_import import import_pptx; print(json.dumps(import_pptx({'data':base64.b64encode(sys.stdin.buffer.read()).decode(),'slide':1})))";
+  const result = JSON.parse(execFileSync('python3', ['-B', '-c', script], { input:exported, encoding:'utf8' }));
+  const images = result.items.filter(item => item.type === 'image');
+  assert.ok(!result.warnings.some(message => message.includes('crop')));
+  assert.equal(images.length, 2);
+  assert.deepEqual(images.map(item => item.name), ['Full image', 'Cropped image']);
+  for (const item of images) {
+    for (const field of ['x','y','width','height','rotation']) assert.ok(Math.abs(item[field]-base[field]) < 1e-7, field);
+    assert.deepEqual([item.imageFit, item.opacity, item.stroke, item.strokeWidth, item.strokeDash, item.softEdge],
+      ['contain', .5, '#00ff0080', 3, 'dash', 2]);
+  }
+  assert.equal(images[0].crop, undefined);
+  assert.deepEqual(images[1].crop, crop);
+  assert.equal(images[1].assetId, images[0].assetId);
+  assert.equal(result.media[0].dataUrl, deck.assets[0].dataUrl);
+});
 
 test('PPT text remains editable with explicit wrapping and the original text content',()=>{
   const result=layoutTextBlock(block([run('First line\nSecond line')]),measure);

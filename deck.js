@@ -118,11 +118,20 @@ export function addSlide(deck) {
 }
 
 /** Duplicate editable content, giving the slide and its objects new identities; assets remain shared. */
-export function duplicateSlide(deck) {
-  const active = currentSlide(deck);
-  ensureRoom(deck, active.items.length);
-  const slide = { id: uid(), name: `${active.name.slice(0, 295)} copy`, canvas: { ...active.canvas }, ...(active.guides !== undefined ? { guides: cloneGuides(active.guides, { newIds: true }) } : {}), items: active.items.map(item => ({ ...item, ...cloneShape(item), ...(item.crop ? { crop: { ...item.crop } } : {}), ...(item.shadow ? { shadow: { ...item.shadow } } : {}), id: uid() })) };
-  deck.slides.splice(deck.slides.indexOf(active) + 1, 0, slide);
+export function duplicateSlide(deck, sourceId = deck.activeSlideId, name) {
+  const sourceIndex = deck.slides.findIndex(page => page.id === sourceId);
+  if (sourceIndex < 0) fail(`Unknown slide: ${sourceId}.`);
+  const source = deck.slides[sourceIndex];
+  ensureRoom(deck, source.items.length);
+  const copyName = safeName(name, 'slide.name', `${source.name.slice(0, 295)} copy`);
+  if (!copyName.trim()) fail('slide.name cannot be blank.');
+  const slide = {
+    id: uid(), name: copyName, canvas: { ...source.canvas },
+    ...(source.guides !== undefined ? { guides: cloneGuides(source.guides, { newIds: true }) } : {}),
+    items: source.items.map(item => ({ ...item, ...cloneShape(item), ...(item.crop ? { crop: { ...item.crop } } : {}),
+      ...(item.shadow ? { shadow: { ...item.shadow } } : {}), id: uid() })),
+  };
+  deck.slides.splice(sourceIndex + 1, 0, slide);
   deck.activeSlideId = slide.id;
   return slide;
 }
@@ -155,13 +164,19 @@ export function moveSlides(deck, selectedSlideIds, insertionIndex) {
   return true;
 }
 
-export function deckSourceManifest(input) {
-  const deck = validateDeck(input);
-  const base = sourceManifest(slideProject(deck));
+/** Index the objects using each asset in slide and layer order. The live deck is already validated. */
+export function deckAssetUsage(deck) {
   const usage = new Map(deck.assets.map(asset => [asset.id, []]));
   for (const slide of deck.slides) for (const item of slide.items) if (isMediaItem(item)) {
     usage.get(item.assetId).push({ slideId: slide.id, slideName: slide.name, itemId: item.id, hidden: item.hidden });
   }
+  return usage;
+}
+
+export function deckSourceManifest(input) {
+  const deck = validateDeck(input);
+  const base = sourceManifest(slideProject(deck));
+  const usage = deckAssetUsage(deck);
   return {
     format: 'figure-editor-source-manifest', version: 2, project: { id: deck.id, name: deck.name }, activeSlideId: deck.activeSlideId,
     slides: deck.slides.map(slide => ({

@@ -2,7 +2,7 @@ import { validateSVGDocument, svgDataURL, svgDimensions } from './svg-vector.js'
 /** Portable project model and exports. Geometry is measured in CSS pixels (96/in). */
 import { isMP4, isMediaItem, posterSource } from './video.js';
 import { HTML_MIME, looksLikeHTML, requireHTMLSnapshots, validateSnapshot } from './html-chart.js';
-import { validateCrop, imageCrop } from './crop.js';
+import { validateCrop, imageContentRect, imageCrop } from './crop.js';
 import { validateShadow, imageShadowSVG, objectShadowSVG, imageBorderSVG, objectBounds } from './shadow.js';
 import { softEdgeSVG, MAX_SOFT_EDGE } from './soft-edge.js';
 import { validateShape, validateGradient, shapeSVG as vectorShapeSVG } from './shape.js';
@@ -183,6 +183,10 @@ function validateProjectInternal(input, assetCache) {
       if ((type === 'video') !== (asset.mime === 'video/mp4')) fail(`item ${itemID} has an incompatible asset type.`);
       if ((type === 'html') !== (asset.mime === HTML_MIME)) fail(`item ${itemID} has an incompatible asset type.`);
       if (['video', 'html'].includes(type) && (item.crop !== undefined || item.shadow !== undefined || item.softEdge !== undefined)) fail('video and HTML crop, shadow and soft edges are not supported.');
+      if (item.imageFit !== undefined) {
+        if (type !== 'image' || item.imageFit !== 'contain') fail('imageFit must be contain on an image object.');
+        canonical.imageFit = 'contain';
+      }
       if (item.crop !== undefined) canonical.crop = validateCrop(item.crop);
       if (item.shadow !== undefined) canonical.shadow = validateShadow(item.shadow);
       if(type==='image' && ['stroke','strokeWidth','strokeGradient'].some(key=>item[key]!==undefined)){
@@ -289,9 +293,12 @@ function svgFromCanonical(project, { gradientRotation } = {}) {
     lines.push(`<g id="${xml(item.id)}" transform="translate(${n(item.x)} ${n(item.y)}) rotate(${n(item.rotation)} ${n(w / 2)} ${n(h / 2)})" opacity="${n(item.opacity)}">`);
     const contentStart = lines.length;
     if (isMediaItem(item)) {
-      const c = imageCrop(item);
-      if (item.crop) lines.push(`<svg width="${n(w)}" height="${n(h)}" viewBox="${c.x} ${c.y} ${c.width} ${c.height}" preserveAspectRatio="none" overflow="hidden">`);
-      lines.push(`<image x="0" y="0" width="${item.crop ? '1' : n(w)}" height="${item.crop ? '1' : n(h)}" preserveAspectRatio="none" href="${xml(posterSource(assets.get(item.assetId)))}"/>`);
+      const asset = assets.get(item.assetId), c = imageCrop(item), rect = imageContentRect(item, asset);
+      if (item.crop) {
+        const origin = item.imageFit === 'contain' ? ` x="${n(rect.x)}" y="${n(rect.y)}"` : '';
+        lines.push(`<svg${origin} width="${n(rect.width)}" height="${n(rect.height)}" viewBox="${c.x} ${c.y} ${c.width} ${c.height}" preserveAspectRatio="none" overflow="hidden">`);
+      }
+      lines.push(`<image x="${item.crop ? 0 : n(rect.x)}" y="${item.crop ? 0 : n(rect.y)}" width="${item.crop ? '1' : n(rect.width)}" height="${item.crop ? '1' : n(rect.height)}" preserveAspectRatio="none" href="${xml(posterSource(asset))}"/>`);
       if (item.crop) lines.push('</svg>');
       if(item.type==='image')lines.push(imageBorderSVG(paintItem,`picture-border-${project.id}-${item.id}`));
     } else if (item.type === 'text') {

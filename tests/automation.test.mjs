@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { addSlide, createDeck, validateDeck } from '../deck.js';
 import { prepareBatch, describeProject } from '../automation.js';
 import { svgDataURL } from '../svg-vector.js';
+import { imageContentRect, cropImage } from '../crop.js';
 
 function fixture() {
   const deck = createDeck();
@@ -51,6 +52,54 @@ test('place_asset uses Place defaults and retains the source for each media type
   assert.deepEqual(result.project.assets, before.assets);
   assert.deepEqual(result.project.slides[1], before.slides[1]);
   assert.deepEqual(source, before);
+});
+
+function swapFixture() {
+  const deck = vectorDeck();
+  deck.assets.push({ id: 'revision', name: 'plot.png', mime: 'image/png', width: 200, height: 400, dataUrl: png });
+  const panel = { id: 'panel', name: 'EXAFS fit', type: 'image', assetId: 'vector', x: 70, y: 40, width: 240, height: 120,
+    rotation: 20, opacity: 0.8, crop: { x: 0.25, y: 0, width: 0.5, height: 1 }, strokeWidth: 2, stroke: '#ff0000' };
+  deck.slides[0].items.push(panel, { id: 'label', type: 'text', x: 74, y: 44, width: 20, height: 20, text: 'b' });
+  addSlide(deck).items.push({ ...panel, id: 'other' });
+  return validateDeck(deck);
+}
+
+test('swap_asset retains frame, layer and styling, and fits the full replacement on only the named slide', () => {
+  const deck = swapFixture(), before = structuredClone(deck), slide = deck.slides[0];
+  const { project, changedItemIds, createdItemIds } = prepareBatch(deck, [
+    { op: 'swap_asset', slideId: slide.id, itemId: 'panel', assetId: 'revision' },
+  ]);
+  const { crop, ...frame } = slide.items[0];
+  const expected = { ...frame, assetId: 'revision', imageFit: 'contain' };
+  assert.deepEqual(project.slides[0].items, [expected, slide.items[1]]);
+  assert.deepEqual(project.slides[1], before.slides[1]);
+  assert.deepEqual(project.assets, before.assets);
+  assert.deepEqual(deck, before);
+  assert.deepEqual(changedItemIds, ['panel']);
+  assert.deepEqual(createdItemIds, []);
+  assert.deepEqual(imageContentRect(expected, project.assets[1]), { x: 90, y: 0, width: 60, height: 120 });
+  assert.deepEqual(validateDeck(JSON.parse(JSON.stringify(project))).slides[0].items[0], expected);
+  const again = prepareBatch(project, [{ op: 'swap_asset', slideId: slide.id, itemId: 'panel', assetId: 'vector' }]);
+  assert.deepEqual(imageContentRect(again.project.slides[0].items[0], deck.assets[0]), { x: 0, y: 0, width: 240, height: 120 });
+  const recrop = cropImage(expected, { x: 0, y: 0.25, width: 1, height: 0.5 });
+  assert.deepEqual(imageContentRect(recrop, project.assets[1]), { x: 60, y: 0, width: 120, height: 120 });
+  assert.deepEqual(cropImage(recrop), expected);
+});
+
+test('invalid swaps leave the original project and earlier operations untouched', () => {
+  const deck = swapFixture(), slideId = deck.slides[0].id;
+  deck.slides[1].items[0].locked = true;
+  const before = structuredClone(deck);
+  const swap = { op: 'swap_asset', slideId, itemId: 'panel', assetId: 'revision' };
+  for (const [overrides, message] of [
+    [{ assetId: 'missing' }, /Unknown asset/], [{ itemId: 'label' }, /image object/],
+    [{ assetId: 'vector' }, /already uses/], [{ itemId: 'other', slideId: deck.activeSlideId }, /locked/],
+    [{ slideId: deck.activeSlideId }, /does not exist/], [{ itemIds: ['panel'] }, /Unsupported/],
+  ]) {
+    assert.throws(() => prepareBatch(deck, [{ op: 'set', slideId, itemIds: ['label'], properties: { text: 'new' } },
+      { ...swap, ...overrides }]), message);
+    assert.deepEqual(deck, before);
+  }
 });
 
 test('place_asset preserves the aspect ratio for one dimension and accepts explicit frames', () => {

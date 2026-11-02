@@ -51,6 +51,46 @@ def fixture(slides=None, extra=None):
 
 
 class PptxImportTests(unittest.TestCase):
+    def test_only_marked_pictures_treat_symmetric_negative_crop_as_contain_padding(self):
+        ext = ('<a:extLst><a:ext uri="{9B18E286-D535-4B91-B568-9A25B57E38F3}">'
+               '<fe:imageFit xmlns:fe="urn:figure-editor:image-fit:1" mode="contain"/></a:ext></a:extLst>')
+        for marker, right, contained in [(ext, -10000, True), (ext, -5000, False), ('', -10000, False),
+                                         (ext.replace('mode="contain"', 'mode=""'), -10000, False),
+                                         (ext.replace('urn:figure-editor:', 'urn:unrelated:'), -10000, False)]:
+            with self.subTest(marker=marker, right=right):
+                pic = picture(f'<a:srcRect l="-10000" r="{right}"/>')
+                pic = pic.replace('name="Panel"/>', 'name="Panel">'+marker+'</p:cNvPr>')
+                result = import_pptx({**fixture([slide(pic)]), 'slide':1})
+                self.assertEqual(result['items'][0].get('imageFit'), 'contain' if contained else None)
+                self.assertNotIn('crop', result['items'][0])
+                self.assertEqual(any('Out-of-bounds image crop' in warning for warning in result['warnings']), not contained)
+
+    def test_edited_or_incompletely_marked_contain_groups_keep_their_native_children(self):
+        def group(pic_x=20, marker_extra='', extra_child='', frame_fill='<a:noFill/>'):
+            width, height = 200*EMU, 100*EMU
+            marker = (f'<a:extLst><a:ext uri="{{9B18E286-D535-4B91-B568-9A25B57E38F3}}">'
+                      f'<fe:imageFit xmlns:fe="urn:figure-editor:image-fit:1" mode="contain" {marker_extra}/></a:ext></a:extLst>')
+            xf = xfrm(60, 30, 200, 100).replace('</a:xfrm>', f'<a:chOff x="0" y="0"/><a:chExt cx="{width}" cy="{height}"/></a:xfrm>')
+            pic = picture('<a:srcRect l="25000" r="25000"/>', xfrm(pic_x,0,160,100)).replace('</p:spPr>','<a:ln><a:noFill/></a:ln></p:spPr>')
+            frame = (f'<p:sp><p:nvSpPr><p:cNvPr id="5" name="Frame"/></p:nvSpPr><p:spPr>{xfrm(0,0,200,100)}'
+                     f'<a:prstGeom prst="rect"/>{frame_fill}<a:ln w="9525"><a:solidFill><a:srgbClr val="ff0000"/></a:solidFill></a:ln></p:spPr></p:sp>')
+            return (f'<p:grpSp><p:nvGrpSpPr><p:cNvPr id="4" name="Group">{marker}</p:cNvPr></p:nvGrpSpPr>'
+                    f'<p:grpSpPr>{xf}</p:grpSpPr>{pic}{frame}{extra_child}</p:grpSp>')
+
+        guard = f'picX="{20*EMU}" picY="0" picCX="{160*EMU}" picCY="{100*EMU}" cropL="25000" cropT="0" cropR="25000" cropB="0"'
+        for xml in [group(), group(30, guard), group(marker_extra=guard.replace('cropR="25000"', 'cropR="0"')),
+                    group(marker_extra=guard, extra_child=text_shape(text='Added caption')),
+                    group(marker_extra=guard, frame_fill='<a:solidFill><a:srgbClr val="bb0000"/></a:solidFill>')]:
+            result = import_pptx({**fixture([slide(xml)]), 'slide':1})
+            self.assertGreaterEqual(len(result['items']), 2)
+            pic = result['items'][0]
+            self.assertEqual(pic['name'], 'Panel')
+            self.assertNotIn('imageFit', pic)
+            self.assertEqual(pic['width'], 160)
+            self.assertEqual(pic['crop']['width'], .5)
+            if 'Added caption' in xml:
+                self.assertTrue(any(item['type'] == 'textBlock' for item in result['items']))
+
     def test_luminance_transforms_preserve_hue_saturation_order_and_alpha(self):
         # Hand-calculated HSL examples distinguish luminance from per-channel RGB
         # arithmetic. Import the actual text style so this also covers consumers.

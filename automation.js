@@ -1,4 +1,4 @@
-import { cloneDeck, createAssetItem, validateDeck, slideProject } from './deck.js';
+import { cloneDeck, createAssetItem, deckAssetUsage, validateDeck, slideProject } from './deck.js';
 import { uid, exportPNG, projectToSVG } from './core.js';
 import { exportPDF } from './pdf.js';
 import { exportPPTX } from './pptx.js';
@@ -60,11 +60,24 @@ export function prepareBatch(project, operations) {
       distribute: ['op', 'slideId', 'itemIds', 'axis', 'gap'],
       add_text: ['op', 'slideId', 'properties'],
       place_asset: ['op', 'slideId', 'assetId', 'properties'],
+      swap_asset: ['op', 'slideId', 'itemId', 'assetId'],
     }[op.op];
-    if (!Array.isArray(allowed)) fail('Supported operations: set, align, distribute, add_text, place_asset.');
+    if (!Array.isArray(allowed)) fail('Supported operations: set, align, distribute, add_text, place_asset, swap_asset.');
     keys(op, allowed, op.op);
     const slide = next.slides.find(slide => slide.id === op.slideId);
     if (!slide) fail(`Unknown slide: ${op.slideId}.`);
+    if (op.op === 'swap_asset') {
+      const [item] = targets(slide, [op.itemId]);
+      const asset = next.assets.find(candidate => candidate.id === op.assetId);
+      if (!asset) fail(`Unknown asset: ${op.assetId}. Use an assetId from get_state.assets.`);
+      if (item.type !== 'image' || !asset.mime.startsWith('image/')) fail('swap_asset requires an image object and an SVG or raster image asset.');
+      if (item.assetId === asset.id) fail('This object already uses the requested asset.');
+      item.assetId = asset.id;
+      item.imageFit = 'contain';
+      delete item.crop;
+      changed.add(item.id);
+      continue;
+    }
     if (op.op === 'place_asset' || op.op === 'add_text') {
       let item;
       if (op.op === 'place_asset') {
@@ -94,16 +107,30 @@ export function prepareBatch(project, operations) {
   return { project: validateDeck(next), changedItemIds: [...changed], createdItemIds: created };
 }
 
+function isProjectRelativePath(path) {
+  if (typeof path !== 'string' || path !== path.trim() || /[\\\x00-\x1f\x7f]/.test(path)) return false;
+  if (/^(?:[a-z][a-z0-9+.-]*:|~)/i.test(path) || /%(?:25|2e|2f|3a|5c)/i.test(path)) return false;
+  return path.split('/').every(part => part !== '' && part !== '.' && part !== '..');
+}
+
 /** State is intentionally free of embedded images, HTML scripts and file handles. */
 export function describeProject(project, slideId = project.activeSlideId) {
   const slide = project.slides.find(slide => slide.id === slideId);
   if (!slide) fail(`Unknown slide: ${slideId}.`);
-  const visibleFields = ['id', 'type', ...fields, 'locked', 'hidden', 'assetId'];
+  const visibleFields = ['id', 'type', ...fields, 'locked', 'hidden', 'assetId', 'crop', 'imageFit'];
+  const usage = deckAssetUsage(project);
   return {
     project: { id: project.id, name: project.name }, activeSlideId: project.activeSlideId,
     slides: project.slides.map(page => ({ id: page.id, name: page.name, canvas: { ...page.canvas }, itemCount: page.items.length })),
     slide: { id: slide.id, name: slide.name, canvas: { ...slide.canvas }, items: slide.items.map(item => Object.fromEntries(visibleFields.filter(key => key in item).map(key => [key, item[key]]))) },
-    assets: project.assets.map(asset => ({ id: asset.id, name: asset.name, mime: asset.mime, width: asset.width, height: asset.height })),
+    assets: project.assets.map(asset => ({
+      id: asset.id, name: asset.name, mime: asset.mime, width: asset.width, height: asset.height,
+      sourceKind: asset.sourceKind,
+      ...(asset.sourceOrigin !== undefined ? { sourceOrigin: asset.sourceOrigin } : {}),
+      ...(isProjectRelativePath(asset.relativePath) ? { relativePath: asset.relativePath } : {}),
+      ...(/^(?:sha256:)?[a-f0-9]{64}$/i.test(asset.fingerprint ?? '') ? { fingerprint: asset.fingerprint } : {}),
+      usedBy: usage.get(asset.id),
+    })),
   };
 }
 

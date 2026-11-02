@@ -83,7 +83,7 @@ const named = (source, name) => {
 };
 function transform(source) {
   const off = tags(source, 'a:off')[0];
-  const ext = tags(source, 'a:ext')[0];
+  const ext = tags(source, 'a:ext').find(element => element.cx !== undefined);
   assert.ok(off && ext, 'object has position and dimensions');
   return { x: Number(off.x), y: Number(off.y), width: Number(ext.cx), height: Number(ext.cy) };
 }
@@ -581,11 +581,59 @@ test('image crops are editable srcRect metadata and keep complete original media
   assert.deepEqual(media[0][1], Buffer.from(PNG, 'base64'));
 });
 
+test('a contained picture keeps its outer transform, editable media and native padding', async () => {
+  const deck = createDeck();
+  deck.assets = [asset()];
+  deck.slides[0].items = [item('swapped', 'image', { assetId: 'png', imageFit: 'contain', rotation: 45,
+    width: 200, height: 100, opacity: .6, stroke: '#ff0000', strokeWidth: 2, softEdge: 3,
+    shadow: { enabled: true } })];
+  const parts = await unzip(await exportPPTX(deck));
+  const slide = xml(parts, 'ppt/slides/slide1.xml'), pic = named(slide, 'swapped');
+  assert.doesNotMatch(slide, /<p:grpSp>/);
+  assert.deepEqual(transform(pic), { x: 20*EMU, y: 30*EMU, width: 200*EMU, height: 100*EMU });
+  assert.equal(tags(pic, 'a:xfrm')[0].rot, String(45 * 60000));
+  assert.deepEqual(tags(pic, 'a:srcRect'), [{ l: '-50000', t: '0', r: '-50000', b: '0' }]);
+  assert.equal(tags(pic, 'fe:imageFit')[0].mode, 'contain');
+  assert.equal(tags(pic, 'a:ln')[0].w, String(2*EMU));
+  assert.equal(tags(pic, 'a:alphaModFix')[0].amt, '60000');
+  assert.equal(tags(pic, 'a:softEdge')[0].rad, '38100');
+  assert.equal(tags(pic, 'a:outerShdw').length, 1);
+  assert.deepEqual(parts.get('ppt/media/image1.png'), Buffer.from(PNG, 'base64'));
+});
+
+test('a crop inside a padded frame remains editable without exposing discarded pixels', async () => {
+  const deck = createDeck();
+  deck.assets = [asset()];
+  deck.slides[0].items = [item('panel', 'image', { assetId: 'png', imageFit: 'contain', rotation: 90,
+    width: 200, height: 100, opacity: .5, crop: { x: .25, y: 0, width: .5, height: 1 },
+    stroke: '#ff0000', strokeWidth: 2, strokeDash: 'dash', softEdge: 3, shadow: { enabled: true } }),
+    item('next', 'text', { text: 'Label' })];
+  const parts = await unzip(await exportPPTX(deck));
+  const slide = xml(parts, 'ppt/slides/slide1.xml'), group = slide.match(/<p:grpSp>.*?<\/p:grpSp>/s)[0];
+  const pic = named(group, 'panel'), frame = named(group, 'panel frame');
+  assert.deepEqual(transform(group), { x: 20*EMU, y: 30*EMU, width: 200*EMU, height: 100*EMU });
+  assert.equal(tags(group, 'a:xfrm')[0].rot, String(90 * 60000));
+  assert.deepEqual(transform(pic), { x: 75*EMU, y: 0, width: 50*EMU, height: 100*EMU });
+  assert.deepEqual(tags(pic, 'a:srcRect'), [{ l: '25000', t: '0', r: '25000', b: '0' }]);
+  assert.deepEqual(transform(frame), { x: 0, y: 0, width: 200*EMU, height: 100*EMU });
+  assert.deepEqual(tags(group, 'fe:imageFit'), [{ 'xmlns:fe': 'urn:figure-editor:image-fit:1', mode: 'contain',
+    picX: String(75*EMU), picY: '0', picCX: String(50*EMU), picCY: String(100*EMU),
+    cropL: '25000', cropT: '0', cropR: '25000', cropB: '0' }]);
+  assert.equal(tags(pic, 'a:alphaModFix')[0].amt, '50000');
+  assert.equal(tags(frame, 'a:ln')[0].w, String(2*EMU));
+  assert.equal(tags(frame, 'a:prstDash')[0].val, 'dash');
+  assert.match(group, /<p:grpSpPr>.*?<a:effectLst>.*?<a:outerShdw .*?<a:softEdge .*?<\/a:effectLst><\/p:grpSpPr>/s);
+  assert.doesNotMatch(pic + frame, /a:effectLst/);
+  const ids = tags(slide, 'p:cNvPr').map(shape => shape.id);
+  assert.equal(new Set(ids).size, ids.length);
+  assert.deepEqual(parts.get('ppt/media/image1.png'), Buffer.from(PNG, 'base64'));
+});
+
 test('SVG export embeds vector bytes, PNG fallback and Office SVG relationship', async () => {
   const { validateSVGDocument, svgDataURL } = await import('../svg-vector.js');
   const svgDocument=validateSVGDocument({tag:'svg',attrs:{width:'20',height:'10'},children:[{tag:'rect',attrs:{width:'20',height:'10',fill:'red'},children:[]}]});
   const deck=createDeck();deck.assets=[{id:'svg',name:'vector.svg',mime:'image/svg+xml',width:20,height:10,svgDocument,dataUrl:svgDataURL(svgDocument)}];
-  deck.slides[0].items=[item('vector','image',{assetId:'svg'})];
+  deck.slides[0].items=[item('vector','image',{assetId:'svg'}), item('contained-vector','image',{assetId:'svg',imageFit:'contain'})];
   const priorDocument=globalThis.document,priorImage=globalThis.Image;
   globalThis.Image=class {naturalWidth=20;naturalHeight=10;set src(v){queueMicrotask(()=>this.onload());}};
   globalThis.document={createElement(){return {width:0,height:0,getContext(){return {drawImage(){}};},toBlob(callback){callback(new Blob([Buffer.from(PNG,'base64')],{type:'image/png'}));}};}};
@@ -593,6 +641,9 @@ test('SVG export embeds vector bytes, PNG fallback and Office SVG relationship',
     const parts=await unzip(await exportPPTX(deck));
     assert.match(xml(parts,'[Content_Types].xml'),/Extension="svg" ContentType="image\/svg\+xml"/);
     assert.match(xml(parts,'ppt/slides/slide1.xml'),/<asvg:svgBlip[^>]*r:embed="rId3"/);
+    const contained = named(xml(parts,'ppt/slides/slide1.xml'),'contained-vector');
+    assert.deepEqual(tags(contained,'a:srcRect'), [{ l:'0', t:'-16667', r:'0', b:'-16667' }]);
+    assert.equal(tags(contained,'asvg:svgBlip')[0]['r:embed'], 'rId3');
     assert.match(xml(parts,'ppt/slides/_rels/slide1.xml.rels'),/Target="\.\.\/media\/fallback1.png"/);
     assert.match(xml(parts,'ppt/slides/_rels/slide1.xml.rels'),/Target="\.\.\/media\/image1.svg"/);
     assert.equal(parts.get('ppt/media/image1.svg').toString(),Buffer.from(deck.assets[0].dataUrl.split(',')[1],'base64').toString());

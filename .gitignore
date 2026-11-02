@@ -10,6 +10,7 @@
 !/app.js
 !/canvas-text-geometry.js
 !/automation.js
+!/export-check.js
 !/automation_bridge.py
 !/figure_mcp.py
 !/font-tools.js

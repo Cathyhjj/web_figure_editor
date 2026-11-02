@@ -22,6 +22,8 @@ NS = {'a': 'http://schemas.openxmlformats.org/drawingml/2006/main',
       'p': 'http://schemas.openxmlformats.org/presentationml/2006/main',
       'r': 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'}
 RID = '{' + NS['r'] + '}'
+FIT_EXTENSION = '{9B18E286-D535-4B91-B568-9A25B57E38F3}'
+FIT_NODE = '{urn:figure-editor:image-fit:1}imageFit'
 
 
 class PptxImportError(Exception):
@@ -58,6 +60,68 @@ def flag(el, key):
 
 def tag(el):
     return el.tag.rsplit('}', 1)[-1]
+
+
+def contain_marker(nonvisual):
+    return find(nonvisual, f'a:extLst/a:ext[@uri="{FIT_EXTENSION}"]/{FIT_NODE}[@mode="contain"]')
+
+
+def contained_group_picture(group):
+    """Reassemble our native picture/frame pair only while it matches the exported layout."""
+    nv = find(group, 'p:nvGrpSpPr/p:cNvPr')
+    marker = contain_marker(nv)
+    if marker is None or [tag(child) for child in group] != ['nvGrpSpPr', 'grpSpPr', 'pic', 'sp']:
+        return None
+    picture, frame = find(group, 'p:pic'), find(group, 'p:sp')
+    if picture is None or frame is None:
+        return None
+    # An edited picture, caption, frame fill, or extra child must keep its own drawing.
+    if find(frame, 'p:txBody') is not None or find(frame, 'p:style') is not None:
+        return None
+    picture_nv, frame_nv = find(picture, 'p:nvPicPr/p:cNvPr'), find(frame, 'p:nvSpPr/p:cNvPr')
+    if picture_nv is None or frame_nv is None or flag(picture_nv, 'hidden') or flag(frame_nv, 'hidden'):
+        return None
+    psp, fsp = find(picture, 'p:spPr'), find(frame, 'p:spPr')
+    for sp in (psp, fsp):
+        rect = find(sp, 'a:prstGeom')
+        if rect is None or rect.get('prst') != 'rect':
+            return None
+    if (find(psp, 'a:ln/a:noFill') is None or find(fsp, 'a:noFill') is None
+            or any(tag(el) not in ('xfrm', 'prstGeom', 'ln') for el in psp)
+            or any(tag(el) not in ('xfrm', 'prstGeom', 'noFill', 'ln') for el in fsp)):
+        return None
+    group_xf = find(group, 'p:grpSpPr/a:xfrm')
+    pic_xf, frame_xf = find(psp, 'a:xfrm'), find(fsp, 'a:xfrm')
+    if group_xf is None or pic_xf is None or frame_xf is None or pic_xf.attrib or frame_xf.attrib:
+        return None
+    for child_tag, group_tag in [('off', 'chOff'), ('ext', 'chExt')]:
+        child_bounds, group_bounds = find(frame_xf, 'a:'+child_tag), find(group_xf, 'a:'+group_tag)
+        if child_bounds is None or group_bounds is None or child_bounds.attrib != group_bounds.attrib:
+            return None
+    # A nonuniformly resized group stretches its children, which contain cannot represent.
+    group_ext, local_ext = find(group_xf, 'a:ext'), find(group_xf, 'a:chExt')
+    if not math.isclose(num(group_ext, 'cx') / num(local_ext, 'cx'), num(group_ext, 'cy') / num(local_ext, 'cy'), rel_tol=1e-6):
+        return None
+    off, ext = find(pic_xf, 'a:off'), find(pic_xf, 'a:ext')
+    if off is None or ext is None:
+        return None
+    bounds = [('picX', off.get('x')), ('picY', off.get('y')), ('picCX', ext.get('cx')), ('picCY', ext.get('cy'))]
+    crop = find(picture, 'p:blipFill/a:srcRect')
+    bounds.extend(('crop'+key.upper(), crop.get(key, '0') if crop is not None else '0') for key in ('l','t','r','b'))
+    if any(value is None or marker.get(key) != value for key, value in bounds):
+        return None
+
+    # Feed the native source and frame properties back through the ordinary picture importer.
+    result = copy.deepcopy(picture)
+    props = find(result, 'p:spPr')
+    props.clear()
+    for node in (group_xf, find(psp, 'a:prstGeom'), find(fsp, 'a:ln'), find(group, 'p:grpSpPr/a:effectLst')):
+        if node is not None:
+            props.append(node)
+    result_nv = find(result, 'p:nvPicPr/p:cNvPr')
+    result_nv.set('name', nv.get('name', 'Object'))
+    result_nv.append(find(nv, 'a:extLst'))
+    return result
 
 
 def multiply(a, b):
@@ -520,6 +584,10 @@ class Converter:
             if min(ew, eh, cw, ch) <= 0:
                 self.warn('Group with empty bounds was omitted.', name)
                 return
+            contained = contained_group_picture(shape)
+            if contained is not None:
+                self.shape(contained, path, matrix, inherited)
+                return
             x, y, w, h = num(off,'x')/EMU, num(off,'y')/EMU, ew/EMU, eh/EMU
             sx, sy = ew/cw, eh/ch
             mapping = (sx,0,0,sy,x-num(co,'x')/EMU*sx,y-num(co,'y')/EMU*sy)
@@ -600,8 +668,17 @@ class Converter:
             item = self.base(name,g,'image'); item['assetId'] = mid
             if native_shadow:item['shadow']=native_shadow
             if native_soft_edge is not None:item['softEdge']=native_soft_edge
+            alpha = find(blip, 'a:alphaModFix')
+            if alpha is not None: item['opacity'] = max(0,min(1,num(alpha,'amt',100000)/100000))
+            marked = contain_marker(find(shape, 'p:nvPicPr/p:cNvPr')) is not None
             border=self.line_style(shape,chain)
             if border is not None and find(border,'a:noFill') is None:
+                if marked and 0 < item['opacity'] < 1:
+                    # Exported outline colors include picture opacity. The editor applies it to the whole object.
+                    border = copy.deepcopy(border)
+                    for color_alpha in children(border, './/a:srgbClr/a:alpha'):
+                        value = min(100000, round(num(color_alpha, 'val') / item['opacity']))
+                        color_alpha.set('val', str(value))
                 gradient=self.stroke_gradient(find(border,'a:gradFill'),g,name)
                 stroke=self.color(find(border,'a:solidFill'),'none')
                 if gradient:stroke=gradient['stops'][0]['color']
@@ -612,13 +689,17 @@ class Converter:
                     if gradient:item['strokeGradient']=gradient
             crop = find(shape,'p:blipFill/a:srcRect')
             l,t,r,b = [num(crop,k)/100000 for k in ('l','t','r','b')]
-            if min(l,t,r,b) < 0 or l+r >= 1 or t+b >= 1:
+            padding = marked and ((l == r < 0 and t == b == 0) or (t == b < 0 and l == r == 0))
+            if padding:
+                item['imageFit'] = 'contain'
+            elif min(l,t,r,b) < 0 or l+r >= 1 or t+b >= 1:
                 self.warn('Out-of-bounds image crop was not retained.',name)
-            elif any((l,t,r,b)):
-                item['crop'] = {'x':l,'y':t,'width':1-l-r,'height':1-t-b}
+            else:
+                if marked:
+                    item['imageFit'] = 'contain'
+                if any((l,t,r,b)):
+                    item['crop'] = {'x':l,'y':t,'width':1-l-r,'height':1-t-b}
             item['_flipX'], item['_flipY'] = g['_flipX'], g['_flipY']
-            alpha = find(blip, 'a:alphaModFix')
-            if alpha is not None: item['opacity'] = max(0,min(1,num(alpha,'amt',100000)/100000))
             if find(shape, 'p:spPr/a:prstGeom') is not None and find(shape,'p:spPr/a:prstGeom').get('prst') != 'rect':
                 self.warn('Image shape mask is approximated by a rectangular crop.',name)
             self.items.append(item)

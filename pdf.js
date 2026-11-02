@@ -1,7 +1,7 @@
 import { posterProject } from './video.js';
 /** Single-page vector PDF. Geometry is CSS px (96/in), PDF pages use points (72/in). */
 import { validateProject, withRasterCanvas } from './core.js';
-import { imageCrop } from './crop.js';
+import { imageContentRect, imageCrop } from './crop.js';
 import { shadowBounds } from './shadow.js';
 import { shadeColor, shapeBounds as vectorShapeBounds } from './shape.js';
 import { isLineShape, shapePath, arrowHeads, shapeBounds, strokeDashArray } from './shapes.js';
@@ -275,8 +275,10 @@ export async function exportPDF(input, dpi = 300) {
         drawing = { bounds: [bounds.x, bounds.y, bounds.x + bounds.width, bounds.y + bounds.height], content: `q ${n(bounds.width)} 0 0 ${n(-bounds.height)} ${n(bounds.x)} ${n(bounds.y + bounds.height)} cm /${name} Do Q\n` };
       } else {
         if (!images.has(asset.id)) images.set(asset.id, await embedAsset(pdf, asset));
-        const crop = imageCrop(item), w = item.width / crop.width, h = item.height / crop.height;
-        drawing = { bounds: [0, 0, item.width, item.height], content: `q 0 0 ${n(item.width)} ${n(item.height)} re W n\n${n(w)} 0 0 ${n(-h)} ${n(-crop.x * w)} ${n((1 - crop.y) * h)} cm /${images.get(asset.id)} Do Q\n` };
+        const rect = imageContentRect(item, asset), crop = imageCrop(item);
+        const w = rect.width / crop.width, h = rect.height / crop.height;
+        drawing = { bounds: [rect.x, rect.y, rect.x + rect.width, rect.y + rect.height],
+          content: `q ${n(rect.x)} ${n(rect.y)} ${n(rect.width)} ${n(rect.height)} re W n\n${n(w)} 0 0 ${n(-h)} ${n(rect.x - crop.x * w)} ${n(rect.y + (1 - crop.y) * h)} cm /${images.get(asset.id)} Do Q\n` };
       }
     }
     if (!drawing) continue;

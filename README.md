@@ -25,9 +25,12 @@ codex mcp add figure_editor -- python3 /absolute/path/web_figure_editor/figure_m
 | 工具 | 支持的操作 |
 | --- | --- |
 | `figure_sessions` | 列出已连接页面及项目摘要；每次明确选择 `sessionId`，不会自动猜测标签页。 |
-| `figure_get_state` | 当前项目、所有页摘要、指定页的对象 ID／文字／几何／锁定状态、选择、revision、Undo 数量和保存状态；素材只返回元数据。 |
-| `figure_batch_edit` | 用 `place_asset` 放置素材、`add_text` 加标注、`set` 设置几何和文字格式、`align` 对齐、`distribute` 调整间距。整批成功后可一次撤销。 |
+| `figure_get_state` | 读取项目和页摘要、指定页上的对象和选择、revision、Undo 数量和保存状态。素材条目包含已记录的相对路径、指纹和跨页使用位置 `usedBy`。 |
+| `figure_batch_edit` | 用 `place_asset` 放置素材、`swap_asset` 替换单个图像对象的来源、`add_text` 加标注、`set` 设置几何和文字格式、`align` 对齐、`distribute` 调整间距。整批成功后可一次撤销。 |
+| `figure_duplicate_slide` | 按指定的 `slideId` 复制整页，可用 `name` 命名。副本插在原页之后并成为当前页。返回 `newSlideId` 和原对象到新对象的 `itemIdMap`。 |
 | `figure_preview` | 当前或指定 slide 的 PNG 预览，最长边可设 256–1600 px；返回图片与渲染时的 revision。 |
+| `figure_preview_batch` | 在临时副本上试跑与 `figure_batch_edit` 相同的操作，返回指定页的 PNG 和起始版本 `baseRevision`。每次调用可查看一个方案。 |
+| `figure_check_export` | 按导出格式和最终印刷宽度检查位图有效 DPI、对象越界和缺失的 HTML 快照。返回页与对象 ID、测量值和告警，供导出前核对。 |
 | `figure_export` | PNG／SVG／PDF 导出一页，PPTX／HTML 导出全部页；写入导出目录中的新文件，返回绝对路径、大小和 SHA-256，不覆盖已有文件。 |
 | `figure_history` | 一次 Undo 或 Redo，使用编辑器原有历史。 |
 | `figure_save` | `destination=file` 保存到已授权项目文件；`destination=draft` 只保存浏览器恢复草稿。 |
@@ -35,6 +38,14 @@ codex mcp add figure_editor -- python3 /absolute/path/web_figure_editor/figure_m
 用 `figure_sessions` 选择页面，再用 `figure_get_state` 读取素材、对象和 `revision`。调用 `figure_batch_edit`、`figure_history` 或 `figure_save` 时，把该版本传入 `expectedRevision`。每个操作都要指定 `slideId`。修改已有对象用 `itemIds`，从素材库放置图用 `assets[].id` 作为 `assetId`。位置和尺寸以 **CSS px（96 px = 1 inch）** 计。放置时省略 `properties` 会使用页面 Place 按钮的默认尺寸和位置。只指定宽或高会保持比例，同时指定两者允许拉伸。对齐和分布适用于未旋转的对象，旋转对象可用 `set` 定位。指定 `gap` 时从最前面的对象起等距排列，省略时保留整体两端位置。
 
 例如，先把四张 SVG 导入 Assets，然后告诉 AI：“按指定顺序排成 2×2，保持比例，在左上角分别标上 a–d，给我看预览。” 同一批次中，每张图用一个 `place_asset` 指定 `assetId` 和 `properties: {x, y, width}`，标签用 `add_text` 放在对应图层上方。用 `figure_preview` 查看结果，一次 Undo 可撤销全部八个对象。
+
+改稿时，可以问“第 2 页的 b 面板用的是哪个文件？” `figure_get_state` 返回的 `assets[].usedBy` 列出引用它的页和对象，也包括隐藏对象。用已记录的 `relativePath` 或 `fingerprint` 区分同名文件。如果项目缺少这些信息，直接按 `assetId` 指定素材。
+
+要把某一幅图换成已导入的新版，在同一批次传入 `{op: "swap_asset", slideId, itemId, assetId}`，其中 `itemId` 是旧图的画布对象，`assetId` 是新版素材。支持 SVG 和位图之间的替换。新图完整、等比地居中放入原图框，比例不同时两侧或上下留白。旧图的裁剪会清除。图框位置、旋转、叠放顺序、独立的面板标签及其他位置的副本均保留。用 `figure_preview` 检查结果，或用一次 Undo 还原原图和旧裁剪。
+
+- **投稿前检查。** “按 PDF 最终宽 85 mm、位图至少 300 DPI 检查第 2 页。” 在 `figure_check_export` 中指定 `format`、`finalWidthMm` 和 `minRasterDpi`。阈值默认为 300。有效 DPI 按裁切后可见的源像素和实际印刷尺寸计算，横纵两个方向取较低值。矢量对象单独列出。省略 `slideId` 时，PNG、SVG、PDF 检查当前页，PPTX 和 HTML 检查整份项目。
+- **制作修订版。** “复制 Figure 3，命名为 Reviewer 2，只替换副本的 b 面板。” 用项目当前版本调用 `figure_duplicate_slide`，再用它返回的 `newSlideId`、`itemIdMap[原对象ID]` 和新 `revision` 做 `swap_asset`。两页共享素材库，各自保留独立的布局和参考线。复制和换图分别可撤销。
+- **比较排版。** “分别预览 2×2 和横排方案。” 对同一 `expectedRevision` 分别调用 `figure_preview_batch`，每个方案提交自己的 `operations` 并指定要看的 `slideId`。试排只返回标有 `proposed: true` 的图片，不写草稿或历史。选定后，将该方案的原始操作和同一版本传给 `figure_batch_edit`。版本已变化时，重新读取状态后再试排。
 
 锁定对象会拒绝整批修改；过期 revision、正在拖拽／输入文字／绘图／执行文件操作或打开的模态窗口也会拒绝冲突操作。先完成当前编辑，再读取最新状态。刷新、暂停和重新打开页面会产生新的 session；若命令超时且已投递，其结果可能未知，应先查询状态，避免重复执行。
 

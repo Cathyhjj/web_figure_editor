@@ -3,6 +3,7 @@ import { validateDeck } from './deck.js';
 import { isMediaItem } from './video.js';
 import { htmlPosterDeck } from './html-chart.js';
 import { isLineShape } from './shapes.js';
+import { imageContentRect } from './crop.js';
 
 const EMU_PER_PX = 9525;
 const EMU_PER_PT = 12700;
@@ -74,7 +75,8 @@ function preflightSize(deck) {
   return xmlBytes;
 }
 
-function layoutForDeck(deck) {
+/** Geometry only, shared by export and print-size inspection of an already validated deck. */
+export function pptxLayoutForDeck(deck) {
   const first = deck.slides[0].canvas;
   const minScale = Math.max(MIN_SLIDE_PX / first.width, MIN_SLIDE_PX / first.height);
   const maxScale = Math.min(MAX_SLIDE_PX / first.width, MAX_SLIDE_PX / first.height);
@@ -95,7 +97,7 @@ function layoutForDeck(deck) {
 }
 
 /** Report the common slide size and each canvas's proportional fit, all geometry in CSS px. */
-export function pptxLayout(input) { return layoutForDeck(validateDeck(input)); }
+export function pptxLayout(input) { return pptxLayoutForDeck(validateDeck(input)); }
 
 function color(value) {
   const named = { black: '000000', white: 'FFFFFF', red: 'FF0000', green: '008000', blue: '0000FF', gray: '808080', grey: '808080' };
@@ -127,9 +129,9 @@ function line(item, scale) {
   }
   return `<a:ln w="${width}" cap="flat" cmpd="sng" algn="ctr">${gradient ? gradientFill(gradient, item.opacity * (item.strokeOpacity ?? 1)) : fill(item.stroke, item.opacity * (item.strokeOpacity ?? 1))}<a:prstDash val="${dash}"/>${isLineShape(item) ? '<a:round/>' : '<a:miter lim="800000"/>'}${ends}</a:ln>`;
 }
-function transform(item, layout) {
+function transform(item, layout, childSpace = '') {
   const rotation = Math.round(((item.rotation % 360 + 360) % 360) * 60000) % 21600000;
-  return `<a:xfrm${rotation ? ` rot="${rotation}"` : ''}${item.connectorFlipX ? ' flipH="1"' : ''}${item.connectorFlipY ? ' flipV="1"' : ''}><a:off x="${emu(layout.x + item.x * layout.scale)}" y="${emu(layout.y + item.y * layout.scale)}"/><a:ext cx="${emu(item.width * layout.scale)}" cy="${emu(item.height * layout.scale)}"/></a:xfrm>`;
+  return `<a:xfrm${rotation ? ` rot="${rotation}"` : ''}${item.connectorFlipX ? ' flipH="1"' : ''}${item.connectorFlipY ? ' flipV="1"' : ''}><a:off x="${emu(layout.x + item.x * layout.scale)}" y="${emu(layout.y + item.y * layout.scale)}"/><a:ext cx="${emu(item.width * layout.scale)}" cy="${emu(item.height * layout.scale)}"/>${childSpace}</a:xfrm>`;
 }
 function nonVisual(id, name, textBox = false) {
   return `<p:nvSpPr><p:cNvPr id="${id}" name="${escapeXML(name)}"/><p:cNvSpPr${textBox ? ' txBox="1"' : ''}/><p:nvPr/></p:nvSpPr>`;
@@ -206,13 +208,46 @@ function objectEffects(item, layout) {
   const alpha = Math.round((1 - shadow.transparency / 100) * 100000);
   return `<a:effectLst><a:outerShdw blurRad="${blur}" dist="${distance}" dir="${direction}" sx="${size}" sy="${size}" algn="${shadow.alignment || 'ctr'}" rotWithShape="${shadow.rotateWithShape === false ? 0 : 1}"><a:srgbClr val="${hex}"><a:alpha val="${alpha}"/></a:srgbClr></a:outerShdw>${softEdge}</a:effectLst>`;
 }
-function imageShape(item, asset, id, relationship, layout, svgRelationship) {
+function imageFitMarker(geometry = '') {
+  return `<a:extLst><a:ext uri="{9B18E286-D535-4B91-B568-9A25B57E38F3}"><fe:imageFit xmlns:fe="urn:figure-editor:image-fit:1" mode="contain"${geometry}/></a:ext></a:extLst>`;
+}
+function cropInsets(c) {
+  const percent = value => Math.max(0, Math.round(value * 100000));
+  const left = Math.min(99999, percent(c.x)), top = Math.min(99999, percent(c.y));
+  return [left, top, Math.min(99999 - left, percent(1 - c.x - c.width)), Math.min(99999 - top, percent(1 - c.y - c.height))];
+}
+function imageShape(item, asset, id, relationship, layout, svgRelationship, insets) {
   const svgExtension = svgRelationship ? `<a:extLst><a:ext uri="{96DAC541-7B7A-43D3-8B79-37D633B846F1}"><asvg:svgBlip xmlns:asvg="http://schemas.microsoft.com/office/drawing/2016/SVG/main" r:embed="${svgRelationship}"/></a:ext></a:extLst>` : '';
   const alpha = Math.round(item.opacity * 100000);
-  const c = item.crop, percent = value => Math.max(0, Math.round(value * 100000));
-  const left = c ? Math.min(99999, percent(c.x)) : 0, top = c ? Math.min(99999, percent(c.y)) : 0;
-  const crop = c ? `<a:srcRect l="${left}" t="${top}" r="${Math.min(99999 - left, percent(1 - c.x - c.width))}" b="${Math.min(99999 - top, percent(1 - c.y - c.height))}"/>` : '';
-  return `<p:pic><p:nvPicPr><p:cNvPr id="${id}" name="${escapeXML(item.name)}" descr="${escapeXML(asset.name)}"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="${relationship}">${alpha === 100000 ? '' : `<a:alphaModFix amt="${alpha}"/>`}${svgExtension}</a:blip>${crop}<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>${transform(item, layout)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${item.strokeWidth>0 ? line(item,layout.scale) : '<a:ln><a:noFill/></a:ln>'}${objectEffects(item, layout)}</p:spPr></p:pic>`;
+  const margins = item.crop ? cropInsets(item.crop) : insets;
+  const crop = margins ? `<a:srcRect l="${margins[0]}" t="${margins[1]}" r="${margins[2]}" b="${margins[3]}"/>` : '';
+  const marker = item.imageFit === 'contain' ? `>${imageFitMarker()}</p:cNvPr>` : '/>';
+  return `<p:pic><p:nvPicPr><p:cNvPr id="${id}" name="${escapeXML(item.name)}" descr="${escapeXML(asset.name)}"${marker}<p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="${relationship}">${alpha === 100000 ? '' : `<a:alphaModFix amt="${alpha}"/>`}${svgExtension}</a:blip>${crop}<a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr>${transform(item, layout)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${item.strokeWidth>0 ? line(item,layout.scale) : '<a:ln><a:noFill/></a:ln>'}${objectEffects(item, layout)}</p:spPr></p:pic>`;
+}
+
+function containedPicture(item, asset, id, refs, layout, nextId) {
+  const rect = imageContentRect(item, asset);
+  // Signed srcRect values extend the source with transparent margins while keeping
+  // a single native editable picture, border, and the original object transform.
+  const padX = Math.round(rect.x / rect.width * 100000), padY = Math.round(rect.y / rect.height * 100000);
+  if (!padX && !padY) return imageShape(item, asset, id, refs.relationship, layout, refs.svgRelationship);
+  if (!item.crop && Math.max(padX, padY) <= 2147483647) {
+    return imageShape(item, asset, id, refs.relationship, layout, refs.svgRelationship, [-padX, -padY, -padX, -padY]);
+  }
+  // A single srcRect cannot clip source pixels and add padding along the same
+  // axis. Keep the source picture editable and give its group the outer frame.
+  const local = { x: 0, y: 0, scale: layout.scale };
+  const { shadow, softEdge, imageFit, ...child } = item;
+  const picture = imageShape({ ...child, ...rect, rotation: 0, strokeWidth: 0 }, asset, nextId(), refs.relationship, local, refs.svgRelationship);
+  const frame = shape({ ...child, name: item.name + ' frame', type: 'rect', x: 0, y: 0, rotation: 0,
+    fill: 'none', stroke: item.stroke || 'none', strokeWidth: item.strokeWidth || 0 }, nextId(), local);
+  const cx = emu(item.width * layout.scale), cy = emu(item.height * layout.scale);
+  const groupTransform = transform(item, layout, `<a:chOff x="0" y="0"/><a:chExt cx="${cx}" cy="${cy}"/>`);
+  // A reimporter can recognize this grouping only while the child's native
+  // geometry and crop still match. Changes made in PowerPoint take precedence.
+  const [left, top, right, bottom] = item.crop ? cropInsets(item.crop) : [0, 0, 0, 0];
+  const marker = imageFitMarker(` picX="${emu(rect.x * layout.scale)}" picY="${emu(rect.y * layout.scale)}" picCX="${emu(rect.width * layout.scale)}" picCY="${emu(rect.height * layout.scale)}" cropL="${left}" cropT="${top}" cropR="${right}" cropB="${bottom}"`);
+  return `<p:grpSp><p:nvGrpSpPr><p:cNvPr id="${id}" name="${escapeXML(item.name)}">${marker}</p:cNvPr><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr>${groupTransform}${objectEffects(item, layout)}</p:grpSpPr>${picture}${frame}</p:grpSp>`;
 }
 
 function videoShape(item, asset, id, links, layout) {
@@ -240,9 +275,11 @@ function slideXML(slide, layout, assets, media) {
   // A real shape preserves each original canvas background when fitted into a common slide.
   const background = { type: 'rect', name: 'Slide background', x: 0, y: 0, width: slide.canvas.width, height: slide.canvas.height, rotation: 0, opacity: 1, fill: slide.canvas.background, stroke: 'none', strokeWidth: 0 };
   const shapes = [shape(background, 2, layout)];
+  let shapeId = 2;
+  const nextId = () => ++shapeId;
   for (const item of slide.items) {
     if (item.hidden) continue;
-    const id = shapes.length + 2;
+    const id = nextId();
     if (item.type === 'video') {
       if (!videoRelationships.has(item.assetId)) {
         const file = media.get(item.assetId), links = {};
@@ -267,7 +304,9 @@ function slideXML(slide, layout, assets, media) {
         imageRelationships.set(item.assetId, { relationship, svgRelationship });
       }
       const refs = imageRelationships.get(item.assetId);
-      shapes.push(imageShape(item, assets.get(item.assetId), id, refs.relationship, layout, refs.svgRelationship));
+      const asset = assets.get(item.assetId);
+      shapes.push(item.imageFit === 'contain' ? containedPicture(item, asset, id, refs, layout, nextId)
+        : imageShape(item, asset, id, refs.relationship, layout, refs.svgRelationship));
     } else shapes.push(item.type === 'text' ? textShape(item, id, layout) : shape(item, id, layout));
   }
   // PowerPoint has one common page boundary. Cover fitted-canvas margins so objects
@@ -286,7 +325,7 @@ function slideXML(slide, layout, assets, media) {
   );
   for (const margin of margins) shapes.push(shape(
     { ...margin, type: 'rect', rotation: 0, opacity: 1, fill: 'white', stroke: 'none', strokeWidth: 0 },
-    shapes.length + 2, { x: 0, y: 0, scale: 1 },
+    nextId(), { x: 0, y: 0, scale: 1 },
   ));
   return {
     xml: `${XML}<p:sld ${namespaces}><p:cSld name="${escapeXML(slide.name)}"><p:bg><p:bgPr>${fill('white')}<a:effectLst/></p:bgPr></p:bg><p:spTree>${emptyTree}${shapes.join('')}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>${videoTiming(videoIds)}</p:sld>`,
@@ -426,7 +465,7 @@ function zip(entries) {
 /** Export all slides in order without changing the deck, assets, or active slide. */
 export async function exportPPTX(input) {
   const deck = htmlPosterDeck(validateDeck(input));
-  const layout = layoutForDeck(deck);
+  const layout = pptxLayoutForDeck(deck);
   const xmlBudget = preflightSize(deck);
   const assets = new Map(deck.assets.map(asset => [asset.id, asset]));
   const media = new Map();

@@ -87,6 +87,21 @@ test('undo snapshots copy all mutable deck records while keeping binary strings 
   assert.equal(snapshot.assets[0].dataUrl, deck.assets[0].dataUrl);
 });
 
+test('named duplicates target an explicit source and invalid requests preserve the deck', () => {
+  const deck = validateDeck(legacy()), source = currentSlide(deck), active = addSlide(deck);
+  const before = structuredClone(deck);
+  for (const [id, name] of [['missing', 'Revision'], [source.id, '  '], [source.id, 'a'.repeat(301)]]) {
+    assert.throws(() => duplicateSlide(deck, id, name));
+    assert.deepEqual(deck, before);
+  }
+  const copy = duplicateSlide(deck, source.id, 'Reviewer 2');
+  assert.deepEqual(deck.slides.map(slide => slide.id), [source.id, copy.id, active.id]);
+  assert.equal(copy.name, 'Reviewer 2');
+  assert.equal(deck.activeSlideId, copy.id);
+  assert.equal(copy.items[1].assetId, source.items[1].assetId);
+  assert.deepEqual(source, before.slides[0]);
+});
+
 test('delete selects adjacent slide, keeps original assets, and refuses to delete the last', () => {
   const deck = validateDeck(legacy());
   const first = currentSlide(deck);

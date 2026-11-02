@@ -1,5 +1,5 @@
 /** Picture shadows use PowerPoint-style points; item geometry uses 96 CSS px/in. */
-import { imageCrop } from './crop.js';
+import { imageContentRect, imageCrop } from './crop.js';
 import { softEdgeSVG } from './soft-edge.js';
 import { shapeBounds as vectorBounds } from './shape.js';
 import { isShapeItem, shapeBounds as presetBounds, shapeSVG as presetSVG } from './shapes.js';
@@ -112,14 +112,16 @@ export function imageShadowSVG(item, asset, filterId) {
   const geometry = shadowGeometry(item);
   if (!geometry) return '';
   if (typeof filterId !== 'string' || !/^[A-Za-z][A-Za-z\d_-]*$/.test(filterId)) throw new Error('Image shadow filter ID contains unsupported characters.');
-  const { shadow, x, y, width, height, sigma, bounds } = geometry;
+  const { shadow, x, y, sigma, bounds } = geometry;
   const crop = imageCrop(item);
+  const rect = imageContentRect(item, asset), scale = shadow.size / 100;
+  const left = x + rect.x * scale, top = y + rect.y * scale, width = rect.width * scale, height = rect.height * scale;
   let picture = item.crop
-    ? `<svg x="${n(x)}" y="${n(y)}" width="${n(width)}" height="${n(height)}" viewBox="${crop.x} ${crop.y} ${crop.width} ${crop.height}" preserveAspectRatio="none" overflow="hidden"><image width="1" height="1" preserveAspectRatio="none" href="${xml(asset.dataUrl)}"/></svg>`
-    : `<image x="${n(x)}" y="${n(y)}" width="${n(width)}" height="${n(height)}" preserveAspectRatio="none" href="${xml(asset.dataUrl)}"/>`;
+    ? `<svg x="${n(left)}" y="${n(top)}" width="${n(width)}" height="${n(height)}" viewBox="${crop.x} ${crop.y} ${crop.width} ${crop.height}" preserveAspectRatio="none" overflow="hidden"><image width="1" height="1" preserveAspectRatio="none" href="${xml(asset.dataUrl)}"/></svg>`
+    : `<image x="${n(left)}" y="${n(top)}" width="${n(width)}" height="${n(height)}" preserveAspectRatio="none" href="${xml(asset.dataUrl)}"/>`;
   const border=imageBorderSVG(item,filterId+'-border');
   if(border)picture+=`<g transform="translate(${n(x)} ${n(y)}) scale(${n(shadow.size/100)})">${border}</g>`;
-  const source = objectBounds(item), scale = shadow.size / 100;
+  const source = objectBounds(item);
   picture = softEdgeSVG({ ...item, softEdge: (item.softEdge || 0) * scale }, picture, filterId + '-soft-edge', { x: x + source.x * scale, y: y + source.y * scale, width: source.width * scale, height: source.height * scale });
   return `<defs><filter id="${filterId}" filterUnits="userSpaceOnUse" x="${n(bounds.x)}" y="${n(bounds.y)}" width="${n(bounds.width)}" height="${n(bounds.height)}" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceAlpha" stdDeviation="${n(sigma)}" result="shadow-blur"/><feFlood flood-color="${shadow.color}" flood-opacity="${n(1 - shadow.transparency / 100)}"/><feComposite in2="shadow-blur" operator="in"/></filter></defs><g filter="url(#${filterId})" pointer-events="none">${picture}</g>`;
 }

@@ -7,7 +7,7 @@ import { appendArrowHandles, arrowMidpoints } from './vector-arrow-editor.js';
 import { isMediaItem, posterSource } from './video.js';
 import { createChartFrame } from './html-chart.js';
 import { uid, projectToSVG, exportPNG, downloadBlob } from './core.js';
-import { createDeck, validateDeck, cloneDeck, currentSlide, createAssetItem, slideProject, deckSourceManifest, addSlide, moveSlides } from './deck.js';
+import { createDeck, validateDeck, cloneDeck, currentSlide, createAssetItem, slideProject, deckSourceManifest, addSlide, duplicateSlide, moveSlides } from './deck.js';
 import { pickProjectFile, readProjectFile, readProjectFileState, writeProjectFile, checkProjectFileRevision } from './project-files.js';
 import { createRecentProjects, openRecentProject } from './recent-projects.js';
 import { initRecentProjectMenu } from './recent-project-menu.js';
@@ -28,7 +28,7 @@ import { softEdgeSVG } from './soft-edge.js';
 import { softEdgeEditorMarkup, bindSoftEdgeEditor } from './soft-edge-editor.js';
 import { isShapeItem, isLineShape, shapeSVG, shapeBounds } from './shapes.js';
 import { opacityEditorMarkup, shapeEditorMarkup, bindShapeEditor } from './shape-editor.js';
-import { imageCrop, isCropped, cropImage } from './crop.js';
+import { imageContentRect, imageCrop, isCropped, cropImage } from './crop.js';
 import { createCropEditor } from './crop-editor.js';
 import { resizeItem, resizeMediaDimension } from './resize.js';
 import { selectionRect, enclosedItemIds } from './selection.js';
@@ -44,6 +44,7 @@ import { selectionToPNG } from './clipboard-image.js';
 import { formatTitle, formatSection, formatInspectorMarkup, bindFormatInspector } from './format-inspector.js';
 import { createObjectContextMenu } from './object-context-menu.js';
 import { connectAutomation, describeProject, prepareBatch, renderAutomation } from './automation.js';
+import { checkExport } from './export-check.js';
 
 const $ = id => document.getElementById(id);
 const ns = 'http://www.w3.org/2000/svg';
@@ -170,7 +171,17 @@ function svgText(item){
  return text;
 }
 function appendItemContent(g,item,context='stage'){
-  if(item.type==='image'){const a=assetById(item.assetId);if(a){const c=imageCrop(item),parent=item.crop?svg('svg',{width:item.width,height:item.height,viewBox:`${c.x} ${c.y} ${c.width} ${c.height}`,preserveAspectRatio:'none',overflow:'hidden'}):g;parent.append(svg('image',{href:a.dataUrl,width:item.crop?1:item.width,height:item.crop?1:item.height,preserveAspectRatio:'none'}));if(parent!==g)g.append(parent);}}
+  if(item.type==='image'){
+    const asset=assetById(item.assetId);
+    if(asset){
+      const rect=imageContentRect(item,asset),c=imageCrop(item);
+      const image=svg('image',{...(item.crop?{width:1,height:1}:rect),href:asset.dataUrl,preserveAspectRatio:'none'});
+      if(item.crop){
+        const viewport=svg('svg',{...rect,viewBox:`${c.x} ${c.y} ${c.width} ${c.height}`,preserveAspectRatio:'none',overflow:'hidden'});
+        viewport.append(image);g.append(viewport);
+      }else g.append(image);
+    }
+  }
   else if(item.type==='html'){const a=assetById(item.assetId);if(a)g.append(svg('image',{href:a.posterDataUrl,width:item.width,height:item.height,preserveAspectRatio:'none'}));}
   else if(item.type==='video'){const a=assetById(item.assetId);if(a){g.append(svg('image',{href:a.posterDataUrl,width:item.width,height:item.height,preserveAspectRatio:'none'}));const r=Math.min(item.width,item.height)*.09;g.append(svg('circle',{cx:item.width/2,cy:item.height/2,r,fill:'#111827b3'}));g.append(svg('path',{d:`M ${item.width/2-r*.3} ${item.height/2-r*.5} L ${item.width/2+r*.55} ${item.height/2} L ${item.width/2-r*.3} ${item.height/2+r*.5} Z`,fill:'#fff'}));}}
   else if(item.type==='text')g.append(svgText(item));
@@ -503,7 +514,7 @@ function renderInspector(){
  const i=items[0];
  box.innerHTML=`<div class="section-heading">${i.type==='html'?'HTML chart':i.type==='video'?'Video':i.type==='image'?'Image':i.type==='text'?'Text':'Shape'} properties${i.locked?' · Locked':''}</div>${field('Name','name',i.name,'text')}<div class="field-row">${field('X / px','x',round(i.x),'number','step="1"')}${field('Y / px','y',round(i.y),'number','step="1"')}</div><div class="field-row">${field('Width / px','width',round(i.width),'number',`min="${isLineShape(i)?0:1}" step="1"`)}${field('Height / px','height',round(i.height),'number',`min="${isLineShape(i)?0:1}" step="1"`)}</div>${field('Rotation / °','rotation',round(i.rotation))}${opacityEditorMarkup(i)}`;
  if(i.type==='text')box.innerHTML+=`<label class="field"><span>Text content</span><textarea id="text-content" rows="4">${escapeHTML(i.text)}</textarea></label>${field('Font','fontFamily',i.fontFamily,'text','list="font-families" maxlength="200" autocomplete="off" spellcheck="false"')}<div class="field-row">${field('Size / px','fontSize',i.fontSize,'number','min="1" max="2000" step="any"')}${field('Color','color',i.color,'color')}</div><div class="field-row"><label class="field"><span>Weight</span><select data-property="fontWeight"><option value="400" ${String(i.fontWeight)==='400'?'selected':''}>Regular</option><option value="700" ${String(i.fontWeight)==='700'?'selected':''}>Bold</option></select></label><label class="field"><span>Style</span><select data-property="fontStyle"><option value="normal" ${i.fontStyle==='normal'?'selected':''}>Normal</option><option value="italic" ${i.fontStyle==='italic'?'selected':''}>Italic</option></select></label></div><label class="field"><span>Text alignment</span><select data-property="align">${[['left','Left'],['center','Center'],['right','Right']].map(([v,t])=>`<option value="${v}" ${i.align===v?'selected':''}>${t}</option>`).join('')}</select></label><p class="hint">Uses fonts installed on this computer. SVG does not embed fonts. Press Enter for a new line.</p>`;
- if(i.type==='image'){const a=assetById(i.assetId),c=imageCrop(i);const effectiveDPI=a?Math.round(Math.min(a.width*c.width/i.width,a.height*c.height/i.height)*96):0;box.innerHTML+=`<div class="image-crop-actions"><button id="crop-image" class="button" ${i.locked?'disabled':''}>${isCropped(i)?'Edit crop':'Crop'}</button><button id="restore-image" class="button" ${i.locked||!isCropped(i)?'disabled':''}>Restore original</button></div><p class="hint">Source: ${escapeHTML(a?.name)}<br>Original size: ${a?.width} × ${a?.height} px${isCropped(i)?`<br>Cropped area: ${Math.round(a.width*c.width)} × ${Math.round(a.height*c.height)} px`:''}${a?.mime==='image/svg+xml'?'<br>Vector SVG · resolution independent':`<br>Effective resolution: ${effectiveDPI} DPI`}<br>Drag the bottom-right corner to keep proportions; hold Shift to resize freely. Drag side handles to stretch width or height. Width and height fields keep proportions.</p>`;}
+ if(i.type==='image'){const a=assetById(i.assetId),c=imageCrop(i);const area=a&&imageContentRect(i,a);const effectiveDPI=area?Math.round(Math.min(a.width*c.width/area.width,a.height*c.height/area.height)*96):0;box.innerHTML+=`<div class="image-crop-actions"><button id="crop-image" class="button" ${i.locked?'disabled':''}>${isCropped(i)?'Edit crop':'Crop'}</button><button id="restore-image" class="button" ${i.locked||!isCropped(i)?'disabled':''}>Restore original</button></div><p class="hint">Source: ${escapeHTML(a?.name)}<br>Original size: ${a?.width} × ${a?.height} px${isCropped(i)?`<br>Cropped area: ${Math.round(a.width*c.width)} × ${Math.round(a.height*c.height)} px`:''}${a?.mime==='image/svg+xml'?'<br>Vector SVG · resolution independent':`<br>Effective resolution: ${effectiveDPI} DPI`}<br>${i.imageFit==='contain'?'The picture fits proportionally inside its frame. Drag the side handles to resize the frame.':'Drag the bottom-right corner to keep proportions; hold Shift to resize freely. Drag side handles to stretch width or height. Width and height fields keep proportions.'}</p>`;}
  if(i.type==='video'){const a=assetById(i.assetId);box.innerHTML+=`<div class="image-crop-actions"><button id="preview-video" class="button">▶ Preview video</button></div><p class="hint">MP4 · ${a.width} × ${a.height} px · ${a.duration.toFixed(1)} s<br>Embedded in PowerPoint; click the video during Slide Show to play. H.264 video with AAC audio is recommended.<br>PNG, SVG, PDF, and HTML reports use the poster frame.</p>`;}
  if(i.type==='image'&&editableSVGAsset(assetById(i.assetId)))box.innerHTML+=`<button id="edit-svg" class="button" ${i.locked?'disabled':''}>${assetById(i.assetId).mime==='image/svg+xml'?'Edit SVG elements':'Restore editable SVG'}</button>`;
  if(!['video','html'].includes(i.type))box.innerHTML+=shadowEditorMarkup(i)+formatSection('soft-edges','Soft Edges',softEdgeEditorMarkup(i));
@@ -1437,13 +1448,39 @@ function automationState(slideId){
    error:autosaveError?.detail??null,status:$('autosave-status').textContent}};
 }
 async function executeAutomation(method,params){
- const allowed={get_state:['slideId'],batch_edit:['expectedRevision','operations'],history:['expectedRevision','action'],save:['expectedRevision','destination'],preview:['slideId','maxSize'],export:['slideId','format','dpi']}[method];
+ const allowed={
+  get_state:['slideId'], batch_edit:['expectedRevision','operations'], duplicate_slide:['expectedRevision','slideId','name'],
+  preview:['slideId','maxSize'], preview_batch:['expectedRevision','operations','slideId','maxSize'],
+  check_export:['slideId','format','finalWidthMm','minRasterDpi'], export:['slideId','format','dpi'],
+  history:['expectedRevision','action'], save:['expectedRevision','destination'],
+ }[method];
  if(!allowed||!params||typeof params!=='object'||Array.isArray(params)||Object.keys(params).some(key=>!allowed.includes(key)))throw new Error('Invalid editor command arguments.');
  if(method==='get_state')return automationState(params.slideId);
  const busy=automationBusy();if(busy)throw new Error(`Editor busy: ${busy}`);
- if(['batch_edit','history','save'].includes(method)&&params.expectedRevision!==automationRevision())throw new Error('The project revision changed. Read state and rebuild the operation before retrying.');
- if(method==='batch_edit'){
+ const revision=automationRevision();
+ if(['batch_edit','duplicate_slide','preview_batch','history','save'].includes(method)&&params.expectedRevision!==revision)throw new Error('The project revision changed. Read state and rebuild the operation before retrying.');
+ if(method==='check_export')return {...checkExport(project,params),revision};
+ if(method==='duplicate_slide'){
+  const source=project.slides.find(page=>page.id===params.slideId);
+  if(!source)throw new Error(`Unknown slide: ${params.slideId}.`);
+  // Prepare the new page without disturbing the active slide or selection on failure.
+  const candidate={...project,slides:[...project.slides]};
+  const copy=duplicateSlide(candidate,source.id,params.name);
+  const itemIdMap=Object.fromEntries(source.items.map((item,index)=>[item.id,copy.items[index].id]));
+  if(!change(()=>{
+   project.slides=candidate.slides;project.activeSlideId=copy.id;
+   resetSlideSelection();selected.clear();lastTap=null;lastPointerItem=null;lastPaste=null;
+  }))throw new Error('The duplicate failed validation and was rolled back.');
+  fit();status(`Copied ${source.name} to ${copy.name}. Undo removes the copy.`);
+  return {...automationState(),sourceSlideId:source.id,newSlideId:copy.id,itemIdMap};
+ }
+ if(method==='batch_edit'||method==='preview_batch'){
   const prepared=prepareBatch(project,params.operations);
+  if(method==='preview_batch'){
+   const result=await renderAutomation(prepared.project,{slideId:params.slideId,maxSize:params.maxSize},true);
+   return {...result,proposed:true,baseRevision:revision,currentRevision:automationRevision(),
+    affectedSlideIds:[...new Set(params.operations.map(op=>op.slideId))]};
+  }
   if(!change(()=>{project.slides=prepared.project.slides;}))throw new Error('The edit failed validation and was rolled back.');
   status(`AI updated ${prepared.changedItemIds.length} objects. Undo restores the whole batch.`);
   return {...automationState(),changedItemIds:prepared.changedItemIds,createdItemIds:prepared.createdItemIds};

@@ -325,6 +325,19 @@ test('PDF crops an image with a vector clip while preserving original source pix
   });
 });
 
+test('PDF contains a cropped source in its rotated frame without resampling it', async () => {
+  await withBrowser({}, async state => {
+    const project = imageFixture({ imageFit: 'contain', rotation: 90, crop: { x: .25, y: 0, width: .5, height: 1 } });
+    const objects = await parsePDF(await exportPDF(project, 300));
+    const content = graphics(objects);
+    assert.match(content, /0 1 -1 0 15 -5 cm/, 'rotation uses the outer frame center');
+    assert.match(content, /7\.5 0 5 10 re W n/, 'centers the cropped 1:2 picture in the 20×10 frame');
+    assert.match(content, /10 0 0 -10 5 10 cm/, 'preserves the source aspect ratio and crop offset');
+    assert.equal(images(objects).length, 1);
+    assert.deepEqual(state.reads, [[0, 0, 2, 2]]);
+  });
+});
+
 test('PDF rasterizes only the shadow object bounds at the requested DPI', async () => {
   await withBrowser({}, async state => {
     const project = imageFixture({ x: 50, y: 30, width: 4, height: 2, rotation: 90, shadow: { enabled: true, blur: 0, distance: 0 } });
