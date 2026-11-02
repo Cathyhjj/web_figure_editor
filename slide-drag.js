@@ -1,14 +1,37 @@
-/** Pointer-driven slide reordering, including groups and scrollable/floating rails. */
+/** Find the insertion boundary under a pointer in a row-major grid. */
+function gridPosition(pages, x, y) {
+  const rects = pages.map(card => card.getBoundingClientRect());
+  let first = 0, end = rects.length;
+  for (let i = 1; i < rects.length; i++) {
+    if (Math.abs(rects[i].top - rects[first].top) < 1) continue;
+    if (y < (rects[i - 1].bottom + rects[i].top) / 2) { end = i; break; }
+    first = i;
+  }
+  let index = first;
+  if (y > rects.at(-1).bottom) index = end;
+  else if (y >= rects[0].top) {
+    while (index < end && x >= (rects[index].left + rects[index].right) / 2) index++;
+  }
+  // A wrapped boundary can appear at the end of one row or the start of the
+  // next. Keep the marker on the row the user is actually pointing at.
+  const rect = rects[Math.min(index, end - 1)];
+  const edge = index === first ? rect.left - 4 : index === end ? rect.right + 4 : (rects[index - 1].right + rect.left) / 2;
+  return { index, gridMarker: { edge, top: rect.top, bottom: rect.bottom } };
+}
+
+/** Pointer-driven slide reordering in the sorter and scrollable/floating rails. */
 export function initSlideDrag({ list, context, start, isCurrent, drop, cancel }) {
   let gesture = null, frame = 0, suppressClickUntil = 0;
   const cards = () => [...list.querySelectorAll('.slide-card')];
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
-  const horizontal = () => getComputedStyle(list).flexDirection.startsWith('row');
 
   function position() {
-    const bounds = list.getBoundingClientRect(), row = horizontal(), pages = cards();
+    const layout = getComputedStyle(list);
+    const grid = layout.display === 'grid', row = !grid && layout.flexDirection.startsWith('row');
+    const bounds = list.getBoundingClientRect(), pages = cards();
     const { x, y } = gesture;
     const inside = x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom;
+    if (grid && pages.length) return { bounds, row, pages, inside, ...gridPosition(pages, x, y) };
     const coordinate = row ? x : y;
     let index = pages.findIndex(card => {
       const rect = card.getBoundingClientRect();
@@ -26,6 +49,13 @@ export function initSlideDrag({ list, context, start, isCurrent, drop, cancel })
     preview.style.top = `${clamp(gesture.y + 16, 4, viewportHeight - preview.offsetHeight - 4)}px`;
     marker.hidden = !target.inside;
     if (!target.inside || !target.pages.length) return;
+    if (target.gridMarker) {
+      const { edge, top, bottom } = target.gridMarker;
+      const visibleTop = Math.max(top, target.bounds.top), visibleBottom = Math.min(bottom, target.bounds.bottom);
+      marker.hidden = visibleTop >= visibleBottom;
+      Object.assign(marker.style, { left: `${clamp(edge, target.bounds.left + 2, target.bounds.right - 2)}px`, top: `${visibleTop}px`, width: '3px', height: `${Math.max(0, visibleBottom - visibleTop)}px` });
+      return;
+    }
     const next = target.pages[target.index]?.getBoundingClientRect();
     const previous = target.pages[target.index - 1]?.getBoundingClientRect();
     const edge = next && previous
@@ -79,6 +109,7 @@ export function initSlideDrag({ list, context, start, isCurrent, drop, cancel })
 
   list.addEventListener('pointerdown', event => {
     if (event.button !== 0 || event.isPrimary === false || gesture) return;
+    if (event.pointerType === 'touch' && getComputedStyle(list).display === 'grid') return;
     const card = event.target.closest('.slide-card');
     if (!card || !list.contains(card)) return;
     suppressClickUntil = 0;

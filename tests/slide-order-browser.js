@@ -121,7 +121,8 @@ runButton.onclick = async () => {
     const center = element => { const bounds = element.getBoundingClientRect(); return { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 }; };
     const targetPoint = (id, side) => {
       const card = cardFor(id); card.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-      const bounds = card.getBoundingClientRect(), horizontal = win.getComputedStyle(list).flexDirection.startsWith('row');
+      const style = win.getComputedStyle(list);
+      const bounds = card.getBoundingClientRect(), horizontal = style.display === 'grid' || style.flexDirection.startsWith('row');
       return horizontal ? { x: side === 'before' ? bounds.left + 3 : bounds.right - 3, y: bounds.top + bounds.height / 2 } : { x: bounds.left + bounds.width / 2, y: side === 'before' ? bounds.top + 3 : bounds.bottom - 3 };
     };
     const begin = async (sourceId, targetId, side = 'before') => {
@@ -259,6 +260,83 @@ runButton.onclick = async () => {
     pointer(doc, 'pointermove', outsidePoint(), scrollID);
     await finish(scrollDrag, outsidePoint());
     check('Cancelling after auto-scroll retains every slide and its original position', equal(await save(), longFixture) && get('undo').disabled && indicatorsGone());
+
+    // Use the same editor instance as the rail checks so switching views also
+    // verifies that the panel manager and the sorter share the thumbnail nodes.
+    const rail = get('slides-panel'), sorter = get('slide-sorter');
+    const enterSorter = async () => { get('slide-sorter-view').click(); await frame(); };
+    const key = (target, value, options = {}) => target.dispatchEvent(new win.KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true, ...options }));
+    const inSorter = () => sorter.contains(list) && list.getBoundingClientRect().width > 0;
+    const previousWidth = iframe.style.width;
+    iframe.style.width = '1360px'; await frame();
+    await open(longFixture);
+    const textId = longFixture.slides[0].items[0].id;
+    doc.querySelector(`[data-layer="${textId}"] .layer-select`).click();
+    get('zoom-in').click();
+    const originalZoom = get('zoom-value').textContent;
+    const originalCards = cards();
+    await enterSorter();
+    const positions = cards().map(card => card.getBoundingClientRect());
+    const secondRow = positions.findIndex(rect => rect.top > positions[0].top + 2);
+    check('Slide Sorter shows each existing thumbnail in order, with multiple columns and rows', inSorter() && secondRow >= 2
+      && positions[1].left > positions[0].left && cards().every((card, i) => card === originalCards[i])
+      && equal(cards().map(card => card.dataset.slide), longFixture.slides.map(page => page.id)));
+    check('Opening the sorter is a view change with an identical saved project and no Undo step', equal(await save(), longFixture) && get('undo').disabled);
+    get('normal-view').click(); await frame();
+    check('Switching views without navigating preserves canvas zoom and the selected text object', get('zoom-value').textContent === originalZoom
+      && doc.querySelector('#stage .figure-item.selected')?.dataset.item === textId && get('selection-count').textContent === '1 selected');
+    await enterSorter();
+
+    const secondId = longFixture.slides[1].id;
+    key(cardFor(longFixture.activeSlideId), 'ArrowRight');
+    check('Right arrow moves focus and selection to the adjacent thumbnail', doc.activeElement === cardFor(secondId) && equal(selected(), [secondId]));
+    key(cardFor(secondId), 'ArrowDown', { shiftKey: true });
+    const nextRowIndex = secondRow + 1;
+    check('Shift+Down extends selection to the same column of the next row', doc.activeElement === cards()[nextRowIndex]
+      && equal(selected(), longFixture.slides.slice(1, nextRowIndex + 1).map(page => page.id)));
+    cardFor(secondId).click(); await frame();
+    check('A single click selects a thumbnail and keeps the overview open', inSorter() && equal(selected(), [secondId]) && (await save()).activeSlideId === secondId);
+    key(cardFor(secondId), 'Enter'); await frame();
+    check('Enter opens the selected slide for editing', rail.contains(list) && !inSorter() && get('slide-name').value === longFixture.slides[1].name);
+    await enterSorter();
+    const nextCard = cardFor(longFixture.slides[3].id);
+    nextCard.click();
+    nextCard.dispatchEvent(new win.MouseEvent('dblclick', { bubbles: true, cancelable: true, detail: 2 })); await frame();
+    check('Double-click opens the chosen slide for editing', rail.contains(list) && !inSorter() && get('slide-name').value === longFixture.slides[3].name);
+
+    const slideName = get('slide-name');
+    slideName.focus();
+    slideName.value = 'Updated slide title';
+    slideName.dispatchEvent(new win.Event('input', { bubbles: true })); slideName.blur();
+    await enterSorter();
+    check('Reopening the sorter reflects the latest slide name and number', nextCard.getAttribute('aria-label') === 'Slide 4: Updated slide title'
+      && nextCard.querySelector('.slide-caption').textContent.includes(slideName.value));
+    const group = [0, 2].map(index => longFixture.slides[index].id);
+    select(group[0]); select(group[1], { ctrlKey: true });
+    const gridBefore = await save(), targetIndex = secondRow + 1;
+    const targetId = longFixture.slides[targetIndex].id, expected = longFixture.slides.map(page => page.id).filter(id => !group.includes(id));
+    expected.splice(expected.indexOf(targetId) + 1, 0, ...group);
+    await dragTo(group[0], targetId, 'after');
+    check('A cross-row drop uses the right half of the target tile and moves the selected block together', inSorter() && onlyOrderChanged(gridBefore, await save(), expected) && equal(selected(), group) && indicatorsGone());
+    get('undo').click();
+    check('One Undo restores the grid order, selected group and shared source bytes', inSorter() && equal(await save(), gridBefore) && equal(selected(), group));
+    key(cardFor(group[1]), 'Escape'); await frame();
+    check('Escape returns from the sorter to the slide canvas', rail.contains(list) && !inSorter() && get('slide-name').value === longFixture.slides[2].name);
+
+    const slidesVisibility = get('view-panel-options').querySelector('[data-panel="slides"]');
+    slidesVisibility.click(); await frame();
+    await enterSorter();
+    check('The overview remains available when the Slides panel is hidden', rail.hidden && inSorter() && cards().length === longFixture.slides.length);
+    iframe.style.width = '390px'; await frame();
+    const lastCard = cards().at(-1);
+    lastCard.scrollIntoView({ block: 'nearest', inline: 'nearest' }); await frame();
+    const lastBounds = lastCard.getBoundingClientRect(), gridBounds = list.getBoundingClientRect();
+    check('On a phone-width screen the final tile can be reached without horizontal overflow', inSorter() && lastBounds.bottom <= gridBounds.bottom + 1
+      && lastBounds.left >= -1 && lastBounds.right <= win.innerWidth + 1 && list.scrollWidth <= list.clientWidth + 1);
+    get('normal-view').click(); await frame();
+    check('Normal view restores the prior hidden panel preference', rail.contains(list) && rail.hidden && !inSorter() && !slidesVisibility.checked);
+    slidesVisibility.click();
+    iframe.style.width = previousWidth; await frame();
 
     // Leave five distinct slides and a non-adjacent group ready for a separate
     // real-pointer drag and visual inspection after the synthetic suite.
