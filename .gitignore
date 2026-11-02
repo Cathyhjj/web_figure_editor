@@ -8,6 +8,7 @@
 !/index.html
 !/style.css
 !/app.js
+!/canvas-text-geometry.js
 !/automation.js
 !/automation_bridge.py
 !/figure_mcp.py

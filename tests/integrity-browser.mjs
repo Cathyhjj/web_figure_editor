@@ -203,5 +203,70 @@ try {
     await page.locator('#save-project').click(); await idle(page); await reload(page);
     assert.equal(await page.locator('.layer-row').count(), 1); validateDeck(await readFile(page));
   });
+  await scenario('clicking a title edits at the pointed character and commits one undoable edit', async page => {
+    const deck = fixture('Editable title'), original = 'Ti edge\nCu edge';
+    deck.slides[0].items = [{ id: 'title', type: 'text', x: 80, y: 65, width: 240, height: 64,
+      text: original, fontSize: 24, align: 'center', rotation: 12 }];
+    await open(page, deck);
+    await page.locator('#zoom-in').click();
+    const secondLine = page.locator('#stage [data-item="title"] tspan').nth(1);
+    const location = await secondLine.evaluate(line => {
+      const glyph = line.getExtentOfChar(3);
+      const p = new DOMPoint(glyph.x + glyph.width * .15, glyph.y + glyph.height / 2).matrixTransform(line.getScreenCTM());
+      return { x: p.x, y: p.y };
+    });
+    await page.mouse.click(location.x, location.y);
+    const editor = page.locator('#canvas-text-editor');
+    assert.equal(await editor.evaluate(el => el === document.activeElement), true);
+    assert.deepEqual(await editor.evaluate(el => [el.selectionStart, el.selectionEnd]), [11, 11]);
+    await page.keyboard.type('K-'); await page.keyboard.press('Shift+ArrowLeft'); await page.keyboard.type(' ');
+    await page.keyboard.press('End'); await page.keyboard.press('Enter');
+    const ime = await page.context().newCDPSession(page);
+    await ime.send('Input.imeSetComposition', {text: 'xin', selectionStart: 3, selectionEnd: 3});
+    await ime.send('Input.insertText', {text: '新标题'}); await ime.detach();
+    const expected = 'Ti edge\nCu K edge\n新标题';
+    assert.equal(await editor.inputValue(), expected);
+    await page.locator('#save-project').click(); await idle(page);
+    assert.equal(await editor.isVisible(), false);
+    const saved = validateDeck(await readFile(page)).slides[0].items[0];
+    assert.equal(saved.text, expected); assert.equal(saved.align, 'center'); assert.equal(saved.rotation, 12);
+    assert.ok(saved.height >= 24 * 1.2 * 3);
+    await page.locator('#undo').click();
+    const [restored] = await untilDraft(page, p => p?.slides[0].items[0].text === original);
+    assert.equal(restored.slides[0].items[0].height, 64); assert.equal(await page.locator('#undo').isDisabled(), true);
+    await page.locator('#redo').click(); await untilDraft(page, p => p?.slides[0].items[0].text === expected);
+  });
+  await scenario('the text box supports selection, drag and Shift selection alongside inline editing', async page => {
+    const deck = fixture('Text gestures');
+    deck.slides[0].items = [
+      { id: 'title', type: 'text', x: 30, y: 40, width: 240, height: 80, text: 'Label', fontSize: 24 },
+      { id: 'locked', type: 'text', x: 30, y: 220, width: 180, height: 60, text: 'Locked', fontSize: 24, locked: true },
+    ];
+    await open(page, deck);
+    const editor = page.locator('#canvas-text-editor'), title = page.locator('#stage [data-item="title"]');
+    const point = (x, y) => page.locator('#stage').evaluate((stage, [x, y]) => {
+      const p = new DOMPoint(x, y).matrixTransform(stage.getScreenCTM()); return { x: p.x, y: p.y };
+    }, [x, y]);
+    const whitespace = await point(200, 100), glyph = await point(42, 55), end = await point(87, 80);
+    await page.mouse.click(whitespace.x, whitespace.y);
+    assert.equal(await title.evaluate(el => el.classList.contains('selected')), true); assert.equal(await editor.isVisible(), false);
+    await page.mouse.click(whitespace.x, whitespace.y);
+    assert.equal(await editor.evaluate(el => el === document.activeElement), true);
+    await page.keyboard.press('Escape');
+    assert.equal(await editor.isVisible(), false); assert.equal(await title.evaluate(el => el.classList.contains('selected')), true);
+    await page.mouse.move(glyph.x, glyph.y); await page.mouse.down(); await page.mouse.move(end.x, end.y, { steps: 8 }); await page.mouse.up();
+    assert.equal(await editor.isVisible(), false);
+    const [moved] = await untilDraft(page, p => p?.slides[0].items[0].x > 60);
+    const movedTitle = moved.slides[0].items[0];
+    assert.ok(Math.abs(movedTitle.x - 75) < 1 && Math.abs(movedTitle.y - 65) < 1);
+    assert.equal(movedTitle.text, 'Label');
+    await page.locator('#undo').click(); await untilDraft(page, p => p?.slides[0].items[0].x === 30);
+    const lockedGlyph = await point(42, 235);
+    await page.mouse.click(lockedGlyph.x, lockedGlyph.y); assert.equal(await editor.isVisible(), false);
+    await page.keyboard.down('Shift');
+    try { await page.mouse.click(glyph.x, glyph.y); } finally { await page.keyboard.up('Shift'); }
+    assert.equal(await page.locator('#stage .figure-item.selected').count(), 2); assert.equal(await editor.isVisible(), false);
+    assert.equal(await page.locator('#undo').isDisabled(), true);
+  });
   console.log(JSON.stringify({ passed: checks.length, checks }, null, 2));
 } finally { await browser.close(); }

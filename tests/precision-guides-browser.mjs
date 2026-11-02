@@ -281,6 +281,7 @@ try {
     assert.equal(await page.locator('#stage .figure-item.selected').count(), 1);
     const guide = await point(page, 200, 25); await page.mouse.dblclick(guide.x, guide.y);
     assert.notEqual(await page.evaluate(() => document.activeElement.id), 'text-content');
+    assert.equal(await page.locator('#canvas-text-editor').isVisible(), false);
     assert.equal(await page.locator('#stage [data-guide]').count(), 2);
     assert.equal(await page.locator('#undo').isDisabled(), true);
   });

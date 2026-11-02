@@ -285,13 +285,13 @@ run.onclick = async () => {
     get('close-format-panel').click(); await settle(win);
     check('Close leaves the formatting panel mode', !formatOpen());
     get('add-text').click(); await settle(win);
-    const addedTextId = selected()?.dataset.item, addedTextEditor = get('text-content');
-    check('Add text after closing Format reveals and focuses the text editor', Boolean(addedTextId) && shown(panel()) && shown(addedTextEditor) && doc.activeElement === addedTextEditor && addedTextEditor.selectionStart === 0 && addedTextEditor.selectionEnd === addedTextEditor.value.length);
+    const addedTextId = selected()?.dataset.item, addedTextEditor = get('canvas-text-editor');
+    check('Add text after closing Format selects the placeholder on the canvas', Boolean(addedTextId) && !shown(panel()) && shown(addedTextEditor) && doc.activeElement === addedTextEditor && addedTextEditor.selectionStart === 0 && addedTextEditor.selectionEnd === addedTextEditor.value.length);
     await openFormat('format-picture'); get('close-format-panel').click(); await settle(win);
     item(addedTextId).querySelector('.item-hit').dispatchEvent(new win.MouseEvent('dblclick', { button: 0, bubbles: true, cancelable: true }));
     await settle(win);
-    const reopenedTextEditor = get('text-content');
-    check('Double-clicking text after closing Format reveals and focuses its editor', selected()?.dataset.item === addedTextId && shown(panel()) && shown(reopenedTextEditor) && doc.activeElement === reopenedTextEditor && reopenedTextEditor.selectionStart === 0 && reopenedTextEditor.selectionEnd === reopenedTextEditor.value.length);
+    const reopenedTextEditor = get('canvas-text-editor');
+    check('Double-clicking text after closing Format focuses it on the canvas', selected()?.dataset.item === addedTextId && !shown(panel()) && shown(reopenedTextEditor) && doc.activeElement === reopenedTextEditor);
     await openFormat('format-picture'); get('close-format-panel').click(); await settle(win);
     const visibility = find('[data-panel="objects"]');
     visibility.checked = false; visibility.dispatchEvent(new win.Event('change', { bubbles: true }));
