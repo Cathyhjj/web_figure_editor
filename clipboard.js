@@ -80,14 +80,14 @@ export function createSlidesClipboard(deck, selectedSlideIds = new Set([deck.act
   if (slides.length !== ids.size) throw new Error('A slide selected for copying does not exist.');
   const assetIds = new Set(slides.flatMap(slide => slide.items.filter(item => isMediaItem(item)).map(item => item.assetId)));
   return validateDeck({
-    ...deck, slides, assets: deck.assets.filter(asset => assetIds.has(asset.id)),
+    ...deck, originalPptx: undefined, slides, assets: deck.assets.filter(asset => assetIds.has(asset.id)),
     activeSlideId: ids.has(deck.activeSlideId) ? deck.activeSlideId : slides.at(-1).id,
   });
 }
 
 /** Keep the established single-slide format when just one slide was copied. */
 export function encodeSlides(slidesPayload) {
-  const source = validateDeck(slidesPayload);
+  const source = validateDeck({ ...slidesPayload, originalPptx: undefined });
   if (source.slides.length === 1) return encodeSlide(createSlideClipboard(source));
   const text = SLIDES_PREFIX + JSON.stringify(source);
   if (text.length > MAX_TEXT_LENGTH) throw new Error('The copied slides exceed the 240 MB clipboard limit. Copy fewer slides.');

@@ -88,6 +88,7 @@ class LocalServerTests(unittest.TestCase):
         self.assertEqual(data, {"app": "figure-editor-local", "version": 1, "locate": True,
                             "saveClipboardImage": True, "pdfTextOutlines": False, "pptxImport": True, "pptxPaste": True,
                             "pptxClipboard": server.clipboard_available(), "pptxClipboardReady": server.clipboard_ready(),
+                            "powerPointPDF": server.power_point_pdf_available(),
                             "automation": True, "token": self.local.token})
         self.assertEqual(self.request(path="/")[1], b"Figure Editor")
         self.assertEqual(self.request(path="/tests/browser.html")[1], b"Browser tests")

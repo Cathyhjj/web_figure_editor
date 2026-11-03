@@ -1,6 +1,7 @@
 import { isMediaItem } from './video.js';
 import { cloneShape } from './shape.js';
 import { cloneGuides, validateGuides } from './guides.js';
+import { validateOriginalPPTX } from './pptx-source.js';
 /** Multi-slide projects. The asset registry is shared; each slide owns its canvas and items. */
 import { createProject, uid, validateProject, validateProjectBatch, sourceManifest } from './core.js';
 
@@ -67,6 +68,7 @@ export function validateDeck(input) {
   return {
     format: 'figure-editor', version: 2, id: deckId, name, assets: validated[0].assets,
     slides: validated.map((slide, index) => ({ id: slide.id, name: slide.name, canvas: slide.canvas, items: slide.items, ...(guides[index] !== undefined ? { guides: guides[index] } : {}) })), activeSlideId,
+    ...(p.originalPptx === undefined ? {} : { originalPptx: validateOriginalPPTX(p.originalPptx) }),
   };
 }
 

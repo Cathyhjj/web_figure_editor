@@ -32,6 +32,7 @@ class DesktopLauncherTests(unittest.TestCase):
         shutil.copy2(REPO / "automation_bridge.py", self.root / "automation_bridge.py")
         shutil.copy2(REPO / "pdf_text.py", self.root / "pdf_text.py")
         shutil.copy2(REPO / "pptx_import.py", self.root / "pptx_import.py")
+        shutil.copy2(REPO / "powerpoint_pdf.py", self.root / "powerpoint_pdf.py")
         shutil.copy2(REPO / "pptx_clipboard.py", self.root / "pptx_clipboard.py")
         shutil.copy2(REPO / "scripts" / "desktop_launcher.py", self.root / "scripts" / "desktop_launcher.py")
         (self.root / "index.html").write_text("live editor", encoding="utf-8")

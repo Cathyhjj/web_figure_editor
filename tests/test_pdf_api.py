@@ -136,6 +136,16 @@ class PdfTextApiTests(unittest.TestCase):
             self.assertEqual(self.request(path="/api/pdf-text/../../run")[0], 404)
             outline.assert_not_called()
 
+    def test_powerpoint_native_pdf_requires_origin_token_and_bounded_source(self):
+        path, payload = "/api/pptx-source-pdf", {"name": "test.pptx", "data": "dGVzdA=="}
+        with mock.patch.object(server, "render_powerpoint_pdf", return_value={"data": "JVBERg=="}) as render:
+            for headers in ({"Origin": None}, {"X-Figure-Token": "wrong"}):
+                self.assertEqual(self.request(path=path, data=payload, headers=headers)[0], 403)
+            self.assertEqual(self.request(path=path, data=payload, headers={"Content-Length": str(server.MAX_PPTX_BODY + 1)})[0], 413)
+            render.assert_not_called()
+            self.assertEqual(self.request(path=path, data=payload)[:2], (200, {"data": "JVBERg=="}))
+            render.assert_called_once_with(payload)
+
 
 if __name__ == "__main__":
     unittest.main()

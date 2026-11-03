@@ -17,7 +17,8 @@ import { locateAsset } from './locate.js';
 import { hasSavedLocalSource, needsLocalSource, saveClipboardAsset, savePastedSources } from './local-source.js';
 import { generateHTMLReport } from './report.js';
 import { exportPPTX, pptxLayout } from './pptx.js';
-import { initPPTXImport } from './pptx-import.js';
+import { initPPTXImport, localAPI } from './pptx-import.js';
+import { unchangedOriginalPPTX } from './pptx-source.js';
 import { POWERPOINT_MIME, initPowerPointPaste } from './pptx-clipboard.js';
 import { exportPDF } from './pdf.js';
 import { initWindows } from './windows.js';
@@ -665,7 +666,12 @@ function insertPowerPointSlide(deck,warnings){
   return applied;
 }
 const targetIsCurrent=target=>target.project===project&&target.slideId===project.activeSlideId&&(!fileOperation||autosaveWriting);
-initPPTXImport({captureTarget:importTarget,targetIsCurrent,insert:insertPowerPointSlide});
+initPPTXImport({captureTarget:importTarget,targetIsCurrent,insert:insertPowerPointSlide,openProject:(deck,warnings)=>{
+ if(dirty&&!confirm('Opening this presentation as a new project will replace the current local draft. Continue?'))return false;
+ replaceProject(deck);changed();
+ status(`Opened ${deck.slides.length} slides as a new project. Save to choose its file location. The original PPTX is embedded for unchanged exports.${warnings.some(w=>/omitted|not retained|approximat/i.test(w))?' Some features are approximated on the editable canvas.':''}`);
+ return true;
+}});
 const powerpointPaste=initPowerPointPaste({
  captureTarget:()=>({...importTarget(),revision:editRevision}),
  targetIsCurrent:target=>targetIsCurrent(target)&&target.revision===editRevision,
@@ -1145,19 +1151,39 @@ async function reopenRecentProject(entry){
  }finally{fileOperation=false;renderFileActions();scheduleAutosave();}
 }
 $('source-manifest').onclick=()=>downloadBlob(new Blob([JSON.stringify(deckSourceManifest(project),null,2)],{type:'application/json'}),filename()+'.sources.json');
-let exporting=false;
+let exporting=false,exportInfoVersion=0;
 function exportInfo(){
  if(exporting)return;
+ const version=++exportInfoVersion;
+ const originalOption=$('export-format').querySelector('[value="pdf-source"]');
+ originalOption.hidden=originalOption.disabled=!project.originalPptx;
+ if(originalOption.disabled&&$('export-format').value==='pdf-source')$('export-format').value='pdf';
  const format=$('export-format').value,report=format==='html',ppt=format==='pptx',png=format==='png',pdf=format==='pdf',dpi=Number($('export-dpi').value);
  $('export-title').textContent=ppt?'Export as PPT':report?'Export HTML report':'Export current slide';
  $('export-slide-name').textContent=report||ppt?`All ${project.slides.length} slide${project.slides.length===1?'':'s'} · ${project.name}`:`Slide ${project.slides.indexOf(slide())+1} of ${project.slides.length}: ${slide().name}`;
  $('export-dpi').disabled=!(png||pdf);
  $('export-dpi-label').textContent=pdf?'PDF effects resolution':'PNG resolution';
  $('export-submit').disabled=false;
+ if(format==='pdf-source'){
+  $('export-title').textContent='Export PDF with PowerPoint';
+  $('export-slide-name').textContent=`All ${project.slides.length} slides · ${project.name}`;
+  $('export-submit').disabled=true;$('export-info').textContent='Checking the original presentation…';
+  (async()=>{
+    const original=await unchangedOriginalPPTX(project);
+    if(!original)throw new Error('This project has changed since import. Choose PDF · Vector text + shapes to export your edits.');
+    if(!(await localAPI()).powerPointPDF)throw new Error('This option requires Microsoft PowerPoint and the current Figure Editor server on this Mac.');
+    if(version!==exportInfoVersion)return;
+    $('export-info').textContent='Microsoft PowerPoint will open a temporary copy of the unchanged presentation on this Mac and export all pages as a PDF, preserving the original layout.';
+    $('export-submit').disabled=false;
+  })().catch(e=>{if(version===exportInfoVersion)$('export-info').textContent=e.message;});return;
+ }
  if(ppt){
   try{
    const layout=pptxLayout(project);
    $('export-info').textContent=`PowerPoint (.pptx) · ${Number(layout.widthInches.toFixed(2))} × ${Number(layout.heightInches.toFixed(2))} in. All slides, with editable text, shapes, separate images, and embedded MP4 videos (click to play in Slide Show). ${layout.mixedSizes?'Different canvas sizes are fitted proportionally and centered on the first slide’s page size. ':''}${layout.scale!==1?'The first canvas is scaled to fit PowerPoint’s size limits. ':''}Fonts are not embedded.`;
+   if(project.originalPptx)unchangedOriginalPPTX(project).then(original=>{
+    if(original&&version===exportInfoVersion)$('export-info').textContent='This complete presentation is unchanged. Export keeps the original PowerPoint file, including its masters, layouts, placeholders and embedded media.';
+   }).catch(e=>{if(version===exportInfoVersion){$('export-info').textContent=e.message;$('export-submit').disabled=true;}});
   }catch(e){$('export-info').textContent=e.message;$('export-submit').disabled=true;}
   return;
  }
@@ -1176,6 +1202,14 @@ $('export-submit').onclick=async()=>{
   flushText();const format=$('export-format').value;let blob,exportName;
   if(format==='pptx'){
    exportName=filename()+'.pptx';blob=await exportPPTX(project);
+  }else if(format==='pdf-source'){
+   const original=await unchangedOriginalPPTX(project);
+   if(!original)throw new Error('The project has changed. Choose the current-slide PDF option to export your edits.');
+   const local=await localAPI();if(!local.powerPointPDF)throw new Error('Microsoft PowerPoint PDF export is unavailable on this Mac.');
+   const res=await fetch('/api/pptx-source-pdf',{method:'POST',mode:'same-origin',redirect:'error',cache:'no-store',headers:{'Content-Type':'application/json','X-Figure-Token':local.token},
+    body:JSON.stringify({name:original.name,data:original.data})});
+   const result=await res.json();if(!res.ok)throw new Error(result.error||'PowerPoint could not export the PDF.');
+   blob=new Blob([Uint8Array.from(atob(result.data),c=>c.charCodeAt(0))],{type:'application/pdf'});exportName=filename()+'.pdf';
   }else if(format==='html'){
    blob=new Blob([generateHTMLReport(project)],{type:'text/html;charset=utf-8'});exportName=filename()+'-report.html';
   }else{
@@ -1185,7 +1219,7 @@ $('export-submit').onclick=async()=>{
   }
   if(blob.size>240*1024*1024)throw new Error('Export exceeds 240 MB. Use fewer slides or smaller source images.');
   downloadBlob(blob,exportName);$('export-dialog').close();
-  status(format==='pptx'?`PowerPoint exported with all ${project.slides.length} slides. Text, shapes, and images can be edited in PowerPoint. Embedded videos play when clicked in Slide Show.`:format==='html'?`HTML report exported with all ${project.slides.length} slides. Open the file offline; save your project to keep editing.`:`Current slide exported as ${format.toUpperCase()}. Save project to keep all slides editable.`);
+  status(format==='pdf-source'?`Exported all ${project.slides.length} pages as PDF using PowerPoint on this Mac.`:format==='pptx'?`PowerPoint exported with all ${project.slides.length} slides. Text, shapes, and images can be edited in PowerPoint. Embedded videos play when clicked in Slide Show.`:format==='html'?`HTML report exported with all ${project.slides.length} slides. Open the file offline; save your project to keep editing.`:`Current slide exported as ${format.toUpperCase()}. Save project to keep all slides editable.`);
  }catch(e){$('export-info').textContent='Export failed: '+e.message;status('Export failed: '+e.message,true);}finally{exporting=false;button.disabled=false;button.textContent='Export file';$('export-format').disabled=$('export-cancel').disabled=false;$('export-dpi').disabled=!['png','pdf'].includes($('export-format').value);}
 };
 const editingInput = target => /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName)||target?.isContentEditable;

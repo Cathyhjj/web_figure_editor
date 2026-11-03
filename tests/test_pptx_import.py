@@ -51,6 +51,41 @@ def fixture(slides=None, extra=None):
 
 
 class PptxImportTests(unittest.TestCase):
+    def test_blank_template_inherits_text_fields_and_keeps_picture_frames_separate(self):
+        def field(name, ph, geometry='', text_body=''):
+            return (f'<p:sp><p:nvSpPr><p:cNvPr id="2" name="{name}"/><p:cNvSpPr/>'
+                    f'<p:nvPr><p:ph {ph}/></p:nvPr></p:nvSpPr><p:spPr>{geometry}</p:spPr>{text_body}</p:sp>')
+
+        blue = '<a:solidFill><a:srgbClr val="003399"/></a:solidFill>'
+        body = ('<p:txBody><a:bodyPr lIns="95250" anchor="ctr"/>'
+                '<a:lstStyle><a:lvl1pPr algn="ctr"><a:buChar char="§"/><a:defRPr sz="3150" b="1">'
+                '<a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:latin typeface="Arial"/>'
+                '</a:defRPr></a:lvl1pPr></a:lstStyle><a:p><a:r><a:t>Click to add text</a:t></a:r></a:p></p:txBody>')
+        layout_shapes = (field('Heading layout', 'type="body" idx="3"', xfrm(11,22,200,50) + blue, body)
+                         + field('Photo layout', 'type="pic" idx="4"', xfrm(20,90,80,80) + blue, body))
+        extra = {
+            'ppt/slides/_rels/slide1.xml.rels': relations([('layout', 'slideLayout', '../slideLayouts/layout.xml', '')]),
+            'ppt/slideLayouts/layout.xml': f'<p:sldLayout {HEADER}><p:cSld><p:spTree>{layout_shapes}</p:spTree></p:cSld></p:sldLayout>',
+        }
+        empty = '<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:endParaRPr i="1"/></a:p></p:txBody>'
+        for text_body in (empty, ''):
+            with self.subTest(explicit_text_body=bool(text_body)):
+                shapes = field('Blank heading', 'idx="3"', text_body=text_body) + field('Blank photo', 'idx="4"', text_body=empty)
+                result = import_pptx({**fixture([slide(shapes)], extra), 'slide': 1})
+                self.assertEqual([(i['type'], i['name']) for i in result['items']],
+                                 [('rect', 'Blank heading'), ('textBlock', 'Blank heading'), ('rect', 'Blank photo')])
+                field_item = result['items'][1]
+                self.assertTrue(field_item['emptyPlaceholder'])
+                self.assertEqual((field_item['x'], field_item['y'], field_item['width'], field_item['height']),
+                                 (11, 22, 200, 50))
+                self.assertEqual((field_item['anchor'], field_item['insets']['left']), ('ctr', 10))
+                paragraph = field_item['paragraphs'][0]
+                self.assertEqual(paragraph['align'], 'center')
+                run = paragraph['runs'][0]
+                self.assertEqual((run['text'], run['fontFamily'], run['fontSize'], run['fontWeight'], run['color']),
+                                 ('', 'Arial', 42, 700, '#ffffff'))
+                self.assertEqual(run['fontStyle'], 'italic' if text_body else 'normal')
+
     def test_only_marked_pictures_treat_symmetric_negative_crop_as_contain_padding(self):
         ext = ('<a:extLst><a:ext uri="{9B18E286-D535-4B91-B568-9A25B57E38F3}">'
                '<fe:imageFit xmlns:fe="urn:figure-editor:image-fit:1" mode="contain"/></a:ext></a:extLst>')

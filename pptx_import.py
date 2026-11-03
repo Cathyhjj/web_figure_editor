@@ -469,8 +469,16 @@ class Converter:
 
     def text(self, shape, chain, g, name):
         tx = find(shape, 'p:txBody')
+        placeholders = [find(s, './/p:ph') for s in [shape, *chain]]
+        role = next((ph.get('type') for ph in placeholders if ph is not None and ph.get('type')),
+                    'obj' if placeholders[0] is not None else 'other')
+        text_placeholder = placeholders[0] is not None and role in (
+            'title', 'ctrTitle', 'subTitle', 'body', 'obj', 'dt', 'ftr', 'hdr', 'sldNum')
         if tx is None:
-            return
+            if not text_placeholder:
+                return
+            # A blank slide placeholder can inherit its entire text frame from its layout.
+            tx = ET.Element('{' + NS['p'] + '}txBody')
         body = {}
         for ancestor in reversed(chain):
             b = find(ancestor, 'p:txBody/a:bodyPr')
@@ -481,8 +489,6 @@ class Converter:
             self.warn('Vertical text is imported horizontally.', name)
         if g['_flipX'] or g['_flipY']:
             self.warn('Mirrored text is imported without reflection.', name)
-        placeholders = [find(s,'.//p:ph') for s in [shape,*chain]]
-        role = next((ph.get('type') for ph in placeholders if ph is not None and ph.get('type')), 'body' if any(ph is not None for ph in placeholders) else 'other')
         style_type = 'titleStyle' if role in ('title', 'ctrTitle') else 'bodyStyle' if role in ('body', 'obj', 'subTitle') else 'otherStyle'
         font_ref=first(*(find(s,'p:style/a:fontRef') for s in [shape,*chain]))
         font_default=ET.Element('{'+NS['a']+'}defRPr')
@@ -494,10 +500,13 @@ class Converter:
         if any(tag(node) in ('oMath','oMathPara') for node in tx.iter()):
             self.warn('Office equations are not retained; use an image to preserve them.',name)
         total_text = sum(len(t.text or '') for t in children(tx,'.//a:t'))
-        if total_text > 100000 or len(children(tx,'a:p')) > 2000:
+        source_paragraphs = children(tx, 'a:p')
+        if total_text > 100000 or len(source_paragraphs) > 2000:
             raise PptxImportError(413,'A text box is too large to import (100,000 characters or 2,000 paragraphs).')
         font_scale = num(find(b, 'a:normAutofit'), 'fontScale', 100000)/100000
-        for p in children(tx, 'a:p'):
+        if text_placeholder and not source_paragraphs:
+            source_paragraphs = [ET.Element('{' + NS['a'] + '}p')]
+        for p in source_paragraphs:
             pp = find(p, 'a:pPr')
             level = max(0, min(8, int(num(pp, 'lvl')))) + 1
             defaults = [find(self.presentation, f'p:defaultTextStyle/a:lvl{level}pPr'),
@@ -519,16 +528,17 @@ class Converter:
                 if any(find(run, path) is not None for path in ('a:rPr/a:hlinkClick', 'a:rPr/a:highlight')) or (find(run, 'a:rPr') is not None and find(run, 'a:rPr').get('u', 'none') != 'none'):
                     self.warn('Links, highlighting and underlining are not retained.', name)
                 runs.append({'text': value, **style})
-            if not runs:
+            if not runs or (not any(run['text'] for run in runs) and find(p, 'a:endParaRPr') is not None):
                 runs = [{'text': '', **self.run_style([font_default] + [find(n, 'a:defRPr') for n in defaults] + [find(p, 'a:endParaRPr')], g['_scaleY']*font_scale)}]
             bullet = None
-            for n in defaults:
-                if find(n, 'a:buNone') is not None: bullet = None
-                if find(n, 'a:buChar') is not None: bullet = find(n, 'a:buChar').get('char', '•')
-                if find(n, 'a:buAutoNum') is not None:
-                    bullet = str(len(paragraphs)+1)+'.'
-                    self.warn('Numbered bullets are imported as editable text.', name)
-            if bullet: runs[0]['text'] = bullet + ' ' + runs[0]['text']
+            if any(run['text'].strip() for run in runs):
+                for n in defaults:
+                    if find(n, 'a:buNone') is not None: bullet = None
+                    if find(n, 'a:buChar') is not None: bullet = find(n, 'a:buChar').get('char', '•')
+                    if find(n, 'a:buAutoNum') is not None:
+                        bullet = str(len(paragraphs)+1)+'.'
+                        self.warn('Numbered bullets are imported as editable text.', name)
+                if bullet: runs[0]['text'] = bullet + ' ' + runs[0]['text']
             spacing = {}
             for key in ('lnSpc', 'spcBef', 'spcAft'):
                 node = first(*(find(n, 'a:'+key) for n in reversed(defaults)))
@@ -538,9 +548,12 @@ class Converter:
                                'marginLeft': float(attributes.get('marL', 0))/EMU*g['_scaleX'],
                                'marginRight': float(attributes.get('marR', 0))/EMU*g['_scaleX'],
                                'indent': float(attributes.get('indent', 0))/EMU*g['_scaleX'], 'spacing': spacing})
-        if not any(r['text'] for p in paragraphs for r in p['runs']):
+        empty = not any(r['text'] for p in paragraphs for r in p['runs'])
+        if empty and not text_placeholder:
             return
         item = self.base(name, g, 'textBlock')
+        if empty:
+            item['emptyPlaceholder'] = True
         item.update(paragraphs=paragraphs, insets={key: float(body.get(attr, default))/EMU*g[scale]
                     for key, attr, default, scale in [('left','lIns',91440,'_scaleX'),('right','rIns',91440,'_scaleX'),('top','tIns',45720,'_scaleY'),('bottom','bIns',45720,'_scaleY')]},
                     anchor=body.get('anchor', 't'), wrap=body.get('wrap', 'square') != 'none', scaleY=g['_scaleY'])

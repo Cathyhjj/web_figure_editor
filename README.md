@@ -265,6 +265,12 @@ PNG、SVG、PDF、HTML 报告、页面缩略图和跨应用复制均显示裁切
 
 支持常见预设形状和有界自定义路径，复杂图表、SmartArt、OLE、部分连接线箭头、阴影和文字特效仍有限制，字体和浏览器文字测量也可能带来细微排版差异。导出 PPTX 时形状路径保持可编辑。
 
+### 整份 PowerPoint 作为新项目打开
+
+在 **Import PPTX** 中选择文件，点 **Open all as new project**，按源文件顺序导入全部页（最多 100 页）。新项目的画布对象可以编辑，**Save** 将它们与完整原始 PPTX 一起保存。项目可能包含原演示文稿的备注、隐藏内容和未使用的母版；分享项目时也会分享这些原始内容。
+
+未改动的整份项目导出 **PPT** 时保留原始 PPTX 字节，包括母版、主题、占位符和备注。选 **PDF · Original PowerPoint layout · All slides** 时，本机安装的 Microsoft PowerPoint 负责排版，所有页面一起导出。修改内容后，**PPT** 使用当前可编辑对象生成文件；打印修改后的某一页使用 **PDF · Vector text + shapes**。单页插入不嵌入其他页或完整原文件。
+
 ### 从 PowerPoint 导入一页
 
 点击顶部 **Import PPTX**，选择 `.pptx` 文件，然后在 **Choose a slide** 中选择页码。窗口显示转换后的预览、独立对象数量和 **Import notes**；点击 **Insert as new slide**，在当前页之后插入该页，自动切换到新页。一次 Undo 可撤销整页导入，Redo 可恢复；导入不会替换现有页面或改写原 PPTX。

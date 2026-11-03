@@ -45,6 +45,7 @@
 !/demo.js
 !/report.js
 !/pptx.js
+!/pptx-source.js
 !/pptx-import.js
 !/pptx_import.py
 !/video.js
@@ -229,3 +230,8 @@
 # Precision layout and non-printing guide browser regressions.
 !/tests/precision-layout-browser.mjs
 !/tests/precision-guides-browser.mjs
+
+# Source-faithful PDF rendering with local PowerPoint.
+!/powerpoint_pdf.py
+!/scripts/powerpoint_pdf.applescript
+!/tests/test_powerpoint_pdf.py

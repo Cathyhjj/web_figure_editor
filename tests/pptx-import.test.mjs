@@ -52,6 +52,31 @@ test('mixed styles and superscripts retain independent styles and baseline posit
   assert.ok(result[1].y+result[1].fontSize<result[0].y+result[0].fontSize);
 });
 
+test('blank bar and body placeholders keep an editable text frame with the inherited line position', () => {
+  const field = block([run('', { fontWeight:700, color:'#ffffff' })], { emptyPlaceholder:true, anchor:'ctr' });
+  const p = field.paragraphs[0];
+  Object.assign(p, { align:'center', indent:-4, marginLeft:12, spacing:{lnSpc:{kind:'spcPct',value:95000}} });
+  const [item] = layoutTextBlock(field, measure);
+  assert.equal(item.text, '');
+  assert.equal(item.align, 'center');
+  assert.equal(item.fontWeight, 700);
+  assert.equal(item.color, '#ffffff');
+  assert.deepEqual([item.x, item.width], [118, 272]);
+  assert.equal(item.y, 236.5);
+  assert.equal(item.y + item.height, field.y + field.height - field.insets.bottom);
+  const top = layoutTextBlock({ ...field, anchor:'t' }, measure);
+  assert.equal(top.length, 1);
+  assert.equal(top[0].y, 201);
+  assert.ok(top[0].height > item.height);
+  // The blank fields become ordinary editable items, and retain their frames after save/open.
+  const deck = createDeck();
+  deck.slides[0].items = top;
+  const reopened = validateDeck(JSON.parse(JSON.stringify(validateDeck(deck))));
+  assert.equal(reopened.slides[0].items[0].text, '');
+  reopened.slides[0].items[0].text = 'New poster heading';
+  assert.equal(validateDeck(reopened).slides[0].items[0].text, 'New poster heading');
+});
+
 test('line spacing uses each line font size and keeps trailing explicit breaks',()=>{
   const mixed=layoutTextBlock(block([run('Large\n',{fontSize:30}),run('small\nsmall',{fontSize:10})]),measure);
   assert.equal(mixed[2].y-mixed[1].y,12);

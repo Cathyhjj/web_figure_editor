@@ -23,6 +23,7 @@ from urllib.parse import unquote, urlsplit
 from xml.parsers import expat
 from pdf_text import MAX_PDF_TEXT_BODY, PdfTextError, PdfTextOutliner
 from pptx_import import MAX_PPTX_BODY, PptxImportError, import_pptx
+from powerpoint_pdf import power_point_pdf_available, render_powerpoint_pdf
 from pptx_clipboard import clipboard_available, clipboard_ready, start_clipboard_helper, read_powerpoint_clipboard
 from automation_bridge import AutomationBridge, AutomationError, MAX_AUTOMATION_BODY
 
@@ -448,6 +449,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                                          "locate": sys.platform == "darwin", "saveClipboardImage": True,
                                          "pdfTextOutlines": self.server.pdf_text.available,
                                          "pptxImport": True,
+                                         "powerPointPDF": power_point_pdf_available(),
                                          "pptxPaste": True, "pptxClipboard": clipboard_available(),
                                          "pptxClipboardReady": clipboard_ready(),
                                          "automation": True,
@@ -482,12 +484,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.trusted_request(require_origin=True)
             path = urlsplit(self.path).path
             automation = path.startswith('/api/automation/')
-            if not automation and path not in {"/api/locate", "/api/clipboard-image", "/api/pdf-text", "/api/pptx-import", "/api/pptx-paste", "/api/pptx-clipboard"}:
+            if not automation and path not in {"/api/locate", "/api/clipboard-image", "/api/pdf-text", "/api/pptx-import", "/api/pptx-paste", "/api/pptx-clipboard", "/api/pptx-source-pdf"}:
                 raise LocateError(404, "Unknown local API.")
             clipboard = path == "/api/clipboard-image"
             pdf_text = path == "/api/pdf-text"
-            pptx = path in {"/api/pptx-import", "/api/pptx-paste"}
-            label = "automation" if automation else "PPTX import" if pptx else "PDF text" if pdf_text else "clipboard image" if clipboard else "Locate"
+            pptx = path in {"/api/pptx-import", "/api/pptx-paste", "/api/pptx-source-pdf"}
+            label = "automation" if automation else "PowerPoint PDF" if path == "/api/pptx-source-pdf" else "PPTX import" if pptx else "PDF text" if pdf_text else "clipboard image" if clipboard else "Locate"
             limit = (MAX_AUTOMATION_BODY if path == '/api/automation/result' else 1024 * 1024) if automation else MAX_PPTX_BODY if pptx else MAX_PDF_TEXT_BODY if pdf_text else MAX_CLIPBOARD_BODY if clipboard else MAX_BODY
             tokens = self.headers.get_all("X-Figure-Token", [])
             if len(tokens) != 1 or not secrets.compare_digest(tokens[0].encode(), self.server.token.encode()):
@@ -523,6 +525,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 if not isinstance(data,dict) or set(data)!={'data'}:
                     raise LocateError(400,"Send an embedded PowerPoint slide package.")
                 result=import_pptx({'name':'PowerPoint clipboard.pptx','data':data['data']},single_slide=True)
+            elif path == "/api/pptx-source-pdf":
+                result = render_powerpoint_pdf(data)
             elif pptx:
                 result = import_pptx(data)
             elif pdf_text:

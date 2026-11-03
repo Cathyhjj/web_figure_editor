@@ -1,5 +1,6 @@
 /** Offline, editable PowerPoint export. CSS pixels are 96/in; OOXML uses 914400 EMU/in. */
 import { validateDeck } from './deck.js';
+import { unchangedOriginalPPTX } from './pptx-source.js';
 import { isMediaItem } from './video.js';
 import { htmlPosterDeck } from './html-chart.js';
 import { isLineShape } from './shapes.js';
@@ -464,6 +465,8 @@ function zip(entries) {
 
 /** Export all slides in order without changing the deck, assets, or active slide. */
 export async function exportPPTX(input) {
+  const original = await unchangedOriginalPPTX(input);
+  if (original) return new Blob([original.bytes], { type: PPTX_MIME });
   const deck = htmlPosterDeck(validateDeck(input));
   const layout = pptxLayoutForDeck(deck);
   const xmlBudget = preflightSize(deck);

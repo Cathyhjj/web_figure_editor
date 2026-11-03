@@ -1,7 +1,10 @@
 import { mirrorSVG, svgDataURL, serializeSVG, SVG_NS } from './svg-vector.js';
 /** Local PPTX conversion and explicit, previewed single-slide insertion. */
 import { uid, validateProject, projectToSVG } from './core.js';
-import { validateDeck } from './deck.js';
+import { validateDeck, serializeDeck } from './deck.js';
+import { MAX_PROJECT_BYTES } from './project-files.js';
+import { pasteSlides } from './clipboard.js';
+import { attachOriginalPPTX } from './pptx-source.js';
 import { importFiles } from './assets.js?v=locate-1';
 import { shadowBounds } from './shadow.js';
 
@@ -81,6 +84,19 @@ export function layoutTextBlock(block, measure = canvasMeasure()) {
   }
   const innerHeight = block.height - block.insets.top - block.insets.bottom;
   const offset = block.insets.top + (block.anchor === 'ctr' ? Math.max(0, (innerHeight-height)/2) : block.anchor === 'b' ? Math.max(0, innerHeight-height) : 0);
+  if (block.emptyPlaceholder) {
+    // Leave one editable field at the first typing position, including on a
+    // colored bar. No prompt or bullet should appear until the user types.
+    const { paragraph, width, lines } = paragraphs[0];
+    const style = paragraph.runs[0], line = lines[0];
+    const x = block.insets.left + paragraph.marginLeft + line.indent;
+    const y = offset + line.top + line.ascent - style.fontSize;
+    return [positionText(block, {
+      ...textStyle(style), text: '', align: paragraph.align,
+      width: Math.max(1, width - line.indent),
+      height: Math.max(line.step, block.height - block.insets.bottom - y),
+    }, x, y)];
+  }
   const items = [];
   for (const { paragraph, width, lines } of paragraphs) {
     const style = paragraph.runs[0];
@@ -105,7 +121,7 @@ export function layoutTextBlock(block, measure = canvasMeasure()) {
 
 function imageFile(media) {
   const encoded = media.dataUrl.split(',')[1], bytes = Uint8Array.from(atob(encoded), c => c.charCodeAt(0));
-  return new File([bytes], media.name, { type: media.mime });
+  return new File([bytes], media.name, { type: media.mime, lastModified: 0 });
 }
 
 async function mirroredAsset(asset, flipX, flipY) {
@@ -247,14 +263,15 @@ export async function localAPI() {
   return local;
 }
 
-export function initPPTXImport({ captureTarget, targetIsCurrent, insert }) {
+export function initPPTXImport({ captureTarget, targetIsCurrent, insert, openProject }) {
   const button=document.getElementById('import-pptx');
   const input=document.createElement('input'); input.type='file'; input.accept='.pptx'; input.hidden=true; document.body.append(input);
   const dialog=document.createElement('dialog'); dialog.id='pptx-import-dialog'; dialog.setAttribute('aria-labelledby','pptx-import-title');
-  dialog.innerHTML='<div class="dialog-header"><span class="eyebrow">POWERPOINT IMPORT</span><h2 id="pptx-import-title">Import a PowerPoint slide</h2><p id="pptx-import-file"></p></div><div class="dialog-body"><label class="field"><span>Choose a slide</span><select id="pptx-import-page" disabled></select></label><p id="pptx-import-status" role="status" aria-live="polite">Reading presentation…</p><img id="pptx-import-preview" alt="Preview of the converted slide" hidden><p class="hint">Preview shows the converted layout. Pictures and text remain separate. Mixed text styles may become separate text objects.</p><details id="pptx-import-notes" hidden><summary>Import notes</summary><ul></ul></details></div><div class="dialog-actions"><button id="pptx-import-cancel" class="button">Cancel</button><button id="pptx-import-submit" class="button primary" disabled>Insert as new slide</button></div>';
+  dialog.innerHTML='<div class="dialog-header"><span class="eyebrow">POWERPOINT IMPORT</span><h2 id="pptx-import-title">Import PowerPoint</h2><p id="pptx-import-file"></p></div><div class="dialog-body"><label class="field"><span>Choose a slide</span><select id="pptx-import-page" disabled></select></label><p id="pptx-import-status" role="status" aria-live="polite">Reading presentation…</p><img id="pptx-import-preview" alt="Preview of the converted slide" hidden><p class="hint">Preview shows the converted layout. Pictures and text remain separate. Mixed text styles may become separate text objects.</p><details id="pptx-import-notes" hidden><summary>Import notes</summary><ul></ul></details></div><div class="dialog-actions"><button id="pptx-import-cancel" class="button">Cancel</button><button id="pptx-import-all" class="button" title="Open every slide in a separate project and retain the original PowerPoint file" disabled>Open all as new project</button><button id="pptx-import-submit" class="button primary" disabled>Insert as new slide</button></div>';
   document.body.append(dialog);
   const get=id=>dialog.querySelector('#pptx-import-'+id), select=get('page'), submit=get('submit'), info=get('status'), preview=get('preview');
-  let generation=0, pageGeneration=0, controller, ready=null, target, fileData, token, previewURL;
+  let generation=0, pageGeneration=0, controller, ready=null, target, fileData, token, previewURL, sourceHash;
+  const all=get('all'); all.hidden=!openProject;
   function clearPreview() { ready=null; submit.disabled=true; preview.hidden=true; preview.removeAttribute('src'); if(previewURL)URL.revokeObjectURL(previewURL); previewURL=null; get('notes').hidden=true; }
   dialog.addEventListener('close',()=>{generation++;pageGeneration++;controller?.abort();clearPreview();fileData=null;button.disabled=false;});
   dialog.addEventListener('keydown',e=>e.stopPropagation());
@@ -284,7 +301,7 @@ export function initPPTXImport({ captureTarget, targetIsCurrent, insert }) {
   select.onchange=loadPage;
   input.onchange=async()=>{
     const file=input.files[0];input.value='';if(!file)return;
-    const current=++generation;target=captureTarget();button.disabled=true;select.replaceChildren();select.disabled=true;clearPreview();get('file').textContent=file.name;info.textContent='Reading presentation…';dialog.showModal();
+    const current=++generation;target=captureTarget();button.disabled=true;select.replaceChildren();select.disabled=true;all.disabled=true;sourceHash=null;clearPreview();get('file').textContent=file.name;info.textContent='Reading presentation…';dialog.showModal();
     try {
       if(!/\.pptx$/i.test(file.name)||!file.size||file.size>MAX_BYTES)throw new Error('Choose a nonempty .pptx file of 100 MB or less.');
       const local=await localAPI();if(current!==generation)return;token=local.token;
@@ -292,8 +309,36 @@ export function initPPTXImport({ captureTarget, targetIsCurrent, insert }) {
       if(current!==generation)return;fileData={name:file.name,data};controller=new AbortController();
       const result=await request(null,controller.signal);if(current!==generation)return;
       for(const slide of result.slides){const option=document.createElement('option');option.value=slide.number;option.textContent=`${slide.number}. ${slide.title}`;select.append(option);}
-      select.disabled=false;await loadPage();
+      sourceHash=result.source.sha256;all.disabled=!openProject||result.slides.length>100;select.disabled=false;await loadPage();
     }catch(error){if(current===generation&&error.name!=='AbortError')info.textContent=error.message;}
+  };
+  all.onclick=async()=>{
+    if(!openProject||all.disabled||!fileData)return;
+    const current=generation;
+    controller?.abort(); pageGeneration++; clearPreview();
+    controller=new AbortController(); const signal=controller.signal;
+    select.disabled=true;all.disabled=true;
+    try{
+      let deck=null;const warnings=new Set();
+      const pages=Array.from(select.options, option=>Number(option.value));
+      for(const n of pages){
+        info.textContent=`Importing slide ${n} of ${pages.length}…`;
+        const converted=await request(n,signal);
+        if(converted.source.sha256!==sourceHash||converted.source.slide!==n)throw new Error('The source presentation changed during import.');
+        const page=await preparePPTXSlide(converted,signal);signal.throwIfAborted();
+        page.warnings.forEach(w=>warnings.add(w));
+        if(!deck)deck=page.deck;else pasteSlides(deck,page.deck);
+      }
+      deck.name=fileData.name.replace(/\.pptx$/i,'');
+      deck.activeSlideId=deck.slides[0].id;
+      await attachOriginalPPTX(deck,{...fileData,sha256:sourceHash});
+      if(new Blob([serializeDeck(deck)]).size>MAX_PROJECT_BYTES)throw new Error('The presentation and its editable slides exceed the 240 MB project limit. Insert individual slides instead.');
+      signal.throwIfAborted();
+      if(!targetIsCurrent(target))throw new Error('The destination project changed. Cancel and import again.');
+      if(openProject(deck,[...warnings])!==false)dialog.close();
+      else await loadPage();
+    }catch(error){if(current===generation&&error.name!=='AbortError')info.textContent=error.message;}
+    finally{if(current===generation){select.disabled=false;all.disabled=false;}}
   };
   submit.onclick=()=>{
     if(!ready)return;
