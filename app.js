@@ -844,8 +844,12 @@ function openFormatPanel(){
 const objectMenu=createObjectContextMenu({onAction(action){
  if(action==='format'){openFormatPanel();return;}
  if(action==='crop'){openFormatPanel();$('crop-image')?.click();return;}
- const button={duplicate:'duplicate',delete:'delete-item',front:'bring-forward',back:'send-backward'}[action];
- if(button)$(button).click();$('workspace').focus({preventScroll:true});
+ if(action==='to-front'||action==='to-back')moveSelectedToEnd(action==='to-front');
+ else{
+  const button={duplicate:'duplicate',delete:'delete-item',front:'bring-forward',back:'send-backward'}[action];
+  if(button)$(button).click();
+ }
+ $('workspace').focus({preventScroll:true});
 }});
 function showObjectMenu(event,item){
  if(!canFormat(item)||gesture)return;
@@ -857,7 +861,9 @@ function showObjectMenu(event,item){
  objectMenu.open({x,y,anchor,title:formatTitle(item),actions:[
   {id:'duplicate',label:'Duplicate',disabled:item.locked},
   {id:'front',label:'Bring Forward',disabled:item.locked},
+  {id:'to-front',label:'Bring to Front',disabled:item.locked||slide().items.at(-1)===item},
   {id:'back',label:'Send Backward',disabled:item.locked},
+  {id:'to-back',label:'Send to Back',disabled:item.locked||slide().items[0]===item},
   ...(item.type==='image'?[{id:'crop',label:'Crop…',disabled:item.locked,separator:true}]:[]),
   {id:'format',label:formatTitle(item)+'…',separator:true},
   {id:'delete',label:'Delete',disabled:item.locked,separator:true},
@@ -994,6 +1000,16 @@ $('duplicate').onclick=()=>{if(!selected.size)return;change(()=>{const copies=ch
 $('delete-item').onclick=()=>{if(!selected.size)return;change(()=>{slide().items=slide().items.filter(i=>!selected.has(i.id)||i.locked);selected=new Set(chosen().map(i=>i.id));});};
 function reorder(direction){if(!selected.size)return;change(()=>{if(direction>0){for(let j=slide().items.length-2;j>=0;j--)if(selected.has(slide().items[j].id)&&!slide().items[j].locked&&!selected.has(slide().items[j+1].id))[slide().items[j],slide().items[j+1]]=[slide().items[j+1],slide().items[j]];}else{for(let j=1;j<slide().items.length;j++)if(selected.has(slide().items[j].id)&&!slide().items[j].locked&&!selected.has(slide().items[j-1].id))[slide().items[j],slide().items[j-1]]=[slide().items[j-1],slide().items[j]];}});}
 $('bring-forward').onclick=()=>reorder(1);$('send-backward').onclick=()=>reorder(-1);
+function moveSelectedToEnd(toFront){
+ if(selected.size!==1)return;
+ const items=slide().items,index=items.findIndex(item=>selected.has(item.id));
+ const destination=toFront?items.length-1:0;
+ if(index<0||index===destination||items[index].locked)return;
+ change(()=>{
+  const [item]=items.splice(index,1);
+  items.splice(destination,0,item);
+ });
+}
 function layout(operation){if(!selected.size)return;guideEditor.cancel();change(()=>applyLayout(slide(),[...selected],operation));}
 for(const alignment of ['left','center','right','top','middle','bottom'])$('align-'+alignment).onclick=()=>layout({op:'align',alignment});
 for(const dimension of ['width','height'])$('equal-'+dimension).onclick=()=>layout({op:'match_size',dimension});

@@ -157,6 +157,26 @@ run.onclick = async () => {
     get('stage').dispatchEvent(blank);
     check('Blank canvas retains its normal browser context menu', !blank.defaultPrevented && !shown(menu()));
 
+    const orderMatches = ids => {
+      const paintOrder = [...doc.querySelectorAll('#stage > [data-item]')].map(node => node.dataset.item);
+      const layerOrder = [...doc.querySelectorAll('#layer-list [data-layer]')].map(node => node.dataset.layer);
+      return paintOrder.join() === ids.join() && layerOrder.reverse().join() === ids.join();
+    };
+    const originalOrder = original.slides[0].items.map(entry => entry.id);
+    const rectInFront = ['format-picture', 'format-vector', 'format-rect'];
+    rightClick('format-rect');
+    check('Send to Back is disabled on the bottom layer', action('to-back').disabled);
+    action('to-front').click();
+    check('Bring to Front moves the shape above both other objects', orderMatches(rectInFront));
+    find('[data-layer="format-rect"] .layer-select').dispatchEvent(new win.MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+    check('Bring to Front is disabled on the top layer', action('to-front').disabled);
+    action('to-back').click();
+    check('Send to Back from Layers moves the shape below both other objects', orderMatches(originalOrder));
+    get('undo').click();
+    check('One undo restores the shape to the front', orderMatches(rectInFront));
+    get('redo').click();
+    check('Redo returns the shape to the back', orderMatches(originalOrder));
+
     await openFormat('format-rect');
     check('Format Shape opens the docked formatting panel with a selected Fill and Line tab', formatOpen() && shown(panel()) && panel().dataset.windowState === 'docked' && /Format Shape/.test(panel().textContent) && find('[data-format-tab="paint"]').getAttribute('aria-selected') === 'true');
     key(find('[data-format-tab="paint"]'), 'ArrowRight');
@@ -267,6 +287,9 @@ run.onclick = async () => {
     check('Crop from formatting remains editable and preserves the original embedded image', Boolean(item('format-picture').querySelector('svg[overflow="hidden"]')) && item('format-picture').querySelector('svg[overflow="hidden"] image').getAttribute('href') === original.assets[0].dataUrl && item('format-picture').getAttribute('opacity') === '0.8');
     tab('size'); get('object-locked').click(); tab('picture');
     check('Locked picture disables Crop, SVG restoration, and transparency', get('crop-image').disabled && get('edit-svg').disabled && find('[data-transparency="opacity"][type="number"]').disabled);
+    rightClick('format-picture');
+    check('A locked picture cannot be sent to either end of the layer stack', action('to-front').disabled && action('to-back').disabled);
+    key(action('format'), 'Escape');
     tab('size'); get('object-locked').click();
 
     get('reset-layout').click(); await settle(win);
