@@ -38,6 +38,7 @@ import { textPointerPosition, textEditorBounds } from './canvas-text-geometry.js
 import { UNITS, fromPixels, formatMeasurement, showMeasurement, readMeasurement } from './units.js';
 import { applyLayout, selectionBounds } from './layout.js';
 import { initGuideEditor } from './guide-editor.js';
+import { itemContentKey, assetVisualInputs, sameInputs, createAssetLibrarySnapshot, assetLibraryMatches } from './render-cache.js';
 
 import { CLIPBOARD_MIME, createSelection, encodeSelection, decodeSelection, pasteSelection, SLIDE_CLIPBOARD_MIME, SLIDES_CLIPBOARD_MIME, createSlidesClipboard, encodeSlides, decodeSlides, pasteSlides } from './clipboard.js';
 import { selectionToPNG } from './clipboard-image.js';
@@ -72,6 +73,8 @@ let libraryImports = 0;
 let activeHTMLChart = null;
 let canvasText = null;
 let panelWindows = null;
+const stageContentCache = new WeakMap(), slidePreviewCache = new WeakMap();
+let assetLibrarySnapshot = null;
 let measurementUnit = 'px';
 try { const saved = localStorage.getItem('figure-editor-unit'); if (Object.hasOwn(UNITS, saved)) measurementUnit = saved; } catch {}
 const canFormat = item => item && (item.type === 'image' || item.type === 'shape' || isShapeItem(item));
@@ -210,16 +213,27 @@ function renderSlides(){
  project.slides.forEach((page,index)=>{
   const card=existing.get(page.id)||document.createElement('button');existing.delete(page.id);card.type='button';card.className='slide-card';card.dataset.slide=page.id;card.draggable=false;
   card.setAttribute('aria-label',`Slide ${index+1}: ${page.name}`);card.title=`${page.name} · Drag to reorder`;
-  const preview=svg('svg',{class:'slide-preview',viewBox:`0 0 ${page.canvas.width} ${page.canvas.height}`,'aria-hidden':'true'});
-  preview.style.setProperty('--slide-aspect',String(page.canvas.width/page.canvas.height));
-  preview.append(svg('rect',{width:page.canvas.width,height:page.canvas.height,fill:page.canvas.background}));
-  for(const item of page.items){
-   if(item.hidden)continue;
-   const g=svg('g',{transform:`translate(${item.x} ${item.y}) rotate(${item.rotation} ${item.width/2} ${item.height/2})`,opacity:item.opacity});
-   appendItemContent(g,item,`preview-${page.id}`);preview.append(g);
+  // Only layout metadata is serialized. Embedded image/HTML bytes are compared
+  // by value separately, so selecting an object never reparses every thumbnail.
+  const key=JSON.stringify([page.canvas,page.items]);
+  const sources=page.items.filter(item=>!item.hidden&&item.assetId).flatMap(item=>assetVisualInputs(assetById(item.assetId)));
+  const cached=slidePreviewCache.get(card);
+  if(!cached||cached.key!==key||!sameInputs(cached.sources,sources)){
+   const preview=svg('svg',{class:'slide-preview',viewBox:`0 0 ${page.canvas.width} ${page.canvas.height}`,'aria-hidden':'true'});
+   preview.style.setProperty('--slide-aspect',String(page.canvas.width/page.canvas.height));
+   preview.append(svg('rect',{width:page.canvas.width,height:page.canvas.height,fill:page.canvas.background}));
+   for(const item of page.items){
+    if(item.hidden)continue;
+    const g=svg('g',{transform:`translate(${item.x} ${item.y}) rotate(${item.rotation} ${item.width/2} ${item.height/2})`,opacity:item.opacity});
+    appendItemContent(g,item,`preview-${page.id}`);preview.append(g);
+   }
+   if(card.firstElementChild)card.firstElementChild.replaceWith(preview);else card.append(preview);
+   slidePreviewCache.set(card,{key,sources});
   }
-  const caption=document.createElement('span');caption.className='slide-caption';
-  caption.innerHTML=`<span>${index+1}</span><span>${escapeHTML(page.name)}</span>`;card.replaceChildren(preview,caption);
+  let caption=card.querySelector('.slide-caption');
+  if(!caption){caption=document.createElement('span');caption.className='slide-caption';card.append(caption);}
+  const label=`<span>${index+1}</span><span>${escapeHTML(page.name)}</span>`;
+  if(caption.innerHTML!==label)caption.innerHTML=label;
   card.onclick=e=>{selectSlideCard(page.id,e);if(inSlideSorter())focusCurrentSlide();else card.focus({preventScroll:true});};if(list.children[index]!==card)list.insertBefore(card,list.children[index]||null);
  });
  for(const card of existing.values())card.remove();
@@ -377,7 +391,14 @@ function renderStage(){
  }
  // Never detach the live iframe or its ancestors during redraws: doing so
  // reloads its document. Likewise a focused textarea must keep its selection and IME.
- for(const child of [...stage.children])if(child!==liveGroup&&child!==canvasText?.group)child.remove();
+ const visibleIds=new Set(slide().items.filter(item=>!item.hidden).map(item=>item.id));
+ const existing=new Map();
+ for(const child of [...stage.children]){
+  const protectedGroup=canvasText&&canvasText.item.id===child.dataset.item?canvasText.group:activeHTMLChart&&activeHTMLChart.itemId===child.dataset.item?liveGroup:null;
+  if(protectedGroup&&child!==protectedGroup)child.remove();
+  else if(child.dataset.item&&visibleIds.has(child.dataset.item))existing.set(child.dataset.item,child);
+  else if(child!==liveGroup&&child!==canvasText?.group)child.remove();
+ }
  let next=stage.firstElementChild;
  stage.setAttribute('viewBox',`0 0 ${slide().canvas.width} ${slide().canvas.height}`);
  stage.style.width=`${slide().canvas.width*zoom}px`;stage.style.height=`${slide().canvas.height*zoom}px`;
@@ -387,15 +408,26 @@ function renderStage(){
   if(item.hidden)continue;
   const live=activeHTMLChart?.itemId===item.id?activeHTMLChart:null;
   const editor=canvasText?.item===item?canvasText:null;
-  const g=editor?.group||live?.group||svg('g');
-  for(const [key,value] of Object.entries({'data-item':item.id,transform:`translate(${item.x} ${item.y}) rotate(${item.rotation} ${item.width/2} ${item.height/2})`,opacity:item.opacity,class:`figure-item ${selected.has(item.id)?'selected':''}`}))g.setAttribute(key,value);
+  const g=editor?.group||live?.group||existing.get(item.id)||svg('g');
+  for(const [key,value] of Object.entries({'data-item':item.id,transform:`translate(${item.x} ${item.y}) rotate(${item.rotation} ${item.width/2} ${item.height/2})`,opacity:item.opacity,class:`figure-item ${selected.has(item.id)?'selected':''}`}))if(g.getAttribute(key)!==String(value))g.setAttribute(key,value);
+  if(item.type!=='text'||item.locked)g.removeAttribute('data-editable-text');
   if(editor){
+   stageContentCache.delete(g);
    for(const child of [...g.children])if(child!==editor.host)child.remove();
    const source=svgText(item);source.setAttribute('visibility','hidden');g.insertBefore(source,editor.host);
    const bounds=textEditorBounds(g,item);
    for(const [key,value] of Object.entries(bounds))editor.host.setAttribute(key,value);
-  }else if(live){for(const child of [...g.children])if(child!==live.host)child.remove();}
-  else appendItemContent(g,item);
+  }else if(live){stageContentCache.delete(g);for(const child of [...g.children])if(child!==live.host)child.remove();}
+  else{
+   const key=itemContentKey(item),sources=assetVisualInputs(assetById(item.assetId)),cached=stageContentCache.get(g);
+   if(cached&&cached.key===key&&sameInputs(cached.sources,sources)){
+    // Retain the painted SVG/image nodes; only selection controls depend on zoom.
+    for(const child of [...g.childNodes])if(!cached.nodes.has(child))child.remove();
+   }else{
+    g.replaceChildren();appendItemContent(g,item);
+    stageContentCache.set(g,{key,sources,nodes:new Set(g.childNodes)});
+   }
+  }
   // Transparent geometry makes whitespace in a text box and thin lines selectable.
   const hit=isLineShape(item)?shapeBounds({...item,strokeWidth:Math.max(item.strokeWidth,8/zoom)}):{x:0,y:0,width:item.width,height:item.height};
   const target=svg('rect',{...hit,fill:'transparent',class:'item-hit',style:live?.interacting?'pointer-events:none':''});
@@ -419,6 +451,13 @@ function renderStage(){
    }
   }
   if(g===next)next=next.nextElementSibling;
+  else if((live||editor)&&g.parentNode===stage){
+   // Reorder siblings around a mounted iframe/textarea, never move its ancestor:
+   // insertBefore on that ancestor reloads an iframe and drops a text selection.
+   const after=g.nextElementSibling;
+   while(next&&next!==g){const following=next.nextElementSibling;stage.insertBefore(next,after);next=following;}
+   next=g.nextElementSibling;
+  }
   else stage.insertBefore(g,next);
  }
  if(gesture?.mode==='select'&&gesture.moved){
@@ -430,6 +469,7 @@ function renderStage(){
  $('selection-count').textContent=selected.size?`${selected.size} selected`:`${slide().items.length} object${slide().items.length === 1 ? "" : "s"}`;
 }
 function renderAssets(){
+ if(assetLibraryMatches(assetLibrarySnapshot,project.assets)&&$('asset-list').childElementCount){syncAssetSelection();return;}
  const list=$('asset-list'),scrollTop=$('assets-panel').scrollTop;
  // Read the current state directly so even an immediate rerender preserves a toggle.
  for(const folder of list.querySelectorAll('.asset-folder')){
@@ -457,6 +497,7 @@ function renderAssets(){
   for(const asset of node.assets)container.append(assetCard(asset));
  }
  appendFolderContents(buildAssetTree(project.assets),list);
+ assetLibrarySnapshot=createAssetLibrarySnapshot(project.assets);
  $('assets-panel').scrollTop=scrollTop;
  syncAssetSelection();
 }
@@ -940,7 +981,16 @@ $('workspace').onpointermove=e=>{
  else if(gesture.mode==='move'){const delta=guideEditor.snap(selectionBounds(gesture.items),dx,dy,e.altKey);for(const orig of gesture.items){const i=byId(orig.id);i.x=orig.x+delta.dx;i.y=orig.y+delta.dy;}}
  else{const orig=gesture.items.find(i=>i.id===gesture.id);
  Object.assign(byId(orig.id),resizeItem(orig,gesture.handle,dx,dy,{free:e.shiftKey}));
- }renderStage();
+ }
+ if(gesture.mode==='move'){
+  // Movement only changes the outer transform. Preserve filters, decoded images,
+  // text and the live chart DOM throughout the gesture.
+  for(const original of gesture.items){
+   const item=byId(original.id),transform=`translate(${item.x} ${item.y}) rotate(${item.rotation} ${item.width/2} ${item.height/2})`;
+   $('stage').querySelector(`[data-item="${CSS.escape(item.id)}"]`)?.setAttribute('transform',transform);
+   $('stage').querySelector(`[data-hit-item="${CSS.escape(item.id)}"]`)?.setAttribute('transform',transform);
+  }
+ }else renderStage();
 };
 function endGesture(e){
  if(!gesture||e.pointerId!==gesture.pointerId)return;

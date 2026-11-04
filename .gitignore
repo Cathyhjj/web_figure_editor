@@ -9,6 +9,7 @@
 !/style.css
 !/app.js
 !/canvas-text-geometry.js
+!/render-cache.js
 !/automation.js
 !/export-check.js
 !/automation_bridge.py
@@ -230,6 +231,8 @@
 # Precision layout and non-printing guide browser regressions.
 !/tests/precision-layout-browser.mjs
 !/tests/precision-guides-browser.mjs
+!/tests/interaction-performance-browser.mjs
+!/tests/render-cache-browser.mjs
 
 # Source-faithful PDF rendering with local PowerPoint.
 !/powerpoint_pdf.py
