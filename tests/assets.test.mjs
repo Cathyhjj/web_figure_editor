@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { importFiles, importFolderFiles, importDroppedFiles, pickFolder, replaceAsset, refreshAsset, assetLinkStatus, pickImages, linkAsset, MAX_FILE_BYTES } from '../assets.js';
+import { createHash } from 'node:crypto';
+import { importFiles, importFolderFiles, importDroppedFiles, pickFolder, replaceAsset, refreshAsset, assetLinkStatus, pickImages, linkAsset, MAX_FILE_BYTES, prepareAssetImport, checkLinkedAssetSource } from '../assets.js';
 import { needsLocalSource } from '../local-source.js';
 import { createProject, serializeProject, validateProject } from '../core.js';
 
@@ -12,6 +13,76 @@ globalThis.Image = class {
 };
 const pngBytes = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nxsAAAAASUVORK5CYII=', 'base64'));
 const png = (name = 'panel.png') => Object.assign(new Blob([pngBytes], { type: 'image/png' }), { name, lastModified: 123 });
+const digest = bytes => createHash('sha256').update(bytes).digest('hex');
+const rootId = digest('selected-root');
+const importRecord = (relativePath, bytes = pngBytes) => ({
+  relativePath, mime: 'image/png', data: Buffer.from(bytes).toString('base64'), fingerprint: digest(bytes),
+});
+
+test('MCP import reuses only the same root, path and original version after a project round trip', async () => {
+  const file = importRecord('figures/panel.png');
+  const first = await prepareAssetImport([], { rootId, files: [file] });
+  assert.equal(first.assets[0].status, 'imported');
+  const project = createProject();
+  project.assets = first.newAssets;
+  const library = JSON.parse(serializeProject(project)).assets;
+  assert.equal(library[0].mcpRootId, rootId);
+  const repeated = await prepareAssetImport(library, { rootId, files: [file] });
+  assert.deepEqual(repeated.newAssets, []);
+  assert.deepEqual(repeated.assets, [{ ...first.assets[0], status: 'reused' }]);
+  const rerun = importRecord(file.relativePath, Buffer.concat([pngBytes, Buffer.from('updated')]));
+  for (const params of [{ rootId, files: [rerun] }, { rootId, files: [{ ...file, relativePath: 'other/panel.png' }] },
+    { rootId: digest('another root'), files: [file] }]) {
+    const next = await prepareAssetImport(library, params);
+    assert.equal(next.newAssets.length, 1);
+    assert.notEqual(next.assets[0].assetId, library[0].id);
+  }
+  assert.equal(library.length, 1);
+  const unrelated = { ...library[0], mcpRootId: undefined };
+  assert.equal((await prepareAssetImport([unrelated], { rootId, files: [file] })).assets[0].status, 'imported');
+});
+
+test('MCP import rejects bad sibling bytes, metadata or paths before yielding any assets', async () => {
+  const good = importRecord('good.png'), library = [];
+  const invalid = [
+    { ...good, relativePath: '../good.png' }, { ...good, fingerprint: digest('wrong bytes') },
+    { ...good, relativePath: 'wrong.svg', mime: 'image/svg+xml' }, { ...good, mime: 'text/html' },
+    importRecord('disguised.png', Buffer.from('<html><body>spoofed chart</body></html>')),
+  ];
+  for (const bad of invalid) await assert.rejects(prepareAssetImport(library, { rootId, files: [good, bad] }));
+  assert.deepEqual(library, []);
+});
+
+test('linked source checks hash original bytes, enforce read limits and never request permission', async () => {
+  const original = png(), changedBytes = Buffer.from('updated content');
+  let current = original, permission = 'granted', missing = false, reads = 0, prompts = 0;
+  const handle = { kind: 'file', queryPermission: async () => permission, requestPermission: async () => { prompts++; },
+    async getFile() { reads++; if (missing) throw new DOMException('', 'NotFoundError'); return current; } };
+  const asset = (await importFiles([original], new Map([[original, handle]]))).assets[0];
+  // Older manifests can include the SHA-256 prefix and uppercase hex.
+  asset.fingerprint = 'sha256:' + asset.fingerprint.toUpperCase();
+  const before = structuredClone(asset), budget = { remainingBytes: original.size };
+  assert.deepEqual(await checkLinkedAssetSource(asset, budget), { status: 'unchanged', currentFingerprint: digest(pngBytes) });
+  assert.equal(budget.remainingBytes, 0);
+  let overBudgetRead = false;
+  current = { size: 1, arrayBuffer() { overBudgetRead = true; } };
+  assert.equal((await checkLinkedAssetSource(asset, budget)).status, 'unavailable');
+  assert.equal(overBudgetRead, false);
+  current = new Blob([changedBytes]);
+  assert.deepEqual(await checkLinkedAssetSource(asset), { status: 'changed', currentFingerprint: digest(changedBytes) });
+  permission = 'prompt';
+  assert.equal((await checkLinkedAssetSource(asset)).status, 'permission_required');
+  permission = 'denied';
+  assert.equal((await checkLinkedAssetSource(asset)).status, 'permission_required');
+  assert.equal(reads, 3);
+  assert.equal(prompts, 0);
+  missing = true; permission = 'granted';
+  assert.equal((await checkLinkedAssetSource(asset)).status, 'missing');
+  assert.equal((await checkLinkedAssetSource({ ...asset, linkToken: 'lost-handle' })).status, 'unavailable');
+  assert.equal((await checkLinkedAssetSource({ ...asset, fingerprint: undefined })).status, 'no_fingerprint');
+  assert.equal((await checkLinkedAssetSource({ ...asset, sourceKind: 'copy' })).status, 'embedded');
+  assert.deepEqual(asset, before);
+});
 
 test('imports portable original PNG bytes and records source metadata', async () => {
   const { assets, errors } = await importFiles([png()]);

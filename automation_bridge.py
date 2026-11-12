@@ -4,7 +4,8 @@ import threading
 import time
 
 MAX_AUTOMATION_BODY = 36 * 1024 * 1024
-METHODS = {"get_state", "batch_edit", "duplicate_slide", "preview", "preview_batch", "check_export", "export", "history", "save"}
+METHODS = {"get_state", "import_assets", "check_sources", "inspect_svg", "batch_edit", "duplicate_slide", "preview", "preview_batch",
+           "check_export", "export", "history", "save"}
 
 
 class AutomationError(Exception):

@@ -5,6 +5,8 @@ import { exportPPTX } from './pptx.js';
 import { generateHTMLReport } from './report.js';
 import { isMediaItem } from './video.js';
 import { applyLayout } from './layout.js';
+import { inspectSVGAsset, patchSVGAsset } from './svg-edit.js';
+import { checkLinkedAssetSource, isProjectRelativePath, MAX_IMPORT_BYTES } from './assets.js?v=locate-1';
 
 // Small, explicit editing vocabulary. Neither document replacement nor arbitrary
 // JavaScript/asset writes are accepted through the live control interface.
@@ -38,12 +40,12 @@ function properties(item, patch, { allowEmpty = false } = {}) {
   }
   Object.assign(item, patch);
 }
-function targets(slide, ids) {
+function targets(slide, ids, { allowLocked = false } = {}) {
   if (!Array.isArray(ids) || !ids.length || ids.length > 2000 || new Set(ids).size !== ids.length) fail('itemIds must contain unique object IDs.');
   return ids.map(id => {
     const item = slide.items.find(item => item.id === id);
     if (!item) fail(`Object ${id} does not exist on slide ${slide.id}.`);
-    if (item.locked) fail(`Object ${id} is locked. Unlock it in the editor first.`);
+    if (item.locked && !allowLocked) fail(`Object ${id} is locked. Use set_locked or unlock it in the editor first.`);
     return item;
   });
 }
@@ -51,7 +53,8 @@ function targets(slide, ids) {
 /** Prepare the entire batch without changing the live document. */
 export function prepareBatch(project, operations) {
   if (!Array.isArray(operations) || !operations.length || operations.length > 200) fail('Supply 1–200 operations.');
-  const next = cloneDeck(project), changed = new Set(), created = [];
+  const next = cloneDeck(project), changed = new Set(), created = [], deleted = [], duplicatedItems = [];
+  const createdAssetIds = [], assetReplacements = [], warnings = [];
   for (const op of operations) {
     object(op, 'operation');
     const allowed = {
@@ -61,11 +64,82 @@ export function prepareBatch(project, operations) {
       add_text: ['op', 'slideId', 'properties'],
       place_asset: ['op', 'slideId', 'assetId', 'properties'],
       swap_asset: ['op', 'slideId', 'itemId', 'assetId'],
+      duplicate: ['op', 'slideId', 'itemIds', 'offsetX', 'offsetY'],
+      delete: ['op', 'slideId', 'itemIds'],
+      reorder: ['op', 'slideId', 'itemIds', 'direction'],
+      set_hidden: ['op', 'slideId', 'itemIds', 'hidden'],
+      set_locked: ['op', 'slideId', 'itemIds', 'locked'],
+      replace_asset: ['op', 'slideId', 'itemIds', 'assetId'],
+      edit_svg: ['op', 'slideId', 'itemId', 'assetId', 'patches'],
     }[op.op];
-    if (!Array.isArray(allowed)) fail('Supported operations: set, align, distribute, add_text, place_asset, swap_asset.');
+    if (!Array.isArray(allowed)) fail('Supported operations: set, align, distribute, add_text, place_asset, swap_asset, duplicate, delete, reorder, set_hidden, set_locked, replace_asset, edit_svg.');
     keys(op, allowed, op.op);
     const slide = next.slides.find(slide => slide.id === op.slideId);
     if (!slide) fail(`Unknown slide: ${op.slideId}.`);
+    if (op.op === 'edit_svg') {
+      const [item] = targets(slide, [op.itemId]);
+      if (item.type !== 'image' || item.assetId !== op.assetId) fail('SVG object or asset changed. Inspect the SVG again.');
+      const source = next.assets.find(asset => asset.id === item.assetId);
+      const edited = patchSVGAsset(source, op.patches, uid());
+      next.assets.push(edited); createdAssetIds.push(edited.id);
+      item.assetId = edited.id; changed.add(item.id);
+      assetReplacements.push({ slideId: slide.id, itemId: item.id, sourceAssetId: source.id, assetId: edited.id });
+      continue;
+    }
+    if (op.op === 'replace_asset') {
+      const items = targets(slide, op.itemIds);
+      const asset = next.assets.find(asset => asset.id === op.assetId);
+      if (!asset) fail(`Unknown asset: ${op.assetId}. Use an assetId from get_state.assets.`);
+      if (!asset.mime.startsWith('image/') || items.some(item => item.type !== 'image')) fail('replace_asset requires image objects and an SVG or raster image asset.');
+      for (const item of items) {
+        if (item.assetId === asset.id) fail(`Object ${item.id} already uses the requested asset.`);
+        const source = next.assets.find(asset => asset.id === item.assetId);
+        assetReplacements.push({ slideId: slide.id, itemId: item.id, sourceAssetId: source.id, assetId: asset.id,
+          sourceSize: { width: source.width, height: source.height }, replacementSize: { width: asset.width, height: asset.height } });
+        if (Math.abs(source.width / source.height - asset.width / asset.height) > 1e-8)
+          warnings.push({ code: 'source_aspect_changed', slideId: slide.id, itemId: item.id,
+            message: 'Source aspect ratio changed. The frame, imageFit and normalized crop are preserved; preview the visible region and proportions.' });
+        // Preserve crop, imageFit, geometry, effects and layer order exactly.
+        item.assetId = asset.id; changed.add(item.id);
+      }
+      continue;
+    }
+    if (['duplicate', 'delete', 'reorder', 'set_hidden', 'set_locked'].includes(op.op)) {
+      const items = targets(slide, op.itemIds, { allowLocked: op.op === 'set_locked' });
+      const ids = new Set(op.itemIds);
+      if (op.op === 'duplicate') {
+        const dx = op.offsetX ?? 20, dy = op.offsetY ?? 20;
+        if (![dx, dy].every(value => typeof value === 'number' && Number.isFinite(value))) fail('Duplicate offsets must be finite numbers.');
+        // Preserve stacking order regardless of the order of the supplied IDs.
+        for (const item of slide.items.filter(item => ids.has(item.id))) {
+          const copy = { ...structuredClone(item), id: uid(), name: (item.name + ' copy').slice(0, 1000), x: item.x + dx, y: item.y + dy };
+          slide.items.push(copy); created.push(copy.id); changed.add(copy.id);
+          duplicatedItems.push({ slideId: slide.id, sourceItemId: item.id, itemId: copy.id });
+        }
+      } else if (op.op === 'delete') {
+        slide.items = slide.items.filter(item => !ids.has(item.id));
+        deleted.push(...op.itemIds);
+      } else if (op.op === 'reorder') {
+        if (!['front', 'back', 'forward', 'backward'].includes(op.direction)) fail('Unsupported layer direction.');
+        if (op.direction === 'front' || op.direction === 'back') {
+          const moving = slide.items.filter(item => ids.has(item.id)), rest = slide.items.filter(item => !ids.has(item.id));
+          slide.items = op.direction === 'front' ? [...rest, ...moving] : [...moving, ...rest];
+        } else {
+          const forward = op.direction === 'forward', step = forward ? -1 : 1;
+          for (let index = forward ? slide.items.length - 2 : 1; index >= 0 && index < slide.items.length; index += step) {
+            const neighbor = index - step;
+            if (ids.has(slide.items[index].id) && !ids.has(slide.items[neighbor].id))
+              [slide.items[index], slide.items[neighbor]] = [slide.items[neighbor], slide.items[index]];
+          }
+        }
+      } else {
+        const field = op.op === 'set_hidden' ? 'hidden' : 'locked';
+        if (typeof op[field] !== 'boolean') fail(`${field} must be boolean.`);
+        for (const item of items) item[field] = op[field];
+      }
+      if (op.op !== 'duplicate') for (const item of items) changed.add(item.id);
+      continue;
+    }
     if (op.op === 'swap_asset') {
       const [item] = targets(slide, [op.itemId]);
       const asset = next.assets.find(candidate => candidate.id === op.assetId);
@@ -104,13 +178,51 @@ export function prepareBatch(project, operations) {
     }
     for (const item of items) changed.add(item.id);
   }
-  return { project: validateDeck(next), changedItemIds: [...changed], createdItemIds: created };
+  return { project: validateDeck(next), changedItemIds: [...changed], createdItemIds: created, deletedItemIds: deleted,
+    duplicatedItems, createdAssetIds, assetReplacements, warnings };
 }
 
-function isProjectRelativePath(path) {
-  if (typeof path !== 'string' || path !== path.trim() || /[\\\x00-\x1f\x7f]/.test(path)) return false;
-  if (/^(?:[a-z][a-z0-9+.-]*:|~)/i.test(path) || /%(?:25|2e|2f|3a|5c)/i.test(path)) return false;
-  return path.split('/').every(part => part !== '' && part !== '.' && part !== '..');
+export function inspectSVG(project, { slideId, itemId, offset, limit }) {
+  const slide = project.slides.find(slide => slide.id === slideId);
+  if (!slide) fail(`Unknown slide: ${slideId}.`);
+  const [item] = targets(slide, [itemId], { allowLocked: true });
+  if (item.type !== 'image') fail('SVG inspection requires an image object.');
+  return { slideId, itemId, ...inspectSVGAsset(project.assets.find(asset => asset.id === item.assetId), { offset, limit }) };
+}
+
+function sourceMetadata(asset) {
+  return {
+    ...(isProjectRelativePath(asset.relativePath) ? { relativePath: asset.relativePath } : {}),
+    ...(/^(?:sha256:)?[a-f0-9]{64}$/i.test(asset.fingerprint ?? '') ? { fingerprint: asset.fingerprint } : {}),
+  };
+}
+
+/** Capture placements before asynchronous file reads so every row describes the same project revision. */
+export async function checkSources(project, assetIds, ensureActive) {
+  if (assetIds !== undefined && (!Array.isArray(assetIds) || !assetIds.length || new Set(assetIds).size !== assetIds.length))
+    fail('assetIds must contain unique asset IDs.');
+  const byId = new Map(project.assets.map(asset => [asset.id, asset]));
+  const assets = assetIds === undefined ? project.assets : assetIds.map(id => {
+    if (!byId.has(id)) fail(`Unknown asset: ${id}.`);
+    return byId.get(id);
+  });
+  const usage = deckAssetUsage(project);
+  const checks = assets.map(asset => ({
+    // Only the handle identity and recorded fingerprint are needed to verify a linked file.
+    link: { id: asset.id, sourceKind: asset.sourceKind, linkToken: asset.linkToken,
+      linkPersistence: asset.linkPersistence, fingerprint: asset.fingerprint },
+    rootId: asset.mcpRootId,
+    row: { assetId: asset.id, name: asset.name, ...sourceMetadata(asset), usedBy: usage.get(asset.id) },
+  }));
+  const budget = { remainingBytes: MAX_IMPORT_BYTES };
+  const sources = [];
+  for (const { link, rootId, row } of checks) {
+    ensureActive();
+    const result = rootId ? { status: 'check_root', mcpRootId: rootId } : await checkLinkedAssetSource(link, budget);
+    sources.push({ ...row, ...result });
+  }
+  ensureActive();
+  return sources;
 }
 
 /** State is intentionally free of embedded images, HTML scripts and file handles. */
@@ -127,8 +239,7 @@ export function describeProject(project, slideId = project.activeSlideId) {
       id: asset.id, name: asset.name, mime: asset.mime, width: asset.width, height: asset.height,
       sourceKind: asset.sourceKind,
       ...(asset.sourceOrigin !== undefined ? { sourceOrigin: asset.sourceOrigin } : {}),
-      ...(isProjectRelativePath(asset.relativePath) ? { relativePath: asset.relativePath } : {}),
-      ...(/^(?:sha256:)?[a-f0-9]{64}$/i.test(asset.fingerprint ?? '') ? { fingerprint: asset.fingerprint } : {}),
+      ...sourceMetadata(asset),
       usedBy: usage.get(asset.id),
     })),
   };
@@ -209,8 +320,12 @@ export function connectAutomation({ execute, summary, button, fetcher = fetch })
         if (!command || !enabled || current !== sessionId) continue;
         let result;
         try {
-          if (Date.now() > command.expiresAt) throw new Error('Command expired before execution; read state before retrying.');
-          result = { ok: true, value: await execute(command.method, command.params) };
+          const ensureActive = () => {
+            if (!enabled || stopped || current !== sessionId || Date.now() >= command.expiresAt)
+              throw new Error('Command expired or disconnected. Read state before retrying.');
+          };
+          ensureActive();
+          result = { ok: true, value: await execute(command.method, command.params, ensureActive) };
         } catch (error) { result = { ok: false, error: error.message }; }
         // Retry delivery only, never execute a command again after a network error.
         for (let attempt = 0; attempt < 3; attempt++) {

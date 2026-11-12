@@ -9,6 +9,7 @@ import { join, resolve } from 'node:path';
 import { addSlide, createDeck, validateDeck, serializeDeck } from '../deck.js';
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const output = await mkdtemp(join(tmpdir(), 'figure-mcp-test-'));
+const assetRoot = await mkdtemp(join(output, 'mcp-assets-'));
 const python = process.env.PYTHON || 'python3';
 const server = spawn(python, ['-u', '-c', 'import server; from pathlib import Path; server.start_clipboard_helper=lambda:None; s=server.create_server(Path.cwd(),0); print(s.server_port,flush=True); s.serve_forever()'], { cwd: resolve('.') });
 let serverErrors = ''; server.stderr.on('data', chunk => { serverErrors = (serverErrors + chunk).slice(-10000); });
@@ -17,7 +18,7 @@ const port = await new Promise((resolve, reject) => {
   createInterface({ input: server.stdout }).once('line', line => { clearTimeout(timer); resolve(Number(line)); });
   server.once('exit', code => { clearTimeout(timer); reject(new Error(`Test server exited ${code}: ${serverErrors}`)); });
 });
-const mcp = spawn(python, ['figure_mcp.py', '--port', String(port), '--output-dir', output]);
+const mcp = spawn(python, ['figure_mcp.py', '--port', String(port), '--output-dir', output, '--asset-root', assetRoot]);
 const pending = new Map(); let sequence = 0, stderr = '';
 mcp.stderr.on('data', chunk => { stderr += chunk; });
 createInterface({ input: mcp.stdout }).on('line', line => {
@@ -151,6 +152,150 @@ async function saveTestProject(page, sessionId, revision) {
   assert.equal(result.saved, true);
   return readTestProject(page);
 }
+async function checkAssetImport(page, sessionId) {
+  await openTestProject(page, createDeck());
+  const state = async () => (await call('get_state', { sessionId })).structuredContent;
+  const ingest = async (revision, paths, error) =>
+    (await call('import_assets', { sessionId, expectedRevision: revision, paths }, error)).structuredContent;
+  const check = async (assetIds) => (await call('check_sources', { sessionId, assetIds })).structuredContent;
+  const relativePath = 'results/Fe_K_edge.svg', file = join(assetRoot, relativePath);
+  const svg = color => `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><rect width="200" height="100" fill="${color}"/></svg>`;
+  const original = svg('#bd4422'), revised = svg('#2255bb');
+  const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
+  await mkdir(join(assetRoot, 'results'));
+  await writeFile(file, original);
+  const rasterPaths = ['results/spectrum.png', 'results/sample.jpg'];
+  const rasters = await page.evaluate(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 20; canvas.height = 10;
+    return ['image/png', 'image/jpeg'].map(mime => canvas.toDataURL(mime).split(',')[1]);
+  });
+  for (const [index, path] of rasterPaths.entries()) await writeFile(join(assetRoot, path), Buffer.from(rasters[index], 'base64'));
+  const before = await state(), paths = [relativePath, ...rasterPaths];
+  const broken = 'results/broken.svg';
+  await writeFile(join(assetRoot, broken), '<svg><invalid');
+  await ingest(before.revision, [relativePath, broken], /broken\.svg|malformed SVG|invalid SVG/i);
+  assert.deepEqual((await state()).assets, []);
+  assert.equal((await state()).revision, before.revision);
+  // Force a real page edit after decoding starts so the import must check its revision again at commit.
+  await page.evaluate(() => {
+    const arrayBuffer = File.prototype.arrayBuffer;
+    File.prototype.arrayBuffer = function () {
+      if (this.name === 'Fe_K_edge.svg') {
+        File.prototype.arrayBuffer = arrayBuffer;
+        document.querySelector('#new-slide').click();
+      }
+      return arrayBuffer.call(this);
+    };
+  });
+  await ingest(before.revision, [relativePath], /revision changed/i);
+  const advanced = await state();
+  assert.equal(advanced.slides.length, before.slides.length + 1);
+  assert.deepEqual(advanced.assets, []);
+  const first = await ingest(advanced.revision, paths);
+  assert.deepEqual(first.assets.map(a => [a.relativePath, a.status]), paths.map(path => [path, 'imported']));
+  const [old] = first.assets;
+  assert.equal(old.fingerprint, sha256(original));
+  const imported = await state();
+  assert.equal(imported.history.undo, advanced.history.undo + 1);
+  assert.deepEqual(imported.slide.items, []);
+  assert.equal(imported.revision, first.revision);
+  const retry = await ingest(first.revision, paths);
+  assert.deepEqual(retry.assets.map(a => [a.assetId, a.status]), first.assets.map(a => [a.assetId, 'reused']));
+  assert.equal(retry.revision, first.revision);
+  assert.deepEqual((await state()).history, imported.history);
+  const undo = (await call('history', { sessionId, expectedRevision: retry.revision, action: 'undo' })).structuredContent;
+  assert.deepEqual(undo.assets, []);
+  const redo = (await call('history', { sessionId, expectedRevision: undo.revision, action: 'redo' })).structuredContent;
+  assert.deepEqual(redo.assets, imported.assets);
+  const slideId = redo.activeSlideId;
+  const placed = (await call('batch_edit', { sessionId, expectedRevision: redo.revision,
+    operations: [{ op: 'place_asset', assetId: old.assetId, slideId, properties: { x: 30, y: 40, width: 200 } }] })).structuredContent;
+  const [itemId] = placed.createdItemIds;
+  const initialCheck = await check([old.assetId]);
+  assert.deepEqual(initialCheck.sources.map(a => [a.assetId, a.status]), [[old.assetId, 'unchanged']]);
+  await writeFile(file, revised);
+  await ingest(redo.revision, [relativePath], /revision changed/i);
+  assert.equal((await state()).assets.length, 3);
+  const second = await ingest(placed.revision, [relativePath]);
+  const [latest] = second.assets;
+  assert.notEqual(latest.assetId, old.assetId);
+  assert.equal(latest.status, 'imported');
+  assert.equal(latest.fingerprint, sha256(revised));
+  await saveTestProject(page, sessionId, second.revision);
+  await openTestProject(page);
+  const reopened = await state(), diskBefore = await readTestProject(page);
+  const report = await check();
+  assert.equal(report.revision, reopened.revision);
+  assert.equal(report.sources.length, 4);
+  const prior = report.sources.find(a => a.assetId === old.assetId);
+  assert.deepEqual([prior.status, prior.fingerprint, prior.currentFingerprint], ['changed', old.fingerprint, latest.fingerprint]);
+  assert.deepEqual(prior.usedBy, [{ slideId, slideName: reopened.slide.name, itemId, hidden: false }]);
+  const current = report.sources.find(a => a.assetId === latest.assetId);
+  assert.deepEqual([current.status, current.usedBy], ['unchanged', []]);
+  const preview = await call('preview_batch', { sessionId, expectedRevision: reopened.revision, slideId, maxSize: 1600,
+    operations: [{ op: 'swap_asset', slideId, itemId, assetId: latest.assetId }] });
+  await checkImagePixels(page, preview, 'import-new-source.png', [[100, 80, '#2255bb']]);
+  await checkPreviewPixels(page, sessionId, reopened, 'import-existing-source.png', [[100, 80, '#bd4422']]);
+  const after = await state();
+  assert.equal(after.revision, reopened.revision);
+  assert.deepEqual(after.history, reopened.history);
+  assert.deepEqual(after.slide, reopened.slide);
+  assert.deepEqual(await readTestProject(page), diskBefore);
+  pass('MCP imports SVG/PNG/JPEG in one undo step, deduplicates exact retries and rejects partial or stale imports');
+  pass('a revised source survives save/reopen as a new asset; source checks identify the affected panel and a swap preview uses the new pixels');
+}
+
+async function checkBrowserLinkedSource(page, sessionId) {
+  // Exercise the UI import route with a native, persistable file handle.
+  const file = 'linked-spectrum.svg';
+  const write = async color => page.evaluate(async ({ file, color }) => {
+    const handle = await (await navigator.storage.getDirectory()).getFileHandle(file, { create: true });
+    const writer = await handle.createWritable();
+    await writer.write(`<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10" fill="${color}"/></svg>`);
+    await writer.close();
+  }, { file, color });
+  await write('#38678d');
+  await page.evaluate(file => {
+    const originalPicker = window.showOpenFilePicker;
+    window.showOpenFilePicker = async () => {
+      window.showOpenFilePicker = originalPicker;
+      return [await (await navigator.storage.getDirectory()).getFileHandle(file)];
+    };
+  }, file);
+  await page.locator('#add-images').click();
+  await page.waitForFunction(file => Array.from(document.querySelectorAll('.asset-name')).some(el => el.textContent === file), file);
+  const before = (await call('get_state', { sessionId })).structuredContent;
+  const asset = before.assets.find(a => a.name === file);
+  assert.equal(asset.sourceKind, 'linked');
+  const check = async () => (await call('check_sources', { sessionId, assetIds: [asset.id] })).structuredContent.sources;
+  assert.deepEqual((await check()).map(s => s.status), ['unchanged']);
+  await write('#f8766d');
+  const [changed] = await check();
+  assert.equal(changed.status, 'changed');
+  assert.deepEqual(changed.usedBy, asset.usedBy);
+  await page.evaluate(() => {
+    const prototype = FileSystemHandle.prototype;
+    const query = prototype.queryPermission, request = prototype.requestPermission;
+    window.sourcePermissionRequests = 0;
+    prototype.queryPermission = async () => 'prompt';
+    prototype.requestPermission = async () => { window.sourcePermissionRequests++; return 'denied'; };
+    window.restoreSourcePermissions = () => { prototype.queryPermission = query; prototype.requestPermission = request; };
+  });
+  try {
+    assert.deepEqual((await check()).map(s => s.status), ['permission_required']);
+    assert.equal(await page.evaluate(() => window.sourcePermissionRequests), 0);
+  } finally {
+    await page.evaluate(() => window.restoreSourcePermissions());
+  }
+  await page.evaluate(file => navigator.storage.getDirectory().then(root => root.removeEntry(file)), file);
+  assert.deepEqual((await check()).map(s => s.status), ['missing']);
+  const after = (await call('get_state', { sessionId })).structuredContent;
+  assert.equal(after.revision, before.revision);
+  assert.deepEqual(after.assets, before.assets);
+  pass('check_sources detects changed and missing originals for browser-linked images without refreshing their embedded copies');
+}
+
 async function checkPanelSwap(page, sessionId) {
   const state = async (slideId) => (await call('get_state', { sessionId, slideId })).structuredContent;
   const deck = createDeck(), main = deck.slides[0], supplement = addSlide(deck);
@@ -233,6 +378,148 @@ async function checkPanelSwap(page, sessionId) {
   assert.deepEqual(reopened.slide, after.slide); assert.deepEqual(reopened.assets, after.assets);
   await checkPreviewPixels(page, sessionId, reopened, 'swap-reopened.png', fitSamples);
   pass('swap a single shared SVG by source path, preserve its frame, clear old crop, preview contain, undo/redo and save/reopen');
+
+  await openTestProject(page, fixture);
+  const refreshBefore = await state(), refreshOther = await state(supplement.id);
+  const replacements = [
+    { op: 'replace_asset', slideId: main.id, itemIds: ['target'], assetId: revised.id },
+    { op: 'replace_asset', slideId: supplement.id, itemIds: ['hidden-copy'], assetId: revised.id },
+  ];
+  await edit(refreshBefore.revision, [
+    { op: 'set_locked', slideId: supplement.id, itemIds: ['hidden-copy'], locked: true }, ...replacements,
+  ], /locked/);
+  assert.deepEqual((await state()).slide, refreshBefore.slide);
+  assert.deepEqual((await state(supplement.id)).slide, refreshOther.slide);
+  const proposal = await call('preview_batch', { sessionId, expectedRevision: refreshBefore.revision, operations: replacements });
+  assert.equal(proposal.structuredContent.warnings.length, 2);
+  assert.equal((await state()).revision, refreshBefore.revision);
+  const refreshed = (await edit(refreshBefore.revision, replacements)).structuredContent;
+  assert.equal(refreshed.history.undo, refreshBefore.history.undo + 1);
+  assert.equal(refreshed.warnings.length, 2);
+  assert.deepEqual(refreshed.slide.items[0], { ...refreshBefore.slide.items[0], assetId: revised.id });
+  assert.deepEqual(refreshed.slide.items.slice(1), refreshBefore.slide.items.slice(1));
+  assert.deepEqual((await state(supplement.id)).slide.items[0], { ...refreshOther.slide.items[0], assetId: revised.id });
+  await checkPreviewPixels(page, sessionId, refreshed, 'refresh-crop.png', [[160, 100, '#3050a0'], [400, 100, '#c03018']]);
+  const refreshUndo = await history(refreshed.revision, 'undo');
+  assert.deepEqual(refreshUndo.slide, refreshBefore.slide);
+  assert.deepEqual((await state(supplement.id)).slide, refreshOther.slide);
+  const refreshRedo = await history(refreshUndo.revision, 'redo');
+  const refreshSaved = await saveTestProject(page, sessionId, refreshRedo.revision);
+  assert.deepEqual(refreshSaved.slides[0].items[0].crop, fixture.slides[0].items[0].crop);
+  await openTestProject(page);
+  assert.deepEqual((await state()).slide, refreshed.slide);
+  pass('replace_asset preserves crop and rotation across explicit slides, warns on changed aspect, and round-trips in one Undo');
+}
+
+async function checkObjectEditing(page, sessionId) {
+  await openTestProject(page, fixture('Object operations'));
+  const state = async () => (await call('get_state', { sessionId })).structuredContent;
+  const before = await state(), slideId = before.activeSlideId;
+  await page.locator('#stage [data-item="a"]').click();
+  const operations = [
+    { op: 'duplicate', slideId, itemIds: ['c'], offsetX: 0, offsetY: 80 },
+    { op: 'delete', slideId, itemIds: ['b'] },
+    { op: 'set_hidden', slideId, itemIds: ['a'], hidden: true },
+    { op: 'reorder', slideId, itemIds: ['c'], direction: 'back' },
+    { op: 'set_locked', slideId, itemIds: ['c'], locked: true },
+  ];
+  await call('preview_batch', { sessionId, expectedRevision: before.revision, operations });
+  assert.deepEqual((await state()).slide, before.slide);
+  const edited = (await call('batch_edit', { sessionId, expectedRevision: before.revision, operations })).structuredContent;
+  assert.equal(edited.history.undo, before.history.undo + 1);
+  assert.deepEqual(edited.deletedItemIds, ['b']);
+  assert.deepEqual(edited.selectedItemIds, []);
+  assert.equal(edited.slide.items[0].id, 'c');
+  assert.equal(edited.slide.items[0].locked, true);
+  assert.equal(edited.slide.items[1].hidden, true);
+  assert.equal(edited.duplicatedItems[0].sourceItemId, 'c');
+  assert.equal(await page.locator('#stage [data-item="a"], #stage [data-item="b"]').count(), 0);
+  await call('batch_edit', { sessionId, expectedRevision: edited.revision, operations: [{ op: 'delete', slideId, itemIds: ['c'] }] }, /locked/);
+  const undone = (await call('history', { sessionId, expectedRevision: edited.revision, action: 'undo' })).structuredContent;
+  assert.deepEqual(undone.slide, before.slide);
+  const redone = (await call('history', { sessionId, expectedRevision: undone.revision, action: 'redo' })).structuredContent;
+  const unlocked = (await call('batch_edit', { sessionId, expectedRevision: redone.revision, operations: [
+    { op: 'set_locked', slideId, itemIds: ['c'], locked: false },
+    { op: 'set_hidden', slideId, itemIds: ['a'], hidden: false },
+  ] })).structuredContent;
+  assert.equal(unlocked.slide.items[0].locked, false);
+  assert.equal(unlocked.slide.items[1].hidden, false);
+  await saveTestProject(page, sessionId, unlocked.revision);
+  await openTestProject(page);
+  assert.deepEqual((await state()).slide, unlocked.slide);
+  pass('duplicate/delete/layers/visibility/locking update the live page with selection cleanup, preview, Undo and saved round-trip');
+}
+
+async function checkSVGEditing(page, sessionId) {
+  await openTestProject(page, createDeck());
+  const state = async () => (await call('get_state', { sessionId })).structuredContent;
+  await mkdir(join(assetRoot, 'vector-edit'));
+  const path = 'vector-edit/plot.svg';
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100">'
+    + '<style>rect {fill:#a03020 !important}</style><defs><linearGradient id="fade"><stop offset="0" stop-color="#111111"/><stop offset="1" stop-color="#eeeeee"/></linearGradient></defs>'
+    + '<rect id="background" width="200" height="100"/><text id="axis" x="15" y="80" font-size="18">Fe <tspan>K</tspan> edge</text></svg>';
+  await writeFile(join(assetRoot, path), svg);
+  const initial = await state();
+  const imported = (await call('import_assets', { sessionId, expectedRevision: initial.revision, paths: [path] })).structuredContent;
+  const assetId = imported.assets[0].assetId, slideId = initial.activeSlideId;
+  const placed = (await call('batch_edit', { sessionId, expectedRevision: imported.revision, operations: [
+    { op: 'place_asset', slideId, assetId, properties: { x: 20, y: 20, width: 200 } },
+    { op: 'place_asset', slideId, assetId, properties: { x: 260, y: 20, width: 200 } },
+  ] })).structuredContent;
+  const [itemId, siblingId] = placed.createdItemIds;
+  const inspect = async (options = {}) => (await call('inspect_svg', { sessionId, slideId, itemId, ...options })).structuredContent;
+  const info = await inspect(), partial = await inspect({ offset: 2, limit: 2 });
+  assert.equal(info.revision, placed.revision); assert.equal(info.assetId, assetId);
+  assert.equal(partial.nextOffset, 4); assert.equal(partial.nodes.length, 2);
+  const rect = info.nodes.find(node => node.elementId === 'background'), text = info.nodes.find(node => node.elementId === 'axis');
+  assert.deepEqual(text.textSegments.map(segment => segment.index), [0, 2]);
+  const operation = { op: 'edit_svg', slideId, itemId, assetId, patches: [
+    { path: rect.path, attributes: { fill: '#2850b0' } },
+    { path: text.path, attributes: { 'font-size': '20' }, textIndex: 2, text: ' 边 μ(E)' },
+  ] };
+  const request = { sessionId, expectedRevision: placed.revision, operations: [operation] };
+  const preview = await call('preview_batch', request);
+  await checkImagePixels(page, preview, 'svg-patch-proposal.png', [[40, 40, '#2850b0'], [280, 40, '#a03020']]);
+  const unchanged = await state();
+  assert.equal(unchanged.revision, placed.revision);
+  assert.deepEqual(unchanged.assets, placed.assets); assert.deepEqual(unchanged.history, placed.history);
+  await call('batch_edit', { ...request, operations: [operation, { ...operation, itemId: siblingId, patches: [{ path: [999], attributes: { fill: 'red' } }] }] }, /SVG path/);
+  assert.equal((await state()).revision, placed.revision);
+  const edited = (await call('batch_edit', request)).structuredContent;
+  assert.equal(edited.history.undo, placed.history.undo + 1);
+  assert.equal(edited.createdAssetIds.length, 1);
+  const derivedId = edited.createdAssetIds[0];
+  assert.equal(edited.slide.items[0].assetId, derivedId); assert.equal(edited.slide.items[1].assetId, assetId);
+  assert.equal((await inspect()).nodes.find(node => node.elementId === 'axis').textSegments[1].text, ' 边 μ(E)');
+  await checkPreviewPixels(page, sessionId, edited, 'svg-patch-applied.png', [[40, 40, '#2850b0'], [280, 40, '#a03020']]);
+  const saved = await saveTestProject(page, sessionId, edited.revision);
+  const original = saved.assets.find(asset => asset.id === assetId), derived = saved.assets.find(asset => asset.id === derivedId);
+  assert.deepEqual(derived.svgDocument.children[1], original.svgDocument.children[1]);
+  for (const key of ['fingerprint', 'relativePath', 'mcpRootId']) assert.equal(derived[key], undefined);
+  const undone = (await call('history', { sessionId, expectedRevision: edited.revision, action: 'undo' })).structuredContent;
+  assert.deepEqual(undone.assets, placed.assets); assert.deepEqual(undone.slide, placed.slide);
+  const redone = (await call('history', { sessionId, expectedRevision: undone.revision, action: 'redo' })).structuredContent;
+  await saveTestProject(page, sessionId, redone.revision);
+  await openTestProject(page);
+  const reopened = await state();
+  assert.deepEqual(reopened.slide, edited.slide); assert.deepEqual(reopened.assets, edited.assets);
+  await checkPreviewPixels(page, sessionId, reopened, 'svg-patch-reopened.png', [[40, 40, '#2850b0'], [280, 40, '#a03020']]);
+
+  // A real page edit during asynchronous SVG decoding must prevent the patch from committing.
+  await page.evaluate(() => {
+    const decode = HTMLImageElement.prototype.decode;
+    HTMLImageElement.prototype.decode = function () {
+      HTMLImageElement.prototype.decode = decode;
+      document.querySelector('#new-slide').click();
+      return decode.call(this);
+    };
+  });
+  await call('batch_edit', { sessionId, expectedRevision: reopened.revision, operations: [{ ...operation, assetId: derivedId }] }, /revision changed/);
+  const raced = await state();
+  assert.equal(raced.slides.length, reopened.slides.length + 1);
+  assert.deepEqual(raced.assets, reopened.assets);
+  assert.deepEqual((await call('get_state', { sessionId, slideId })).structuredContent.slide, reopened.slide);
+  pass('inspect/patch SVG preserves shared assets and mixed text, overrides CSS in actual pixels, previews without writes, saves and rejects decoding races');
 }
 async function designFixture(page) {
   const deck = createDeck(), source = deck.slides[0], active = addSlide(deck);
@@ -365,7 +652,10 @@ async function checkSlideCopy(page, sessionId, source, before) {
 try {
   assert.equal((await rpc('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'integration-test', version: '1' } })).result.serverInfo.name, 'figure-editor');
   mcp.stdin.write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) + '\n');
-  assert.equal((await rpc('tools/list')).result.tools.length, 10);
+  const toolNames = (await rpc('tools/list')).result.tools.map(tool => tool.name);
+  assert.equal(toolNames.length, 13);
+  assert.ok(toolNames.includes('figure_inspect_svg'));
+  assert.ok(toolNames.includes('figure_import_assets') && toolNames.includes('figure_check_sources'));
   const { page } = await newPage();
   const sessionId = (await sessions(1))[0].sessionId;
   const deck = fixture();
@@ -447,6 +737,10 @@ try {
   assert.equal((await call('get_state', { sessionId: secondId })).structuredContent.slide.items.length, 0);
   await checkPanelPlacement(second.page, secondId);
   await checkPanelSwap(second.page, secondId);
+  await checkObjectEditing(second.page, secondId);
+  await checkSVGEditing(second.page, secondId);
+  await checkAssetImport(second.page, secondId);
+  await checkBrowserLinkedSource(second.page, secondId);
   const { source, active } = await designFixture(second.page);
   const designState = (await call('get_state', { sessionId: secondId })).structuredContent;
   assert.deepEqual(designState.selectedItemIds, ['anchor']);

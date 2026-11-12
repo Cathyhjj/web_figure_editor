@@ -11,7 +11,7 @@ import { createDeck, validateDeck, cloneDeck, currentSlide, createAssetItem, sli
 import { pickProjectFile, readProjectFile, readProjectFileState, writeProjectFile, checkProjectFileRevision } from './project-files.js';
 import { createRecentProjects, openRecentProject } from './recent-projects.js';
 import { initRecentProjectMenu } from './recent-project-menu.js';
-import { importFiles, pickImages, importFolderFiles, pickFolder, importDroppedFiles, linkAsset, refreshAsset, replaceAsset } from './assets.js?v=locate-1';
+import { importFiles, pickImages, importFolderFiles, pickFolder, importDroppedFiles, linkAsset, refreshAsset, replaceAsset, prepareAssetImport } from './assets.js?v=locate-1';
 import { buildAssetTree } from './asset-tree.js';
 import { locateAsset } from './locate.js';
 import { hasSavedLocalSource, needsLocalSource, saveClipboardAsset, savePastedSources } from './local-source.js';
@@ -45,7 +45,7 @@ import { selectionToPNG } from './clipboard-image.js';
 
 import { formatTitle, formatSection, formatInspectorMarkup, bindFormatInspector } from './format-inspector.js';
 import { createObjectContextMenu } from './object-context-menu.js';
-import { connectAutomation, describeProject, prepareBatch, renderAutomation } from './automation.js';
+import { connectAutomation, describeProject, checkSources, inspectSVG, prepareBatch, renderAutomation } from './automation.js';
 import { checkExport } from './export-check.js';
 
 const $ = id => document.getElementById(id);
@@ -1547,9 +1547,11 @@ function automationState(slideId){
    savedToFile:Boolean(projectFileHandle)&&!dirty,draftCurrent:draftRevision===editRevision&&!draftError,draftError,
    error:autosaveError?.detail??null,status:$('autosave-status').textContent}};
 }
-async function executeAutomation(method,params){
+async function executeAutomation(method,params,ensureActive){
  const allowed={
   get_state:['slideId'], batch_edit:['expectedRevision','operations'], duplicate_slide:['expectedRevision','slideId','name'],
+  import_assets:['expectedRevision','rootId','files'], check_sources:['assetIds'],
+  inspect_svg:['slideId','itemId','offset','limit'],
   preview:['slideId','maxSize'], preview_batch:['expectedRevision','operations','slideId','maxSize'],
   check_export:['slideId','format','finalWidthMm','minRasterDpi'], export:['slideId','format','dpi'],
   history:['expectedRevision','action'], save:['expectedRevision','destination'],
@@ -1558,7 +1560,21 @@ async function executeAutomation(method,params){
  if(method==='get_state')return automationState(params.slideId);
  const busy=automationBusy();if(busy)throw new Error(`Editor busy: ${busy}`);
  const revision=automationRevision();
- if(['batch_edit','duplicate_slide','preview_batch','history','save'].includes(method)&&params.expectedRevision!==revision)throw new Error('The project revision changed. Read state and rebuild the operation before retrying.');
+ if(['import_assets','batch_edit','duplicate_slide','preview_batch','history','save'].includes(method)&&params.expectedRevision!==revision)throw new Error('The project revision changed. Read state and rebuild the operation before retrying.');
+ if(method==='check_sources')return {revision,sources:await checkSources(project,params.assetIds,ensureActive)};
+ if(method==='inspect_svg')return {revision,...inspectSVG(project,params)};
+ if(method==='import_assets'){
+  const {assets,newAssets}=await prepareAssetImport(project.assets,{rootId:params.rootId,files:params.files});
+  // The editor can change, or the user can pause AI control, while the images are decoding.
+  ensureActive();
+  if(automationRevision()!==revision)throw new Error('The project revision changed during import. Read state before retrying.');
+  const pending=automationBusy();if(pending)throw new Error(`Editor busy: ${pending}`);
+  if(newAssets.length){
+   if(!change(()=>{project.assets.push(...newAssets);}))throw new Error($('status').textContent);
+   status(`Imported ${newAssets.length} new asset${newAssets.length===1?'':'s'}. Undo removes this import.`);
+  }
+  return {revision:automationRevision(),assets};
+ }
  if(method==='check_export')return {...checkExport(project,params),revision};
  if(method==='duplicate_slide'){
   const source=project.slides.find(page=>page.id===params.slideId);
@@ -1576,14 +1592,27 @@ async function executeAutomation(method,params){
  }
  if(method==='batch_edit'||method==='preview_batch'){
   const prepared=prepareBatch(project,params.operations);
+  // SVG edits are validated as documents and decoded before either preview or commit.
+  if(prepared.createdAssetIds.length){
+   for(const id of prepared.createdAssetIds){const image=new Image();image.src=prepared.project.assets.find(asset=>asset.id===id).dataUrl;await image.decode();}
+   ensureActive();
+   if(automationRevision()!==revision)throw new Error('The project revision changed during SVG decoding. Read state before retrying.');
+   const pending=automationBusy();if(pending)throw new Error(`Editor busy: ${pending}`);
+  }
   if(method==='preview_batch'){
    const result=await renderAutomation(prepared.project,{slideId:params.slideId,maxSize:params.maxSize},true);
    return {...result,proposed:true,baseRevision:revision,currentRevision:automationRevision(),
-    affectedSlideIds:[...new Set(params.operations.map(op=>op.slideId))]};
+    affectedSlideIds:[...new Set(params.operations.map(op=>op.slideId))],warnings:prepared.warnings};
   }
-  if(!change(()=>{project.slides=prepared.project.slides;}))throw new Error('The edit failed validation and was rolled back.');
+  if(!change(()=>{
+   project.slides=prepared.project.slides;
+   if(prepared.createdAssetIds.length)project.assets=prepared.project.assets;
+   selected=new Set([...selected].filter(id=>slide().items.some(item=>item.id===id&&!item.hidden)));
+  }))throw new Error('The edit failed validation and was rolled back.');
   status(`AI updated ${prepared.changedItemIds.length} objects. Undo restores the whole batch.`);
-  return {...automationState(),changedItemIds:prepared.changedItemIds,createdItemIds:prepared.createdItemIds};
+  return {...automationState(),changedItemIds:prepared.changedItemIds,createdItemIds:prepared.createdItemIds,
+   deletedItemIds:prepared.deletedItemIds,duplicatedItems:prepared.duplicatedItems,
+   createdAssetIds:prepared.createdAssetIds,assetReplacements:prepared.assetReplacements,warnings:prepared.warnings};
  }
  if(method==='history'){
   if(!['undo','redo'].includes(params.action))throw new Error('action must be undo or redo.');

@@ -128,6 +128,24 @@ test('repeated cross-project pastes reuse one portable asset without merging dif
   assert.notEqual(currentSlide(otherDeck).items[0].assetId, 'unrelated-local-link');
 });
 
+test('copying the same image from a different MCP source directory preserves its binding', () => {
+  const source = fixture();
+  Object.assign(source.assets[0], { sourceKind: 'copy', mcpRootId: 'a'.repeat(64) });
+  delete source.assets[0].linkToken;
+  delete source.assets[0].linkPersistence;
+  const selection = createSelection(source, new Set(['image-a']));
+  const deck = createDeck();
+  pasteSelection(deck, selection);
+  // A copied project can carry the exact same asset ID and bytes with a different source root.
+  selection.assets[0].id = deck.assets[0].id;
+  selection.items[0].assetId = deck.assets[0].id;
+  selection.assets[0].mcpRootId = 'b'.repeat(64);
+  pasteSelection(deck, selection);
+  pasteSelection(deck, selection);
+  assert.deepEqual(deck.assets.map(asset => asset.mcpRootId), ['a'.repeat(64), 'b'.repeat(64)]);
+  assert.deepEqual(currentSlide(deck).items.map(item => item.assetId), [deck.assets[0].id, deck.assets[1].id, deck.assets[1].id]);
+});
+
 test('asset ID collisions never replace existing or copied image data', () => {
   for (const mutate of [
     a => a.width = 2,

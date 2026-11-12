@@ -121,7 +121,7 @@ function sameImage(left, right) {
 function reusablePortableAsset(existing, source) {
   return existing.sourceKind === 'copy' && existing.linkToken === undefined && existing.linkPersistence === undefined
     && sameImage(existing, source)
-    && ['name', 'relativePath', 'fingerprint', 'lastModified', 'sourceOrigin'].every(key => existing[key] === source[key]);
+    && ['name', 'relativePath', 'fingerprint', 'lastModified', 'sourceOrigin', 'mcpRootId'].every(key => existing[key] === source[key]);
 }
 
 function freshId(used) {
@@ -139,7 +139,7 @@ function importAssets(candidate, source) {
   for (const asset of source.assets) {
     if (!usedAssets.has(asset.id)) continue;
     const sameId = candidate.assets.find(value => value.id === asset.id);
-    const existing = sameId && sameImage(sameId, asset) ? sameId
+    const existing = sameId && !sameId.mcpRootId && !asset.mcpRootId && sameImage(sameId, asset) ? sameId
       : candidate.assets.find(value => reusablePortableAsset(value, asset));
     if (existing) {
       assetMap.set(asset.id, existing.id);

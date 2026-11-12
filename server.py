@@ -490,7 +490,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             pdf_text = path == "/api/pdf-text"
             pptx = path in {"/api/pptx-import", "/api/pptx-paste", "/api/pptx-source-pdf"}
             label = "automation" if automation else "PowerPoint PDF" if path == "/api/pptx-source-pdf" else "PPTX import" if pptx else "PDF text" if pdf_text else "clipboard image" if clipboard else "Locate"
-            limit = (MAX_AUTOMATION_BODY if path == '/api/automation/result' else 1024 * 1024) if automation else MAX_PPTX_BODY if pptx else MAX_PDF_TEXT_BODY if pdf_text else MAX_CLIPBOARD_BODY if clipboard else MAX_BODY
+            large_automation = path in {'/api/automation/result', '/api/automation/command'}
+            limit = (MAX_AUTOMATION_BODY if large_automation else 1024 * 1024) if automation else MAX_PPTX_BODY if pptx else MAX_PDF_TEXT_BODY if pdf_text else MAX_CLIPBOARD_BODY if clipboard else MAX_BODY
             tokens = self.headers.get_all("X-Figure-Token", [])
             if len(tokens) != 1 or not secrets.compare_digest(tokens[0].encode(), self.server.token.encode()):
                 raise LocateError(403, "Reload the local Figure Editor before using local files.")
@@ -508,6 +509,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             except (OSError, ValueError, RecursionError):
                 raise LocateError(400, "The " + label + " request is not valid JSON.")
             if automation:
+                if (path == '/api/automation/command' and len(body) > 1024 * 1024
+                        and (not isinstance(data, dict) or data.get('method') != 'import_assets')):
+                    raise LocateError(413, "Only asset import commands may exceed 1 MiB.")
                 result = self.server.automation.handle(path.removeprefix('/api/automation/'), data)
             elif path == "/api/pptx-clipboard":
                 if not isinstance(data,dict) or set(data)-{'previewSha256'}:

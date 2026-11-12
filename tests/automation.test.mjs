@@ -13,6 +13,52 @@ function fixture() {
 }
 const op = (deck, operation) => ({ slideId: deck.activeSlideId, ...operation });
 
+test('object operations preserve stacking, isolate copies, and require explicit unlock', () => {
+  const deck = fixture(), before = structuredClone(deck);
+  deck.slides[0].items[0].locked = true;
+  const result = prepareBatch(deck, [
+    op(deck, { op: 'set_locked', itemIds: ['a'], locked: false }),
+    op(deck, { op: 'duplicate', itemIds: ['c', 'a'], offsetX: 7, offsetY: -3 }),
+    op(deck, { op: 'set_hidden', itemIds: ['b'], hidden: true }),
+    op(deck, { op: 'reorder', itemIds: ['c', 'a'], direction: 'front' }),
+    op(deck, { op: 'delete', itemIds: ['b'] }),
+  ]);
+  const items = result.project.slides[0].items;
+  assert.deepEqual(items.slice(-2).map(item => item.id), ['a', 'c']);
+  assert.deepEqual(result.duplicatedItems.map(item => item.sourceItemId), ['a', 'c']);
+  assert.deepEqual(result.createdItemIds, items.slice(0, 2).map(item => item.id));
+  assert.deepEqual(result.deletedItemIds, ['b']);
+  assert.deepEqual(items.slice(0, 2).map(item => [item.text, item.x, item.y]), [['a', 7, -3], ['c', 207, 57]]);
+  assert.equal(deck.slides[0].items[0].locked, true);
+  assert.deepEqual(deck.slides[0].items.slice(1), before.slides[0].items.slice(1));
+});
+
+test('layer moves keep relative order for adjacent and nonadjacent selections', () => {
+  const deck = fixture();
+  deck.slides[0].items.push({ ...deck.slides[0].items[0], id: 'd' });
+  for (const [ids, direction, expected] of [
+    [['a', 'b'], 'forward', ['c', 'a', 'b', 'd']],
+    [['b', 'd'], 'backward', ['b', 'a', 'd', 'c']],
+    [['d', 'b'], 'back', ['b', 'd', 'a', 'c']],
+    [['d', 'b'], 'front', ['a', 'c', 'b', 'd']],
+  ]) assert.deepEqual(prepareBatch(deck, [op(deck, { op: 'reorder', itemIds: ids, direction })]).project.slides[0].items.map(item => item.id), expected);
+});
+
+test('locked, missing, or malformed object operations reject the whole candidate', () => {
+  const deck = fixture(); deck.slides[0].items[1].locked = true;
+  const before = structuredClone(deck);
+  for (const operation of [
+    { op: 'delete', itemIds: ['a', 'b'] }, { op: 'duplicate', itemIds: ['a', 'b'] },
+    { op: 'set_hidden', itemIds: ['b'], hidden: true }, { op: 'reorder', itemIds: ['b'], direction: 'back' },
+    { op: 'set_locked', itemIds: ['a'], locked: 'false' }, { op: 'set_hidden', itemIds: ['a'], hidden: 0 },
+    { op: 'duplicate', itemIds: ['a'], offsetX: Infinity }, { op: 'reorder', itemIds: ['a'], direction: 'invalid' },
+    { op: 'delete', itemIds: ['missing'] },
+  ]) {
+    assert.throws(() => prepareBatch(deck, [op(deck, { op: 'delete', itemIds: ['c'] }), op(deck, operation)]));
+    assert.deepEqual(deck, before);
+  }
+});
+
 const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nWQAAAAASUVORK5CYII=';
 
 function vectorDeck() {
@@ -63,6 +109,30 @@ function swapFixture() {
   addSlide(deck).items.push({ ...panel, id: 'other' });
   return validateDeck(deck);
 }
+
+test('replace_asset preserves crop, frame, fit and effects on explicit placements across slides', () => {
+  const deck = swapFixture();
+  deck.slides[1].items[0].imageFit = 'contain';
+  const before = structuredClone(deck);
+  const result = prepareBatch(deck, deck.slides.map(page => ({ op: 'replace_asset', slideId: page.id,
+    itemIds: page.items.filter(item => item.type === 'image').map(item => item.id), assetId: 'revision' })));
+  for (let n = 0; n < deck.slides.length; n++) {
+    assert.deepEqual(result.project.slides[n].items[0], { ...before.slides[n].items[0], assetId: 'revision' });
+  }
+  assert.equal(result.assetReplacements.length, 2);
+  assert.equal(result.warnings.length, 2);
+  assert.ok(result.warnings.every(row => row.code === 'source_aspect_changed'));
+  assert.deepEqual(result.project.assets, before.assets);
+  assert.deepEqual(deck, before);
+  deck.slides[1].items[0].locked = true;
+  const locked = structuredClone(deck);
+  assert.throws(() => prepareBatch(deck, deck.slides.map(page => ({ op: 'replace_asset', slideId: page.id,
+    itemIds: [page.items[0].id], assetId: 'revision' }))), /locked/);
+  assert.deepEqual(deck, locked);
+  for (const itemIds of [['panel', 'label'], ['missing'], ['panel', 'panel']])
+    assert.throws(() => prepareBatch(deck, [{ op: 'replace_asset', slideId: deck.slides[0].id, itemIds, assetId: 'revision' }]));
+  assert.throws(() => prepareBatch(deck, [{ op: 'replace_asset', slideId: deck.slides[0].id, itemIds: ['panel'], assetId: 'vector' }]), /already uses/);
+});
 
 test('swap_asset retains frame, layer and styling, and fits the full replacement on only the named slide', () => {
   const deck = swapFixture(), before = structuredClone(deck), slide = deck.slides[0];

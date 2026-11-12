@@ -182,6 +182,8 @@
 # Editable vector SVG import and verification.
 !/svg-vector.js
 !/svg-editor.js
+!/svg-edit.js
+!/tests/svg-edit.test.mjs
 !/tests/svg-editor.html
 !/tests/svg-editor-browser.js
 

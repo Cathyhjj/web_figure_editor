@@ -180,7 +180,7 @@ function checkRasterHeader(bytes, mime) {
   }
 }
 
-async function buildAsset(file, id = newId(), relativePath = file?.webkitRelativePath) {
+async function buildAsset(file, id = newId(), relativePath = file?.webkitRelativePath, expectedMime) {
   if (!file || typeof file.arrayBuffer !== 'function') throw new Error('Unable to read the file. Select a local image again.');
   if (file.size === 0) throw new Error('The file is empty.');
   if (file.size > MAX_FILE_BYTES) throw new Error('Each image or video must be 25 MB or smaller.');
@@ -188,6 +188,7 @@ async function buildAsset(file, id = newId(), relativePath = file?.webkitRelativ
   const bytes = new Uint8Array(buffer);
   if (bytes.length > MAX_FILE_BYTES) throw new Error('Each image or video must be 25 MB or smaller.');
   const mime = detectMime(bytes);
+  if (expectedMime && mime !== expectedMime) throw new Error('File contents do not match the requested image format.');
   if (mime !== 'image/svg+xml') checkRasterHeader(bytes, mime);
   const originalDataUrl = bytesToDataUrl(bytes, mime);
   const asset = {
@@ -249,7 +250,7 @@ async function importRecords(records) {
     if (record.filter && !isImageCandidate(file)) { skipped++; continue; }
     try {
       if (total + Number(file.size || 0) > MAX_IMPORT_BYTES) throw new Error('Each import is limited to 100 MB of media. Import smaller batches.');
-      const asset = await buildAsset(file, undefined, relativePath);
+      const asset = await buildAsset(file, undefined, relativePath, record.expectedMime);
       const sizeOfCopy = asset.dataUrl.length + (asset.originalDataUrl?.length || 0) + (asset.posterDataUrl?.length || 0);
       if (embeddedBytes + sizeOfCopy > MAX_IMPORT_BYTES * 4 / 3 || totalPixels + asset.width * asset.height > 64_000_000) {
         throw new Error('The decoded batch exceeds 64 million pixels or 100 MB of assets. Resize the images or import smaller batches.');
@@ -270,6 +271,57 @@ export async function importFiles(files, handleMap = new Map()) {
   const records = Array.from(files || [], (file) => ({ file, handle: handleMap?.get?.(file) }));
   const { assets, errors } = await importRecords(records);
   return { assets, errors };
+}
+
+export function isProjectRelativePath(path) {
+  if (typeof path !== 'string' || path !== path.trim() || /[\\\x00-\x1f\x7f]/.test(path)) return false;
+  if (/^(?:[a-z][a-z0-9+.-]*:|~)/i.test(path) || /%(?:25|2e|2f|3a|5c)/i.test(path)) return false;
+  return path.split('/').every(part => part !== '' && part !== '.' && part !== '..');
+}
+
+const importMime = new Map([['svg', 'image/svg+xml'], ['png', 'image/png'], ['jpg', 'image/jpeg'], ['jpeg', 'image/jpeg']]);
+const sha256Hex = value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value);
+
+function* automationFiles(files) {
+  let remainingBytes = 24 * 1024 * 1024;
+  for (const { relativePath, mime, data, fingerprint } of files) {
+    if (!isProjectRelativePath(relativePath) || relativePath.length > 2000) throw new Error('Expected a relative path inside the asset root.');
+    const name = relativePath.split('/').at(-1);
+    const extension = /\.(svg|png|jpe?g)$/i.exec(name)?.[1].toLowerCase();
+    if (!extension || mime !== importMime.get(extension) || !sha256Hex(fingerprint)) throw new Error(`Invalid source metadata for ${relativePath}.`);
+    if (typeof data !== 'string' || !data.length || data.length % 4 || data.length > Math.ceil(remainingBytes / 3) * 4) {
+      throw new Error('Supply nonempty base64 images totaling at most 24 MiB.');
+    }
+    const binary = atob(data);
+    if (binary.length > remainingBytes) throw new Error('The imported files exceed 24 MiB.');
+    remainingBytes -= binary.length;
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < bytes.length; i++) bytes[i] = binary.charCodeAt(i);
+    yield { file: new File([bytes], name, { type: mime, lastModified: 0 }), relativePath, expectedMime: mime };
+  }
+}
+
+/** Stage a whole MCP import without placing objects, changing the library, or registering file handles. */
+export async function prepareAssetImport(existingAssets, { rootId, files }) {
+  if (!sha256Hex(rootId)) throw new Error('Invalid asset root identifier.');
+  if (!Array.isArray(files) || !files.length || files.length > 32) throw new Error('Import 1–32 files at a time.');
+  const result = await importRecords(automationFiles(files));
+  if (result.errors.length) throw new Error(result.errors.map(({ name, message }) => `${name}: ${message}`).join('\n'));
+  const available = [...existingAssets], newAssets = [], assets = [];
+  for (const [index, source] of result.assets.entries()) {
+    const { relativePath, fingerprint } = source;
+    if (fingerprint !== files[index].fingerprint) throw new Error(`Could not verify the original fingerprint for ${relativePath}.`);
+    const existing = available.find(asset => asset.mcpRootId === rootId && asset.relativePath === relativePath
+      && asset.fingerprint === fingerprint && asset.mime === source.mime && asset.dataUrl === source.dataUrl
+      && asset.originalDataUrl === source.originalDataUrl);
+    if (!existing) {
+      source.mcpRootId = rootId;
+      newAssets.push(source);
+      available.push(source);
+    }
+    assets.push({ assetId: (existing || source).id, relativePath, fingerprint, status: existing ? 'reused' : 'imported' });
+  }
+  return { newAssets, assets };
 }
 
 /** Directory-input fallback: preserve the selected root and all nested directory names. */
@@ -454,4 +506,29 @@ export async function assetLinkStatus(asset) {
     const scope = asset?.linkPersistence === 'session' ? 'this session only' : 'this browser';
     return permission === 'granted' ? `Local file linked (${scope})` : `File handle saved; permission required to refresh (${scope})`;
   } catch { return 'Link unavailable. Relink the file; the embedded copy is preserved.'; }
+}
+
+/** Hash already readable linked originals without refreshing them or requesting permission. */
+export async function checkLinkedAssetSource(asset, budget = { remainingBytes: MAX_IMPORT_BYTES }) {
+  if (asset.sourceKind !== 'linked') return { status: 'embedded' };
+  const recorded = asset.fingerprint?.replace(/^sha256:/i, '').toLowerCase();
+  if (!sha256Hex(recorded)) return { status: 'no_fingerprint', reason: 'No SHA-256 fingerprint was recorded for this copy.' };
+  try {
+    const handle = await getAssetHandle(asset);
+    if (!handle) return { status: 'unavailable', reason: 'No file handle is available in this browser. Relink the original file.' };
+    if (!sessionHandles.has(handle) && await handle.queryPermission?.({ mode: 'read' }) !== 'granted') {
+      return { status: 'permission_required', reason: 'Allow read access to the original in the editor.' };
+    }
+    const file = await handle.getFile();
+    if (file.size > MAX_FILE_BYTES) return { status: 'unavailable', reason: 'The original exceeds the 25 MiB per-file check limit.' };
+    if (file.size > budget.remainingBytes) return { status: 'unavailable', reason: 'The source check byte limit was reached. Check fewer assets.' };
+    budget.remainingBytes -= file.size;
+    const currentFingerprint = await fingerprint(await file.arrayBuffer());
+    if (!currentFingerprint) return { status: 'unavailable', reason: 'Could not compute a SHA-256 fingerprint.' };
+    return { status: recorded === currentFingerprint ? 'unchanged' : 'changed', currentFingerprint };
+  } catch (error) {
+    if (error?.name === 'NotAllowedError' || error?.name === 'SecurityError') return { status: 'permission_required', reason: readableError(error) };
+    if (error?.name === 'NotFoundError') return { status: 'missing', reason: readableError(error) };
+    return { status: 'unavailable', reason: 'Could not read the original file. Relink it in the editor.' };
+  }
 }

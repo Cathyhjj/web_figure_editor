@@ -145,6 +145,10 @@ function validateProjectInternal(input, assetCache) {
       if (asset.width > 4096 || asset.height > 4096 || asset.width * asset.height > 4_000_000) fail('HTML chart viewport is too large.');
     }
     for (const key of ['relativePath', 'fingerprint']) if (a[key] !== undefined) asset[key] = string(a[key], `asset.${key}`, 2000);
+    if (a.mcpRootId !== undefined) {
+      if (typeof a.mcpRootId !== 'string' || !/^[0-9a-f]{64}$/.test(a.mcpRootId)) fail('asset.mcpRootId must be a lowercase SHA-256 identifier.');
+      asset.mcpRootId = a.mcpRootId;
+    }
     if (a.sourceOrigin !== undefined) asset.sourceOrigin = choice(a.sourceOrigin, 'asset.sourceOrigin', ['file', 'clipboard']);
     if (a.linkToken !== undefined) asset.linkToken = id(a.linkToken, 'asset.linkToken', 200);
     if (a.linkPersistence !== undefined) asset.linkPersistence = choice(a.linkPersistence, 'asset.linkPersistence', ['browser', 'session']);
@@ -259,6 +263,7 @@ function manifest(project) {
       sourceKind: a.sourceKind, embeddedCopy: true, ...(a.relativePath !== undefined ? { relativePath: a.relativePath } : {}),
       ...(a.sourceOrigin !== undefined ? { sourceOrigin: a.sourceOrigin } : {}),
       ...(a.fingerprint !== undefined ? { fingerprint: a.fingerprint } : {}),
+      ...(a.mcpRootId !== undefined ? { mcpRootId: a.mcpRootId } : {}),
       ...(a.linkToken !== undefined ? { linkToken: a.linkToken, linkTokenScope: 'Browser-local reference; file handle is not embedded.' } : {}),
       ...(a.linkPersistence !== undefined ? { linkPersistence: a.linkPersistence } : {}),
       ...(a.rasterized !== undefined ? { rasterized: a.rasterized } : {}),

@@ -22,11 +22,16 @@ codex mcp add figure_editor -- python3 /absolute/path/web_figure_editor/figure_m
 
 其他 MCP 客户端配置 `command: "python3"`、`args: ["/absolute/path/web_figure_editor/figure_mcp.py"]` 即可。使用非默认服务端口时追加 `--port 8767`；导出目录默认是仓库内的 `output/mcp/`，可通过 `--output-dir /absolute/output/directory` 指定。注册后按客户端要求重新加载 MCP 工具。
 
+要让 AI 从磁盘导入图片，在适配器的启动参数末尾加上 `--asset-root "/absolute/path/to/figures"`，把路径换成你的素材目录。该选项支持 macOS 和 Linux。调用时只给相对路径，例如 `results/Fe_K_edge.svg`。路径中的文件和子目录须为非隐藏的普通文件或目录，不可使用符号链接。省略该参数时，仍可检查通过浏览器链接的原图。
+
 | 工具 | 支持的操作 |
 | --- | --- |
 | `figure_sessions` | 列出已连接页面及项目摘要；每次明确选择 `sessionId`，不会自动猜测标签页。 |
 | `figure_get_state` | 读取项目和页摘要、指定页上的对象和选择、revision、Undo 数量和保存状态。素材条目包含已记录的相对路径、指纹和跨页使用位置 `usedBy`。 |
-| `figure_batch_edit` | 用 `place_asset` 放置素材、`swap_asset` 替换单个图像对象的来源、`add_text` 加标注、`set` 设置几何和文字格式、`align` 对齐、`distribute` 调整间距。整批成功后可一次撤销。 |
+| `figure_import_assets` | 使用当前 `expectedRevision` 和 `paths` 将指定的 SVG、PNG、JPEG 导入素材库。一次最多 32 个文件、合计 24 MiB，返回每个文件的 `assetId`、SHA-256 指纹及 `imported` 或 `reused`。含新素材的一批导入可一次撤销。 |
+| `figure_check_sources` | 只读比较项目记录的指纹与当前源文件。默认检查整个素材库，也可用 `assetIds` 指定素材。每项的 `usedBy` 列出引用它的页和对象，包括隐藏对象。 |
+| `figure_inspect_svg` | 读取指定 `slideId`、`itemId` 对应的 SVG 元素路径、可编辑属性和直接文字片段，返回 `revision` 与 `assetId`。用 `offset`、`limit` 分页，默认 50、最多 100 个节点。 |
+| `figure_batch_edit` | 放置／换图、几何与文字设置、对齐／分布；也支持对象复制／删除、图层顺序、隐藏／锁定、保留裁剪的批量换图及 SVG 内部编辑。具体操作见下文；整批成功后可一次撤销。 |
 | `figure_duplicate_slide` | 按指定的 `slideId` 复制整页，可用 `name` 命名。副本插在原页之后并成为当前页。返回 `newSlideId` 和原对象到新对象的 `itemIdMap`。 |
 | `figure_preview` | 当前或指定 slide 的 PNG 预览，最长边可设 256–1600 px；返回图片与渲染时的 revision。 |
 | `figure_preview_batch` | 在临时副本上试跑与 `figure_batch_edit` 相同的操作，返回指定页的 PNG 和起始版本 `baseRevision`。每次调用可查看一个方案。 |
@@ -41,17 +46,47 @@ codex mcp add figure_editor -- python3 /absolute/path/web_figure_editor/figure_m
 
 改稿时，可以问“第 2 页的 b 面板用的是哪个文件？” `figure_get_state` 返回的 `assets[].usedBy` 列出引用它的页和对象，也包括隐藏对象。用已记录的 `relativePath` 或 `fingerprint` 区分同名文件。如果项目缺少这些信息，直接按 `assetId` 指定素材。
 
+分析脚本重新生成谱图后，可以问“哪些面板用的还是旧图？” 在 `figure_check_sources` 的结果中查找 `changed` 并查看其 `usedBy`。文件缺失、浏览器需要读权限、项目只有嵌入副本时，会分别报告 `missing`、`permission_required`、`embedded`。要更新其中一个面板，用 `figure_import_assets` 导入同一路径。内容变化会得到新的素材 ID，原面板仍引用旧版；相同目录、路径和内容会复用已有 ID。接着把返回的 `revision` 和新 `assetId` 用于 `figure_preview_batch` 的 `swap_asset` 操作，确认预览后再用 `figure_batch_edit` 应用。
+
 要把某一幅图换成已导入的新版，在同一批次传入 `{op: "swap_asset", slideId, itemId, assetId}`，其中 `itemId` 是旧图的画布对象，`assetId` 是新版素材。支持 SVG 和位图之间的替换。新图完整、等比地居中放入原图框，比例不同时两侧或上下留白。旧图的裁剪会清除。图框位置、旋转、叠放顺序、独立的面板标签及其他位置的副本均保留。用 `figure_preview` 检查结果，或用一次 Undo 还原原图和旧裁剪。
+
+**保留裁剪更新原图。** 分析脚本重新输出图片后，先用 `figure_check_sources` 找到变化的原图及其 `usedBy`，再用 `figure_import_assets` 导入新版。使用 `{op: "replace_asset", slideId, itemIds: ["panel-a", "panel-b"], assetId: "新版素材ID"}` 更新明确指定的对象；跨页时在同一批次添加各页的操作。此操作原样保留图框、旋转、图层、样式、`imageFit` 和归一化裁剪，只替换素材引用。未指定的副本仍用旧版。结果 `assetReplacements` 列出新旧素材及尺寸，源图比例变化会返回 `source_aspect_changed` 告警。新版坐标轴或布局改变后，同一相对裁剪范围可能对应不同内容，应先用 `figure_preview_batch` 检查。导入和整批换图分别可撤销；已经使用新版的对象不应再次纳入操作。
+
+**对象与图层操作。** 以下操作都放在 `figure_batch_edit.operations` 中，并指定 `slideId`、`itemIds`：
+
+| `op` | 参数和行为 |
+| --- | --- |
+| `duplicate` | 可选 `offsetX`、`offsetY`，各默认为 20 px。按原图层顺序复制到最上方；返回 `duplicatedItems` 中的 `sourceItemId` → `itemId` 映射。 |
+| `delete` | 删除画布对象，保留素材库及磁盘源文件；返回 `deletedItemIds`。 |
+| `reorder` | `direction` 为 `front`／`back`（置顶／置底）或 `forward`／`backward`（前移／后移一层）。保持所选对象之间的相对顺序。 |
+| `set_hidden` | `hidden: true/false` 隐藏或显示对象。 |
+| `set_locked` | `locked: true/false` 锁定或解锁对象。只有此操作可以修改锁定对象；可在同一批次先明确解锁，再编辑。 |
+
+**编辑 SVG 内部元素。** 例如“把选中谱图的坐标轴字号统一到 18”。先调用 `figure_inspect_svg`，根据返回的 `path`、`editableAttributes` 和 `textSegments` 构建：
+
+```json
+{
+  "op": "edit_svg", "slideId": "当前页ID", "itemId": "对象ID", "assetId": "检查时的素材ID",
+  "patches": [
+    { "path": [2], "attributes": { "font-size": "18", "font-family": "Arial", "fill": "#222222" } },
+    { "path": [2], "textIndex": 0, "text": "Energy (eV)" }
+  ]
+}
+```
+
+示例路径须换成实际检查结果。`path` 是 SVG 原始 `children` 数组的索引，包含文字节点占位；`textIndex` 指向该元素的直接文字片段，不会扁平化嵌套的 `tspan`。属性使用字符串；空字符串删除本地属性并恢复继承。检查返回本地属性／行内样式，空值不代表没有来自 CSS 或父元素的样式。每个属性／文字片段最多显示 2000 字符，截断会标记；每个节点最多显示前 20 个文字片段，并返回总数。文字已转为路径时只能作为路径编辑。
+
+SVG 修改会先校验和解码，再为选中对象创建独立素材，返回 `createdAssetIds`。原素材、其他副本和磁盘文件保持原样，派生素材不会沿用原文件链接或指纹。节点结构保持不变；只允许界面 SVG 编辑器已有的属性与文字修改，不能提交任意 XML、脚本、外部链接或整段 CSS。共享渐变／滤镜的修改仍会影响同一 SVG 内引用它们的元素。可先用 `figure_preview_batch` 查看效果；预览不会增加素材或历史。应用、Undo／Redo 和保存重开均保留矢量内容。
 
 - **投稿前检查。** “按 PDF 最终宽 85 mm、位图至少 300 DPI 检查第 2 页。” 在 `figure_check_export` 中指定 `format`、`finalWidthMm` 和 `minRasterDpi`。阈值默认为 300。有效 DPI 按裁切后可见的源像素和实际印刷尺寸计算，横纵两个方向取较低值。矢量对象单独列出。省略 `slideId` 时，PNG、SVG、PDF 检查当前页，PPTX 和 HTML 检查整份项目。
 - **制作修订版。** “复制 Figure 3，命名为 Reviewer 2，只替换副本的 b 面板。” 用项目当前版本调用 `figure_duplicate_slide`，再用它返回的 `newSlideId`、`itemIdMap[原对象ID]` 和新 `revision` 做 `swap_asset`。两页共享素材库，各自保留独立的布局和参考线。复制和换图分别可撤销。
 - **比较排版。** “分别预览 2×2 和横排方案。” 对同一 `expectedRevision` 分别调用 `figure_preview_batch`，每个方案提交自己的 `operations` 并指定要看的 `slideId`。试排只返回标有 `proposed: true` 的图片，不写草稿或历史。选定后，将该方案的原始操作和同一版本传给 `figure_batch_edit`。版本已变化时，重新读取状态后再试排。
 
-锁定对象会拒绝整批修改；过期 revision、正在拖拽／输入文字／绘图／执行文件操作或打开的模态窗口也会拒绝冲突操作。先完成当前编辑，再读取最新状态。刷新、暂停和重新打开页面会产生新的 session；若命令超时且已投递，其结果可能未知，应先查询状态，避免重复执行。
+除明确的 `set_locked` 操作外，锁定对象会拒绝整批修改；过期 revision、正在拖拽／输入文字／绘图／执行文件操作或打开的模态窗口也会拒绝冲突操作。先完成当前编辑，再读取最新状态。刷新、暂停和重新打开页面会产生新的 session；若命令超时且已投递，其结果可能未知，应先查询状态，避免重复执行。
 
 MCP 不会打开原生文件选择器或请求新的文件权限。首次保存项目需要在页面点击一次 **Save** 并授权；已有文件保存继续检查外部修改冲突。AutoSave 开关保持用户设置。`destination=draft`、静态导出和真正写回 `.figure.json` 是不同结果，工具会明确区分。
 
-预览／导出复用现有渲染器和格式限制：HTML 图表使用已保存快照，视频使用封面；PDF 文字仍需 macOS 本地轮廓服务。AI 桥单次导出最多 **24 MiB**，更大的文件使用页面 Export。第一版不提供素材导入、原始 SVG 内部编辑或任意 JavaScript 执行。桥仅监听 loopback，复用同源、Host 与随机 token 检查，不提供远程公网端点。
+预览／导出复用现有渲染器和格式限制：HTML 图表使用已保存快照，视频使用封面；PDF 文字仍需 macOS 本地轮廓服务。AI 桥单次导出最多 **24 MiB**，更大的文件使用页面 Export。桥仅监听 loopback，复用同源、Host 与随机 token 检查，不提供远程公网端点。
 
 验证：`npm test`；`python3 -m unittest discover -s tests -p 'test_automation.py'`；`npm run test:automation`。最后一项需要 Playwright 和 Chrome（可用 `PLAYWRIGHT_MODULE` 指定已安装模块），会自动启动随机测试端口，使用隔离浏览器、合成项目和临时导出目录，不连接你的日常编辑页面。
 

@@ -1,42 +1,10 @@
-import { validateSVGDocument, svgNodes, svgDataURL, svgDimensions, parseSVG } from './svg-vector.js';
+import { validateSVGDocument, svgNodes, svgDataURL, svgDimensions } from './svg-vector.js';
+import { documentForAsset, editableFields, fieldValue, setValue } from './svg-edit.js';
 
-const fields={
-  svg:['viewBox'],g:['transform','opacity','fill','stroke','filter'],
-  path:['d'],rect:['x','y','width','height','rx','ry'],circle:['cx','cy','r'],ellipse:['cx','cy','rx','ry'],
-  line:['x1','y1','x2','y2'],polyline:['points'],polygon:['points'],
-  text:['x','y','font-size','font-family','text-anchor'],tspan:['x','y','dx','dy','font-size','font-family'],
-  linearGradient:['x1','y1','x2','y2','gradientTransform','gradientUnits','spreadMethod'],
-  radialGradient:['cx','cy','r','fx','fy','fr','gradientTransform','gradientUnits','spreadMethod'],
-  stop:['offset','stop-color','stop-opacity'],filter:['x','y','width','height','filterUnits','primitiveUnits'],
-  feDropShadow:['dx','dy','stdDeviation','flood-color','flood-opacity'],feGaussianBlur:['stdDeviation'],
-  feOffset:['dx','dy'],feFlood:['flood-color','flood-opacity'],feColorMatrix:['type','values'],
-  feComposite:['operator','k1','k2','k3','k4'],feBlend:['mode'],use:['x','y','width','height','transform'],
-};
-const drawable=new Set(['path','rect','circle','ellipse','line','polyline','polygon','text','tspan','use']);
-const paints=new Set(['fill','stroke','stroke-width','opacity','fill-opacity','stroke-opacity','stop-color','stop-opacity','flood-color','flood-opacity','font-size','font-family','text-anchor','filter']);
 const names={svg:'SVG artwork',g:'Group',defs:'Definitions',style:'Styles',path:'Path',rect:'Rectangle',circle:'Circle',ellipse:'Ellipse',line:'Line',text:'Text',tspan:'Text span',linearGradient:'Linear gradient',radialGradient:'Radial gradient',stop:'Gradient stop',filter:'Filter',feDropShadow:'Drop shadow',feGaussianBlur:'Blur',feOffset:'Shadow offset',feFlood:'Shadow color',feColorMatrix:'Color adjustment',feComposite:'Composite',feBlend:'Blend'};
 const label={d:'Path geometry',stdDeviation:'Blur (standard deviation)',dx:'Horizontal offset',dy:'Vertical offset','stop-color':'Stop color','stop-opacity':'Stop opacity','flood-color':'Shadow color','flood-opacity':'Shadow opacity',gradientTransform:'Gradient transform',offset:'Stop position'};
 const el=(tag,className,text)=>{const n=document.createElement(tag);if(className)n.className=className;if(text!==undefined)n.textContent=text;return n;};
 export function editableSVGAsset(asset) { return asset?.mime==='image/svg+xml'||asset?.originalMime==='image/svg+xml'; }
-
-function documentForAsset(asset) {
-  if(asset.mime==='image/svg+xml')return validateSVGDocument(asset.svgDocument);
-  // Old originals were stored as inert provenance: sanitize again before promotion.
-  const bytes=Uint8Array.from(atob(asset.originalDataUrl.split(',')[1]),c=>c.charCodeAt(0));
-  return parseSVG(new TextDecoder('utf-8',{fatal:true}).decode(bytes)).document;
-}
-function styleValue(node,key) {
-  const declarations=(node.attrs.style||'').split(';').map(v=>v.split(/:(.*)/s));
-  return declarations.find(([k])=>k.trim()===key)?.[1]?.trim().replace(/\s*!important\s*$/i,'')??node.attrs[key]??'';
-}
-function setValue(node,key,value) {
-  if(paints.has(key)) {
-    const declarations=(node.attrs.style||'').split(';').filter(v=>v.trim()&&v.split(':')[0].trim()!==key);
-    if(value.trim())declarations.push(`${key}:${value} !important`);
-    if(declarations.length)node.attrs.style=declarations.join(';');else delete node.attrs.style;
-  }
-  if(value.trim())node.attrs[key]=value;else delete node.attrs[key];
-}
 
 /** Edits stay in a draft tree; only Apply commits one independent asset via the caller. */
 export function openSVGEditor(asset,onApply) {
@@ -62,14 +30,14 @@ export function openSVGEditor(asset,onApply) {
   };
   function form() {
     properties.replaceChildren();const {node}=rows[selected];properties.append(el('h3',null,(names[node.tag]||node.tag)+(node.attrs.id?' #'+node.attrs.id:'')));
-    const keys=[...new Set([...(fields[node.tag]||[]),...(drawable.has(node.tag)?['transform','fill','stroke','stroke-width','opacity','fill-opacity','stroke-opacity','filter']:[])])];
+    const keys=editableFields(node);
     const field=(key,value,change)=>{
       const wrap=el('label','field');wrap.append(el('span',null,label[key]||key));
       const input=el(['d','points','Text'].includes(key)?'textarea':'input');if(input.tagName==='INPUT')input.type='text';
       input.value=value;input.dataset.svgField=key;input.setAttribute('aria-label',label[key]||key);input.placeholder='Inherited / default';
       input.oninput=()=>{change(input.value);refresh();};wrap.append(input);properties.append(wrap);
     };
-    for(const key of keys)field(key,paints.has(key)?styleValue(node,key):(node.attrs[key]||''),value=>setValue(node,key,value));
+    for(const key of keys)field(key,fieldValue(node,key),value=>setValue(node,key,value));
     if(['text','tspan','textPath'].includes(node.tag)) {
       node.children.forEach((child,index)=>{if(typeof child==='string')field('Text',child,value=>{node.children[index]=value;});});
     }
