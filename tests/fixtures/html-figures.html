@@ -1,0 +1,7 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>HTML figure fixture</title>
+<style>
+body{margin:0;background:#eef0f4;font:20px Arial,sans-serif;color:#123456}main{width:900px;margin:40px auto}figure{margin:30px 0;background:white;padding:35px;border:4px solid #6353a4}h2{margin:0 0 24px}table{border-collapse:collapse;width:100%}td,th{padding:16px;border:2px solid #ccd}aside{padding:30px;background:#d6f5dd}.columns{display:grid;grid-template-columns:1fr 1fr;gap:20px}.second{height:1050px;display:flex;flex-direction:column;justify-content:space-between}.bottom{background:#b32f58;color:white;padding:35px}
+</style><body><main><h1>Page heading outside Figures</h1>
+<figure id="first"><h2>Figure 1: HTML, CSS and SVG</h2><div class="columns"><aside>Ordinary HTML text must survive capture.</aside><svg viewBox="0 0 200 100"><rect x="5" y="5" width="190" height="90" fill="#6754ab"/><text x="100" y="60" text-anchor="middle" fill="white">SVG label</text></svg></div><table><tr><th>Contact</th><th>Distance</th></tr><tr><td>Cu–O</td><td>1.948 Å</td></tr></table><figcaption>Figure caption in HTML.</figcaption></figure>
+<figure id="second" class="second"><h2>Figure 2: Below the viewport</h2><p>Long figure body.</p><div class="bottom">BOTTOM CONTENT MUST NOT BE CLIPPED</div></figure>
+</main></body></html>

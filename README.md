@@ -92,11 +92,33 @@ MCP 不会打开原生文件选择器或请求新的文件权限。首次保存�
 
 验证：`npm test`；`python3 -m unittest discover -s tests -p 'test_automation.py'`；`npm run test:automation`。最后一项需要 Playwright 和 Chrome（可用 `PLAYWRIGHT_MODULE` 指定已安装模块），会自动启动随机测试端口，使用隔离浏览器、合成项目和临时导出目录，不连接你的日常编辑页面。
 
+### 完整 HTML / ZIP 组图导入
+
+在 **Assets → Import HTML / ZIP figures** 选择 `.html`、`.htm` 或 `.zip`，也可以把单个文件拖到画布。预览会识别页面中的顶层 `<figure>`，默认每张 Figure 单独生成一个新 slide；切换 **Full pages** 可以导入整页。没有 `<figure>` 的 HTML 默认按整页导入。可调整页面宽度（320–2400 px）和捕获分辨率（150／300／600 DPI）。导入所选 Figure 是一个完整的 Undo 步骤，取消不会更改项目。
+
+完整 HTML 使用独立 Chrome／Chromium／Edge 进程渲染，保留普通 HTML 文字、表格、CSS 背景及 SVG／canvas 的实际外观。支持的 Figure 同时保存原生 HTML 文档和高分辨率 PNG；含 canvas、视频或嵌套 frame 等暂不支持原生编辑的区域仍保留图像，并显示原因。PNG、SVG、PDF、PPTX 和 HTML report 均复用已保存的图像，因此导出不依赖原网页再次运行；其中 SVG／PDF／PPTX 内的导入图仍是栅格图像。提高导出 DPI 不会增加原始捕获的细节。
+
+双击导入图，或在属性面板选择 **Edit HTML Figure**，即可在原生预览或元素列表里选择文字、卡片和 SVG 图形。支持文本分段编辑、字号、文字／背景／SVG 填充和描边颜色，以及拖动或输入位置偏移。HTML 偏移使用 CSS px，SVG 子元素使用 SVG 单位；偏移保留原来的排版空间和已有变换，移出 Figure 边界的内容会被裁剪。编辑器保留原页面的祖先结构、CSS 变量和 Flex/Grid 排版，不将它们转换为普通文字框。脚本不会在编辑预览中运行。
+
+编辑期间修改只存在于草稿，可使用 **Undo edit / Redo edit** 或 **Cancel**。**Apply** 会重新渲染完整 Figure，并把修改后的 HTML 和匹配图像作为一次项目 Undo 一起保存；失败或取消不会更新项目。保存 `.figure.json` 后重新打开，可以继续编辑；同一资产的其他放置实例保持原样。**Download edited HTML** 下载包含修改的自包含原生页面（保留完整页面上下文）；原始 HTML／ZIP 下载仍返回导入时的字节。旧版本导入的 Figure 可从内嵌原文件恢复编辑；不能唯一确定来源或页面宽度时会要求重新导入。
+
+原始 HTML／ZIP 字节随 `.figure.json` 保存，保存重开和复制 slide 都会保留。选中图后，属性面板中的 **Download original HTML / ZIP** 可以取回原文件。ZIP 内的相对路径样式、图片、字体、脚本及数据由隔离渲染器读取，不解压到工作目录。单文件 HTML 需要内嵌依赖；此入口不访问外网。缺失资源和脚本错误会显示在 **Import notes**。渲染器使用临时配置，不读取日常浏览器的登录状态。
+
+每个文件最多 25 MB；ZIP 最多 512 个条目、100 MB 解压后数据和 32 个 HTML 页面；预览最多 100 个 Figure／页面选项。捕获区域最大 8000 × 8000 CSS px，且面积不超过 2500 万 CSS 像素；输出受 3900 万像素和 25 MB 图像上限约束，必要时降低捕获 DPI 并提示。Figure 按其元素边框范围截取；边框外的阴影或溢出内容需选择整页。异步或动画页面请先检查预览；需交互调整视角时使用下面的独立交互入口。
+
+需要本机安装 **Node.js 和 Chrome／Chromium／Edge**，然后使用更新后的 `start.command`／`npm start` 启动；可通过 `FIGURE_CHROME_PATH` 指定浏览器程序。无需 npm 运行时依赖。Samantha 的五版本 ZIP 和其单文件 `pages[]` HTML 合集均可识别为 10 张 Figure；合集与 ZIP 内相同页面会去重。
+
+验证：`npm test`、`python3 -m unittest discover -s tests -p 'test_html_import.py'`；`python3 tests/html-import-renderer.py` 检查离线依赖、网络隔离及合集去重。独立端口启动 `python3 server.py --port 18796` 后运行 `node tests/html-import-browser.mjs`（测试需要 Playwright，可用 `PLAYWRIGHT_MODULE` 指定模块）。设置 `SAMANTHA_ZIP=/path/to/Samantha_HTML_Figures_5_versions.zip` 可额外验收真实包的十张图、源文件保留和五种导出；该包不进入仓库。测试产物写入系统临时目录。
+
+原生编辑验收：在同一隔离测试端口运行 `node tests/html-figure-editor-browser.mjs`。覆盖 HTML／SVG 文字、颜色、位置、嵌套结构、草稿与项目撤销、取消、保存重开和五种导出；设置 `SAMANTHA_ZIP` 后逐一验证十张真实 Figure 的冻结文档像素及修改后的重新打开。
+
 ### 交互式 HTML 图表
 
-使用 **Import HTML chart** 选择 `.html` / `.htm`，或把文件拖入画布。文件夹导入也会保留 HTML 素材；点击 **Place** 放置。HTML 原文嵌入 `.figure.json` 项目，保存、重新打开、复制对象和复制 slide 都会保留。
+使用 **Import interactive HTML chart** 选择 `.html` / `.htm`。文件夹导入也会保留 HTML 素材；点击 **Place** 放置。HTML 原文嵌入 `.figure.json` 项目，保存、重新打开、复制对象和复制 slide 都会保留。
 
-单击图表可以排版；**双击**或在属性中点击 **Interact with chart** 进入画布内的交互视图，使用图表本身的缩放、平移、悬停和图例功能。**Done / Escape** 或取消选中返回排版；最后打开的图表仍继续动画，再次双击会保留当前视角和缩放。调整编辑器缩放、移动对象或编辑其他对象也不会重新加载它，图表按正常对象层级显示。切换 slide、打开另一张交互图表、隐藏/删除图表或替换原 HTML 时才关闭该视图；当前交互状态不会写回原 HTML 或项目。
+在画布中导入一张 HTML 图后，可以直接使用原图的交互功能，例如拖动旋转 3D 结构。**Save snapshot** 保存当前角度供导出，保存后可以继续转。点 **Done**、按 **Escape** 或选中其他对象会回到排版模式，这时拖动会移动整张图。
+
+要继续旋转，**双击图表**，或选中图表后点击画布上方的 **Resume interaction**。若有文字或其他对象叠在图上，可以从 **Layers** 选中图表再恢复交互。交互时，图表范围内的拖动交给原图，叠加的标注仍然可见；点 **Done** 后可以移动标注。移动图表、调整编辑器缩放或编辑其他对象后，恢复交互会接着刚才的视角。切换 slide、打开另一张交互图表、隐藏或删除图表、替换原 HTML 或重新打开项目后，点击 **Interact with chart** 会重新加载原 HTML；临时视角不会写回原文件。
 
 首次交互会尝试生成 PNG 快照，也可点击 **Save snapshot** 保存当前视图。快照对该素材的所有副本生效，用于缩略图以及 PNG、SVG、PDF、PPTX 和只读 HTML report；这些导出不保留 HTML 交互。没有成功快照时，静态导出会给出提示。Plotly、ECharts、SVG 和 canvas 图表可生成快照；普通 HTML 布局仍可交互，但不会自动截图其 DOM 文本或 CSS 装饰。
 
@@ -314,7 +336,7 @@ PNG、SVG、PDF、HTML 报告、页面缩略图和跨应用复制均显示裁切
 
 图片与文字分别可编辑，保留画布尺寸、对象位置、尺寸、旋转、图层顺序及常见主题/母版样式。PNG、JPEG、WebP 图片保留源数据，普通裁剪保留完整原图，可用 **Restore original** 恢复。SVG 保留为可编辑矢量文档；PowerPoint 同时存储 SVG 和 PNG 预览时优先读取 SVG，缺失或不受支持时保留 PNG 预览并提示。分组展开为独立对象；文本按本机字体测量换行，混合样式、特殊行距可能拆成多个可编辑文字对象。编辑后的内容随 `.figure.json`、保存/重开及现有导出一起保留。
 
-这是支持常见科研排图元素的导入器，不是完整 PowerPoint 渲染器。矩形、直线和支持的预设/自定义形状保持独立可编辑；椭圆、圆角矩形、直箭头和弯箭头使用矢量路径，线性渐变保留颜色、透明度和方向。图表、表格、SmartArt、OLE、未支持的复杂形状或 EMF/WMF 等图片会跳过并在预览中说明；部分连接线箭头样式、文字装饰和特效不保留。字体替换和 PowerPoint/浏览器的文字测量差异可能影响排版，请检查预览。图内已有曲线和坐标轴仍然是图片内容。
+这是支持常见科研排图元素的导入器，不是完整 PowerPoint 渲染器。矩形、直线和支持的预设/自定义形状保持独立可编辑；椭圆、圆角矩形、直箭头和弯箭头使用矢量路径，线性渐变保留颜色、透明度和方向。如果 PPTX 保存了兼容的 SmartArt 布局，导入器会将其转换为可编辑的形状和文字。缺少兼容布局的 SmartArt、图表、表格、OLE、未支持的复杂形状或 EMF/WMF 等图片会跳过并在预览中说明。部分连接线箭头样式、文字装饰和特效不保留。字体替换和 PowerPoint/浏览器的文字测量差异可能影响排版，请检查预览。图内已有曲线和坐标轴仍然是图片内容。
 
 需要通过 **start.command** 或 **npm start** 运行本地服务；旧服务需重启后刷新页面。PPTX 在本机读取，不上传到云端，不需安装 PowerPoint。单个 PPTX 上限 100 MB、1–500 页，单页最多 2,000 个转换后对象，图片仍受现有素材限制。`.ppt` 请先在 PowerPoint 中另存为 `.pptx`。
 

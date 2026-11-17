@@ -296,11 +296,13 @@ dialog{border:1px solid var(--drx-border);border-radius:15px;padding:0;width:min
 /* Its SVG group stays mounted across redraws, preserving playback and layer order. */
 #html-chart-overlay{overflow:hidden;line-height:normal;background:#fff;pointer-events:none}
 #html-chart-overlay.is-interacting{pointer-events:auto}
+#stage .chart-foreground,#stage .chart-foreground *{pointer-events:none!important}
+#stage [data-hit-item]{cursor:move}
 .html-chart-frame{display:block;border:0;transform-origin:0 0;background:#fff}
 #html-chart-controls{display:flex;gap:5px;align-items:center;flex-shrink:0}
 #html-chart-controls[hidden],#html-chart-overlay[hidden]{display:none}
-.workspace-heading:has(#html-chart-controls:not([hidden])) .workspace-hint{display:none}
-#html-chart-controls .button{padding:5px 8px;min-height:30px;font-size:11px}
+.workspace-heading:has(:is(#html-chart-interact,#html-chart-controls):not([hidden])) .workspace-hint{display:none}
+#html-chart-controls .button,#html-chart-interact{padding:5px 8px;min-height:30px;font-size:11px}
 
 /* Shape insertion and independent fill, border and object transparency. */
 .shapes-menu{position:fixed;inset:auto;margin:0;padding:14px;width:540px;max-width:calc(100vw - 16px);max-height:min(680px,calc(100vh - 16px));overflow:auto;border:1px solid var(--drx-border);border-radius:10px;background:var(--drx-surface);color:var(--drx-text);box-shadow:0 8px 28px #231d3326}
@@ -419,3 +421,31 @@ dialog{border:1px solid var(--drx-border);border-radius:15px;padding:0;width:min
 }
 @media(pointer:coarse){.view-controls .icon-button{height:42px;min-width:34px}}
 @media(forced-colors:active){.view-controls .icon-button[aria-pressed="true"]{outline:2px solid Highlight;outline-offset:-2px}}
+/* Full-page HTML import previews are raster images, never live source documents. */
+#html-import-dialog { width: min(1100px, calc(100vw - 48px)); max-height: 90vh; }
+#html-import-dialog .dialog-body { overflow: auto; max-height: 65vh; }
+#html-import-dialog .field-row { flex-wrap: wrap; }
+#html-import-candidates { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+.html-import-card { display: grid; grid-template-columns: 22px 1fr; gap: 8px; padding: 12px; border: 1px solid #d8dce5; border-radius: 8px; cursor: pointer; align-content: start; }
+.html-import-card:has(input:checked) { border-color: #6353a4; background: #f6f3fb; }
+.html-import-card img { grid-column: 2; width: 100%; height: 200px; object-fit: contain; background: white; }
+.html-import-card span, .html-import-card small { grid-column: 2; overflow-wrap: anywhere; }
+.html-import-card small { color: #647083; }
+.html-import-selection { display: flex; gap: 16px; margin: 12px 0; }
+/* Native HTML Figures keep their original document inside an isolated preview. */
+.html-figure-editor{width:min(1500px,96vw);max-width:96vw;max-height:94vh;padding:20px;border:1px solid var(--line,#ddd);border-radius:14px;color:inherit}
+.html-figure-editor::backdrop{background:#21182b66}
+.html-figure-editor-body{display:grid;grid-template-columns:220px minmax(260px,1fr) 230px;gap:14px;height:65vh;min-height:360px}
+.html-figure-elements{width:100%;height:100%;white-space:pre;overflow:auto;font-size:12px}
+.html-figure-preview-pane{min-width:0;min-height:0;display:flex;align-items:center;justify-content:center;background:#edeaf0;overflow:hidden;border-radius:8px}
+.html-figure-preview-clip{position:relative;overflow:hidden;flex-shrink:0;background:white;box-shadow:0 1px 8px #0002}
+.html-figure-preview-clip iframe{position:absolute;transform-origin:top left;border:0;background:white;max-width:none}
+.html-figure-properties{overflow:auto;padding:0 6px}
+.html-figure-properties h3{font-size:14px;overflow-wrap:anywhere}
+.html-figure-properties textarea{min-height:72px;resize:vertical}
+.html-figure-color-field{display:flex;gap:6px;align-items:center}
+.html-figure-color-field input[type=color]{flex:0 0 34px;width:34px;padding:2px}
+.html-figure-color-field input[type=text]{min-width:0;flex:1}
+.html-figure-editor .dialog-actions{display:flex;gap:8px;justify-content:flex-end}
+.html-figure-editor .hint{margin:10px 0}
+@media(max-width:900px){.html-figure-editor-body{grid-template-columns:150px minmax(200px,1fr) 180px}}

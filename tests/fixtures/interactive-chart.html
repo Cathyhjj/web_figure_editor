@@ -5,10 +5,26 @@
 <path d="M80 100V510H880" fill="none" stroke="#666" stroke-width="2"/>
 <g id="series"><path d="M80 470 L200 440 L320 410 L440 190 L560 310 L680 250 L800 285 L880 275" fill="none" stroke="#8b3d76" stroke-width="4"/>
 <circle id="peak" cx="440" cy="190" r="12" fill="#8b3d76"/></g>
+<g id="rotation-pad" style="touch-action:none;cursor:grab">
+  <rect x="535" y="100" width="160" height="100" rx="5" fill="#edf4fc"/>
+  <path id="orientation" d="M581 150h64l-10 -8m10 8l-10 8" fill="none" stroke="#145b94" stroke-width="5" transform="rotate(0 615 150)"/>
+</g>
 <text x="400" y="560">Energy (arbitrary units)</text><text id="zoom-level" x="80" y="90" font-size="16">Zoom: 1</text>
 </svg><div id="tooltip" role="status">Peak: x = 440, y = 190</div><button id="zoom-chart">Zoom in</button>
 <script>
 let zoom=1;
+const pad=document.getElementById('rotation-pad'),orientation=document.getElementById('orientation');
+let angle=0,drag=null;
+pad.onpointerdown=event=>{
+  drag={id:event.pointerId,x:event.clientX,start:angle};
+  pad.setPointerCapture(event.pointerId);
+};
+pad.onpointermove=event=>{
+  if(drag?.id!==event.pointerId)return;
+  angle=drag.start+event.clientX-drag.x;
+  orientation.setAttribute('transform',`rotate(${angle} 615 150)`);
+};
+pad.onlostpointercapture=()=>{drag=null;};
 // Expose animation progress and document identity for the editor lifecycle regression.
 window.animationFrames=0;
 document.body.dataset.runId=Date.now()+'-'+Math.random();

@@ -45,6 +45,13 @@ class NativeShadowTests(unittest.TestCase):
         self.assertAlmostEqual(item['items'][0]['shadow']['angle'],15)
         self.assertEqual(item['shadow']['angle'],45)
 
+    def test_scaled_group_preserves_physical_child_shadow_dimensions(self):
+        xf = '<a:xfrm><a:off x="0" y="0"/><a:ext cx="952500" cy="1905000"/><a:chOff x="0" y="0"/><a:chExt cx="3810000" cy="3810000"/></a:xfrm>'
+        group = f'<p:grpSp><p:grpSpPr>{xf}</p:grpSpPr>{rectangle()}</p:grpSp>'
+        item = convert(group)['items'][0]
+        self.assertEqual((item['width'], item['height']), (25, 40))
+        self.assertEqual((item['shadow']['blur'], item['shadow']['distance']), (5, 3))
+
     def test_visible_text_run_keeps_shadow(self):
         tx=f'<p:txBody><a:bodyPr/><a:p><a:r><a:rPr sz="1200">{SHADOW}</a:rPr><a:t>Label</a:t></a:r></a:p></p:txBody>'
         item=convert(rectangle('').replace('</p:sp>',tx+'</p:sp>'))['items'][-1]

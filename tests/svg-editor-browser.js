@@ -16,7 +16,7 @@ const b64=async blob=>{let s='';const b=new Uint8Array(await blob.arrayBuffer())
 document.querySelector('#run').onclick=async()=>{
  const button=document.querySelector('#run');button.disabled=true;document.querySelector('#results').replaceChildren();document.querySelector('iframe')?.remove();
  try {
-  if(location.port!=='18768')throw Error('Use test port 18768');
+  if(!['18768','18769'].includes(location.port))throw Error('Use isolated test port 18768 or 18769');
   const {assets,errors}=await importFiles([new File([source],'gradient-shadow.svg',{type:'image/svg+xml'})]);
   check('Import keeps a vector document at original dimensions',!errors.length&&assets[0].mime==='image/svg+xml'&&assets[0].width===240);
   const originalPixels=await pixels('data:image/svg+xml;base64,'+btoa(source));

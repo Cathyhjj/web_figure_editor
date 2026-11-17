@@ -36,7 +36,8 @@ class SoftEdgeTests(unittest.TestCase):
         item=convert(group)['items'][0]
         self.assertEqual(item['type'],'shadowGroup')
         self.assertEqual(item['softEdge'],5)
-        self.assertEqual(item['items'][0]['softEdge'],10)
+        # A group maps geometry; the saved 5 pt radius is a physical style.
+        self.assertEqual(item['items'][0]['softEdge'],5)
         self.assertNotIn('shadow',item)
 
 if __name__=='__main__':unittest.main()

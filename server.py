@@ -26,6 +26,7 @@ from pptx_import import MAX_PPTX_BODY, PptxImportError, import_pptx
 from powerpoint_pdf import power_point_pdf_available, render_powerpoint_pdf
 from pptx_clipboard import clipboard_available, clipboard_ready, start_clipboard_helper, read_powerpoint_clipboard
 from automation_bridge import AutomationBridge, AutomationError, MAX_AUTOMATION_BODY
+from html_import import HTMLImportError, MAX_HTML_BODY, import_html, renderer_tools
 
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".tif", ".tiff", ".bmp", ".avif", ".heic", ".heif", ".ico", ".mp4", ".html", ".htm"}
@@ -449,6 +450,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                                          "locate": sys.platform == "darwin", "saveClipboardImage": True,
                                          "pdfTextOutlines": self.server.pdf_text.available,
                                          "pptxImport": True,
+                                         "htmlFigureImport": all(renderer_tools()),
                                          "powerPointPDF": power_point_pdf_available(),
                                          "pptxPaste": True, "pptxClipboard": clipboard_available(),
                                          "pptxClipboardReady": clipboard_ready(),
@@ -484,14 +486,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self.trusted_request(require_origin=True)
             path = urlsplit(self.path).path
             automation = path.startswith('/api/automation/')
-            if not automation and path not in {"/api/locate", "/api/clipboard-image", "/api/pdf-text", "/api/pptx-import", "/api/pptx-paste", "/api/pptx-clipboard", "/api/pptx-source-pdf"}:
+            if not automation and path not in {"/api/locate", "/api/clipboard-image", "/api/pdf-text", "/api/pptx-import", "/api/pptx-paste", "/api/pptx-clipboard", "/api/pptx-source-pdf", "/api/html-import"}:
                 raise LocateError(404, "Unknown local API.")
             clipboard = path == "/api/clipboard-image"
             pdf_text = path == "/api/pdf-text"
             pptx = path in {"/api/pptx-import", "/api/pptx-paste", "/api/pptx-source-pdf"}
-            label = "automation" if automation else "PowerPoint PDF" if path == "/api/pptx-source-pdf" else "PPTX import" if pptx else "PDF text" if pdf_text else "clipboard image" if clipboard else "Locate"
+            html_import = path == "/api/html-import"
+            label = "HTML import" if html_import else "automation" if automation else "PowerPoint PDF" if path == "/api/pptx-source-pdf" else "PPTX import" if pptx else "PDF text" if pdf_text else "clipboard image" if clipboard else "Locate"
             large_automation = path in {'/api/automation/result', '/api/automation/command'}
-            limit = (MAX_AUTOMATION_BODY if large_automation else 1024 * 1024) if automation else MAX_PPTX_BODY if pptx else MAX_PDF_TEXT_BODY if pdf_text else MAX_CLIPBOARD_BODY if clipboard else MAX_BODY
+            limit = MAX_HTML_BODY if html_import else (MAX_AUTOMATION_BODY if large_automation else 1024 * 1024) if automation else MAX_PPTX_BODY if pptx else MAX_PDF_TEXT_BODY if pdf_text else MAX_CLIPBOARD_BODY if clipboard else MAX_BODY
             tokens = self.headers.get_all("X-Figure-Token", [])
             if len(tokens) != 1 or not secrets.compare_digest(tokens[0].encode(), self.server.token.encode()):
                 raise LocateError(403, "Reload the local Figure Editor before using local files.")
@@ -513,6 +516,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         and (not isinstance(data, dict) or data.get('method') != 'import_assets')):
                     raise LocateError(413, "Only asset import commands may exceed 1 MiB.")
                 result = self.server.automation.handle(path.removeprefix('/api/automation/'), data)
+            elif html_import:
+                result = import_html(data)
             elif path == "/api/pptx-clipboard":
                 if not isinstance(data,dict) or set(data)-{'previewSha256'}:
                     raise LocateError(400, "Send an optional clipboard image fingerprint.")
@@ -542,7 +547,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     raise LocateError(400, "An asset descriptor is required.")
                 result = self.server.locator.locate(descriptor(data.get("asset")))
             self.json_response(200, result)
-        except (LocateError, PdfTextError, PptxImportError, AutomationError) as error:
+        except (LocateError, PdfTextError, PptxImportError, AutomationError, HTMLImportError) as error:
             self.json_response(error.status, {"error": str(error)})
 
 

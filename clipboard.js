@@ -115,7 +115,7 @@ export function decodeSlides(text) {
 }
 
 function sameImage(left, right) {
-  return ['mime', 'dataUrl', 'width', 'height', 'originalMime', 'originalDataUrl', 'posterDataUrl', 'posterWidth', 'posterHeight', 'duration', 'hasSnapshot'].every(key => left[key] === right[key]);
+  return ['mime', 'dataUrl', 'width', 'height', 'originalMime', 'originalDataUrl', 'posterDataUrl', 'posterWidth', 'posterHeight', 'duration', 'hasSnapshot'].every(key => left[key] === right[key]) && JSON.stringify(left.htmlFigure) === JSON.stringify(right.htmlFigure);
 }
 
 function reusablePortableAsset(existing, source) {

@@ -20,7 +20,9 @@ MAX_XML = 8 * 1024 * 1024
 EMU = 9525
 NS = {'a': 'http://schemas.openxmlformats.org/drawingml/2006/main',
       'p': 'http://schemas.openxmlformats.org/presentationml/2006/main',
-      'r': 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'}
+      'r': 'http://schemas.openxmlformats.org/officeDocument/2006/relationships',
+      'dgm': 'http://schemas.openxmlformats.org/drawingml/2006/diagram',
+      'dsp': 'http://schemas.microsoft.com/office/drawing/2008/diagram'}
 RID = '{' + NS['r'] + '}'
 FIT_EXTENSION = '{9B18E286-D535-4B91-B568-9A25B57E38F3}'
 FIT_NODE = '{urn:figure-editor:image-fit:1}imageFit'
@@ -251,12 +253,14 @@ class Converter:
                     rgb, hls = colorsys.hls_to_rgb(*hls), None
                 # DrawingML tint is the retained input fraction, mixed with white.
                 rgb = [max(0, min(1, c*v + (1-v if typ == 'tint' else 0))) for c in rgb]
-            elif typ in ('lumMod', 'lumOff'):
-                # Keep hue/saturation through consecutive luminance transforms,
-                # including a temporary black/white endpoint or intervening alpha.
+            elif typ in ('lumMod', 'lumOff', 'satMod'):
+                # Keep HSL components through consecutive transforms, including
+                # temporary black/white endpoints or intervening alpha. RGB tint
+                # and shade materialize this state before their own arithmetic.
                 if hls is None:
                     hls = list(colorsys.rgb_to_hls(*rgb))
-                hls[1] = max(0, min(1, hls[1]*v if typ == 'lumMod' else hls[1]+v))
+                component = 2 if typ == 'satMod' else 1
+                hls[component] = max(0, min(1, hls[component]+v if typ == 'lumOff' else hls[component]*v))
             elif typ == 'alpha': alpha = v
         if hls is not None:
             rgb = colorsys.hls_to_rgb(*hls)
@@ -459,8 +463,8 @@ class Converter:
         baseline = num(ET.Element('r', props), 'baseline') / 100000
         if baseline:
             size *= .65
-        shadow = self.shadow_style(nodes[-1],list(reversed(nodes[:-1])),'Text',scale) if nodes else None
-        soft_edge = self.soft_edge_style(nodes[-1],list(reversed(nodes[:-1])),'Text',scale) if nodes else None
+        shadow = self.shadow_style(nodes[-1],list(reversed(nodes[:-1])),'Text') if nodes else None
+        soft_edge = self.soft_edge_style(nodes[-1],list(reversed(nodes[:-1])),'Text') if nodes else None
         return {**({'shadow':shadow} if shadow else {}), **({'softEdge':soft_edge} if soft_edge is not None else {}), 'fontFamily': family[:200] or 'Arial', 'fontSize': max(1, min(2000, size)),
                 'fontWeight': 700 if props.get('b') in ('1', 'true') else 400,
                 'fontStyle': 'italic' if props.get('i') in ('1', 'true') else 'normal',
@@ -487,8 +491,6 @@ class Converter:
         if b is not None: body.update(b.attrib)
         if body.get('vert', 'horz') != 'horz':
             self.warn('Vertical text is imported horizontally.', name)
-        if g['_flipX'] or g['_flipY']:
-            self.warn('Mirrored text is imported without reflection.', name)
         style_type = 'titleStyle' if role in ('title', 'ctrTitle') else 'bodyStyle' if role in ('body', 'obj', 'subTitle') else 'otherStyle'
         font_ref=first(*(find(s,'p:style/a:fontRef') for s in [shape,*chain]))
         font_default=ET.Element('{'+NS['a']+'}defRPr')
@@ -522,14 +524,14 @@ class Converter:
                 if tag(run) not in ('r', 'fld', 'br'):
                     continue
                 value = '\n' if tag(run) == 'br' else ''.join(t.text or '' for t in children(run, 'a:t'))
-                style = self.run_style([font_default] + [find(n, 'a:defRPr') for n in defaults] + [find(run, 'a:rPr')], g['_scaleY']*font_scale)
+                style = self.run_style([font_default] + [find(n, 'a:defRPr') for n in defaults] + [find(run, 'a:rPr')], font_scale)
                 if style['spacing']:
                     self.warn('Character spacing is approximated.', name)
                 if any(find(run, path) is not None for path in ('a:rPr/a:hlinkClick', 'a:rPr/a:highlight')) or (find(run, 'a:rPr') is not None and find(run, 'a:rPr').get('u', 'none') != 'none'):
                     self.warn('Links, highlighting and underlining are not retained.', name)
                 runs.append({'text': value, **style})
             if not runs or (not any(run['text'] for run in runs) and find(p, 'a:endParaRPr') is not None):
-                runs = [{'text': '', **self.run_style([font_default] + [find(n, 'a:defRPr') for n in defaults] + [find(p, 'a:endParaRPr')], g['_scaleY']*font_scale)}]
+                runs = [{'text': '', **self.run_style([font_default] + [find(n, 'a:defRPr') for n in defaults] + [find(p, 'a:endParaRPr')], font_scale)}]
             bullet = None
             if any(run['text'].strip() for run in runs):
                 for n in defaults:
@@ -545,18 +547,23 @@ class Converter:
                 if node is not None and len(node):
                     spacing[key] = {'kind': tag(node[0]), 'value': num(node[0], 'val')}
             paragraphs.append({'runs': runs, 'align': {'ctr': 'center', 'r': 'right'}.get(attributes.get('algn'), 'left'),
-                               'marginLeft': float(attributes.get('marL', 0))/EMU*g['_scaleX'],
-                               'marginRight': float(attributes.get('marR', 0))/EMU*g['_scaleX'],
-                               'indent': float(attributes.get('indent', 0))/EMU*g['_scaleX'], 'spacing': spacing})
+                               'marginLeft': float(attributes.get('marL', 0))/EMU,
+                               'marginRight': float(attributes.get('marR', 0))/EMU,
+                               'indent': float(attributes.get('indent', 0))/EMU, 'spacing': spacing})
         empty = not any(r['text'] for p in paragraphs for r in p['runs'])
         if empty and not text_placeholder:
             return
+        if not empty and (g['_flipX'] or g['_flipY']):
+            self.warn('Mirrored text is imported without reflection.', name)
+        # Group transforms map shape geometry. DrawingML text sizes, margins and
+        # paragraph spacing are already physical values; scaling them again makes
+        # grouped labels tiny (or oversized) compared with native PowerPoint.
         item = self.base(name, g, 'textBlock')
         if empty:
             item['emptyPlaceholder'] = True
-        item.update(paragraphs=paragraphs, insets={key: float(body.get(attr, default))/EMU*g[scale]
-                    for key, attr, default, scale in [('left','lIns',91440,'_scaleX'),('right','rIns',91440,'_scaleX'),('top','tIns',45720,'_scaleY'),('bottom','bIns',45720,'_scaleY')]},
-                    anchor=body.get('anchor', 't'), wrap=body.get('wrap', 'square') != 'none', scaleY=g['_scaleY'])
+        item.update(paragraphs=paragraphs, insets={key: float(body.get(attr, default))/EMU
+                    for key, attr, default in [('left','lIns',91440),('right','rIns',91440),('top','tIns',45720),('bottom','bIns',45720)]},
+                    anchor=body.get('anchor', 't'), wrap=body.get('wrap', 'square') != 'none', scaleY=1)
         self.items.append(item)
 
     def add_media(self, path, raw=None, mime=None):
@@ -571,6 +578,125 @@ class Converter:
                             'dataUrl': f'data:{mime};base64,' + base64.b64encode(raw).decode(),
                             'relativePath': self.name + '/' + path, 'fingerprint': hashlib.sha256(raw).hexdigest()}
         return mid
+
+    def smartart(self, shape, path, geometry, name):
+        """Import Office's saved diagram layout as ordinary editable shapes and text.
+
+        MS-ODRAWXML 2.10 defines this layout and its separate text transforms. The
+        cache uses physical EMUs after the ancestor group's size scaling, unlike
+        the graphicFrame's coordinates in that group. Applying that scale again
+        shrinks grouped diagrams a second time. Keep the frame's final position,
+        rotation and reflection, and use the cached sizes unchanged.
+        """
+        graphic = find(shape, 'a:graphic/a:graphicData')
+        if graphic is None or graphic.get('uri') != NS['dgm']:
+            return False
+
+        def unavailable(reason):
+            self.warn('SmartArt was omitted: ' + reason +
+                      ' Open and save the presentation in PowerPoint to refresh its saved diagram layout.', name)
+            return True
+
+        relationships = self.pkg.relationships(path)
+        refs = find(graphic, 'dgm:relIds')
+        data_id = refs.get(RID+'dm') if refs is not None else None
+        data_path, data_kind = relationships.get(data_id, (None, '')) if data_id else (None, '')
+        if not data_path or data_path not in self.pkg.names or not data_kind.endswith('/diagramData'):
+            return unavailable('its embedded diagram data is missing or linked externally.')
+        data = self.pkg.xml(data_path)
+        extension = find(data, 'dgm:extLst/a:ext/dsp:dataModelExt')
+        drawing_id = extension.get('relId') if extension is not None else None
+        if not drawing_id:
+            return unavailable('its saved drawing reference is missing.')
+        # PowerPoint normally stores this relationship on the owning slide. Some
+        # producers place it on the diagram-data part instead; both are bounded
+        # package relationships, never filesystem paths or external resources.
+        drawing_path = None
+        for owner in (path, data_path):
+            target, kind = self.pkg.relationships(owner).get(drawing_id, (None, ''))
+            if target and target in self.pkg.names and kind.endswith('/diagramDrawing'):
+                drawing_path = target
+                break
+        if drawing_path is None:
+            return unavailable('its saved drawing is missing or linked externally.')
+        drawing = self.pkg.xml(drawing_path)
+        tree = find(drawing, 'dsp:spTree')
+        if drawing.tag != '{'+NS['dsp']+'}drawing' or tree is None:
+            return unavailable('its saved drawing format is unsupported.')
+        if flag(find(tree, 'dsp:nvGrpSpPr/dsp:cNvPr'), 'hidden'):
+            return True
+        shapes = children(tree, './/dsp:sp')
+        if not shapes:
+            return unavailable('its saved drawing contains no shapes.')
+        if len(shapes) > 2000:
+            raise PptxImportError(413, 'This SmartArt contains too many objects to import.')
+        allowed = {'nvGrpSpPr', 'grpSpPr', 'sp', 'grpSp', 'extLst'}
+        for group in [tree, *children(tree, './/dsp:grpSp')]:
+            if any(child.tag != '{'+NS['dsp']+'}'+tag(child) or tag(child) not in allowed for child in group):
+                return unavailable('its saved drawing contains unsupported object types.')
+
+        counter = 0
+
+        def presentation_copy(node):
+            result = copy.deepcopy(node)
+            for element in result.iter():
+                if element.tag.startswith('{'+NS['dsp']+'}'):
+                    element.tag = '{'+NS['p']+'}'+tag(element)
+            return result
+
+        def convert_children(source, destination):
+            nonlocal counter
+            for child in source:
+                kind = tag(child)
+                if kind == 'grpSp':
+                    group = presentation_copy(child)
+                    for old in list(group):
+                        if tag(old) in ('sp', 'grpSp'):
+                            group.remove(old)
+                    convert_children(child, group)
+                    destination.append(group)
+                elif kind == 'sp':
+                    counter += 1
+                    native = presentation_copy(child)
+                    nv = find(native, 'p:nvSpPr/p:cNvPr')
+                    child_name = nv.get('name') if nv is not None else None
+                    child_name = name + ' · ' + (child_name or 'Shape '+str(counter))
+                    if nv is not None:
+                        nv.set('name', child_name)
+                    destination.append(native)
+
+        converted = []
+        convert_children(tree, converted)
+        radians = math.radians(geometry['rotation'])
+        c, s = math.cos(radians), math.sin(radians)
+        fx, fy = -1 if geometry['_flipX'] else 1, -1 if geometry['_flipY'] else 1
+        a, b, c, d = c*fx, s*fx, -s*fy, c*fy
+        w, h = geometry['width'], geometry['height']
+        cx, cy = geometry['x']+w/2, geometry['y']+h/2
+        matrix = (a, b, c, d, cx-a*w/2-c*h/2, cy-b*w/2-d*h/2)
+        # The root may carry visibility and composited effects even when its
+        # transform is omitted. Its default is identity in the cached physical
+        # coordinate space; don't drop those properties by unwrapping the tree.
+        group = ET.Element('{'+NS['p']+'}grpSp')
+        root_nv = find(tree, 'dsp:nvGrpSpPr')
+        if root_nv is not None:
+            group.append(presentation_copy(root_nv))
+        root_props = find(tree, 'dsp:grpSpPr')
+        props = presentation_copy(root_props) if root_props is not None else ET.Element('{'+NS['p']+'}grpSpPr')
+        if find(props, 'a:xfrm') is None:
+            xf = ET.Element('{'+NS['a']+'}xfrm')
+            for element, attrs in [('off', {'x':'0','y':'0'}), ('ext', {'cx':str(w*EMU),'cy':str(h*EMU)}),
+                                   ('chOff', {'x':'0','y':'0'}), ('chExt', {'cx':str(w*EMU),'cy':str(h*EMU)})]:
+                ET.SubElement(xf, '{'+NS['a']+'}'+element, attrs)
+            props.insert(0, xf)
+        group.append(props)
+        group.extend(converted)
+        before = len(self.items)
+        self.shape(group, drawing_path, matrix, False)
+        if len(self.items) == before:
+            return unavailable('its saved shapes could not be converted.')
+        self.warn('SmartArt is imported as editable shapes and text from its saved layout; automatic SmartArt layout is not retained.', name)
+        return True
 
     def shape(self, shape, path, matrix, inherited=True):
         typ = tag(shape)
@@ -610,8 +736,8 @@ class Converter:
             cx, cy = x+w/2,y+h/2
             rot = (*rot[:4],cx-rot[0]*cx-rot[2]*cy,cy-rot[1]*cx-rot[3]*cy)
             group_geometry = self.geometry(xf,matrix,name)
-            group_shadow = self.shadow_style(shape,[],name,group_geometry['_scaleY'])
-            group_soft_edge = self.soft_edge_style(shape,[],name,group_geometry['_scaleY'])
+            group_shadow = self.shadow_style(shape,[],name)
+            group_soft_edge = self.soft_edge_style(shape,[],name)
             if (group_shadow and group_shadow['transparency'] < 100) or group_soft_edge:
                 # Keep the composited group alpha, including each child's own effects.
                 # The browser stores this bounded group as an editable SVG asset.
@@ -645,9 +771,11 @@ class Converter:
             self.warn('Object without usable coordinates was omitted.', name)
             return
         g = self.geometry(xf,matrix,name)
-        native_shadow = self.shadow_style(shape,chain,name,g['_scaleY'])
-        native_soft_edge = self.soft_edge_style(shape,chain,name,g['_scaleY'])
+        native_shadow = self.shadow_style(shape,chain,name)
+        native_soft_edge = self.soft_edge_style(shape,chain,name)
         if typ == 'graphicFrame':
+            if self.smartart(shape, path, g, name):
+                return
             self.warn('Chart, table, SmartArt or embedded object was omitted. Export it as an image in PowerPoint to include it.', name)
             return
         if typ == 'pic':
@@ -697,7 +825,7 @@ class Converter:
                 if gradient:stroke=gradient['stops'][0]['color']
                 if stroke!='none' or gradient:
                     dash=find(border,'a:prstDash')
-                    item.update(stroke=stroke,strokeWidth=num(border,'w',12700)/EMU*g['_scaleY'],
+                    item.update(stroke=stroke,strokeWidth=num(border,'w',12700)/EMU,
                                 strokeDash={'dash':'dash','sysDash':'dash','lgDash':'dash','dot':'dot','sysDot':'dot'}.get(dash.get('val') if dash is not None else '', 'solid'))
                     if gradient:item['strokeGradient']=gradient
             crop = find(shape,'p:blipFill/a:srcRect')
@@ -727,7 +855,7 @@ class Converter:
             stroke_gradient = self.stroke_gradient(stroke_gradient_node,g,name)
             if stroke_gradient_node is not None:
                 stroke = self.color(find(stroke_gradient_node,'a:gsLst/a:gs'))
-            width = num(line,'w',12700)/EMU*g['_scaleY'] if line is not None else 0
+            width = num(line,'w',12700)/EMU if line is not None else 0
             dash_node = find(line,'a:prstDash')
             dash_value = dash_node.get('val','solid') if dash_node is not None else 'solid'
             stroke_dash = {'dash':'dash','sysDash':'dash','lgDash':'dash','dot':'dot','sysDot':'dot'}.get(dash_value,'solid')
@@ -805,7 +933,11 @@ class Converter:
                             self.warn('Diagonal line border gradient projection is approximated.',name)
                     imported['strokeGradient'] = paint
             text_start=len(self.items)
-            self.text(shape,chain,g,name)
+            # Saved SmartArt has an independent text rectangle in the same
+            # coordinate system, often inscribed inside the visible geometry.
+            text_transform = find(shape, 'p:txXfrm')
+            text_geometry = self.geometry(text_transform, matrix, name) if text_transform is not None else g
+            self.text(shape,chain,text_geometry,name)
             if native_soft_edge is not None:
                 for imported in self.items[first_shape_index:]:
                     imported['softEdge']=native_soft_edge

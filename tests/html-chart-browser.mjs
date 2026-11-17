@@ -25,24 +25,43 @@ try{
  async function checkLayout(name){check(name,await page.locator('#html-chart-controls').isHidden()&&await page.locator('#html-chart-overlay iframe').isVisible()&&await page.locator('#html-chart-overlay iframe').getAttribute('inert')!==null);await checkAnimation(name+' preserves animation and document');}
  await page.waitForFunction(()=>document.getElementById('status').textContent.includes('snapshot saved'),null,{timeout:20000});
  check('HTML import renders chart and captures real PNG',await frame.locator('#zoom-level').textContent()==='Zoom: 1');
- async function chartPointer(child,selector,click=false){const outer=await page.locator('#html-chart-overlay iframe').boundingBox();const inner=await child.locator(selector).evaluate(el=>{const r=el.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,width:innerWidth,height:innerHeight}});const x=outer.x+inner.x*outer.width/inner.width,y=outer.y+inner.y*outer.height/inner.height;await page.mouse.move(x,y);if(click)await page.mouse.click(x,y);}
+ async function chartPointer(child,selector,click=false){const outer=await page.locator('#html-chart-overlay iframe').boundingBox();const inner=await child.locator(selector).evaluate(el=>{const r=el.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,width:innerWidth,height:innerHeight}});const scale=outer.width/inner.width,x=outer.x+inner.x*scale,y=outer.y+inner.y*outer.height/inner.height;await page.mouse.move(x,y);if(click)await page.mouse.click(x,y);return {x,y,scale};}
+ const angle=child=>child.locator('#orientation').evaluate(el=>el.transform.baseVal.getItem(0).angle);
+ async function rotateChart(child,name){
+  const before=await angle(child),placement=await chart.getAttribute('transform');
+  const {x,y,scale}=await chartPointer(child,'#rotation-pad');
+  await child.locator('#rotation-pad:hover').waitFor({state:'attached',timeout:3000});
+  await page.mouse.down();await page.mouse.move(x+38*scale,y,{steps:6});await page.mouse.up();
+  await child.locator('#orientation').evaluate(()=>new Promise(resolve=>requestAnimationFrame(resolve)));
+  const after=await angle(child);
+  check(name,after>before+5&&await chart.getAttribute('transform')===placement);
+  return after;
+ }
  await chartPointer(frame,'#peak');await frame.locator('#tooltip').waitFor({state:'visible'});check('Real pointer hover shows chart tooltip',true);
  await chartPointer(frame,'#zoom-chart',true);await page.waitForTimeout(100);check('Chart zoom changes data view',await frame.locator('#zoom-level').textContent()==='Zoom: 1.2');
+ await rotateChart(frame,'First pointer drag rotates the chart');
+ const beforeSnapshot=await rotateChart(frame,'A second drag after releasing the pointer continues rotating');
  await page.mouse.move(20,20);await checkAnimation('Pointer leaving chart keeps animation running');
  await page.locator('#zoom-in').click();check('Editor zoom preserves live chart state',await frame.locator('#zoom-level').textContent()==='Zoom: 1.2');
  check('Sandbox blocks parent DOM and localStorage',await frame.locator('body').evaluate(()=>!window.parentAccess&&!window.storageAccess)&&!(await page.locator('body').getAttribute('data-html-escaped')));
  await page.locator('#html-chart-snapshot').click();await page.waitForFunction(()=>!document.getElementById('html-chart-snapshot').disabled);
+ check('Saving a snapshot preserves chart orientation',await angle(frame)===beforeSnapshot);
+ const afterSnapshot=await rotateChart(frame,'The chart still rotates after saving a snapshot');
  await page.screenshot({path:path.join(output,'interactive.png'),fullPage:true});
  await frame.locator('#zoom-chart').press('Escape');await checkLayout('Escape inside iframe returns to layout with live preview');
- await page.locator('#interact-html').click();await page.locator('#html-chart-overlay iframe').waitFor();
- check('Re-entering after Escape preserves chart zoom',await frame.locator('#zoom-level').textContent()==='Zoom: 1.2');
+ const interact=page.locator('#html-chart-interact');
+ check('Resume interaction is available after Escape',await interact.isVisible()&&await interact.textContent()==='Resume interaction');
+ await interact.click();await page.locator('#html-chart-overlay iframe').waitFor();
+ check('Re-entering after Escape preserves chart zoom and orientation',await frame.locator('#zoom-level').textContent()==='Zoom: 1.2'&&await angle(frame)===afterSnapshot);
+ const afterResume=await rotateChart(frame,'Resuming from the toolbar restores pointer rotation');
  await page.locator('#html-chart-done').click();await checkLayout('Done returns to layout with live preview');
  const beforeDrag=await page.locator('#html-chart-overlay').boundingBox();
  await page.mouse.move(beforeDrag.x+beforeDrag.width*.6,beforeDrag.y+beforeDrag.height*.7);await page.mouse.down();await page.mouse.move(beforeDrag.x+beforeDrag.width*.6+36,beforeDrag.y+beforeDrag.height*.7+24,{steps:5});await page.mouse.up();
  const afterDrag=await page.locator('#html-chart-overlay').boundingBox();
  check('Layout drag moves chart without reloading it',Math.abs(afterDrag.x-beforeDrag.x-36)<2&&Math.abs(afterDrag.y-beforeDrag.y-24)<2&&await frame.locator('body').getAttribute('data-run-id')===runId);
  await page.mouse.dblclick(afterDrag.x+afterDrag.width*.6,afterDrag.y+afterDrag.height*.7);
- check('Double-click resumes the same zoomed chart',await page.locator('#html-chart-controls').isVisible()&&await frame.locator('#zoom-level').textContent()==='Zoom: 1.2');
+ check('Double-click resumes the same zoomed and rotated chart',await page.locator('#html-chart-controls').isVisible()&&await frame.locator('#zoom-level').textContent()==='Zoom: 1.2'&&await angle(frame)===afterResume);
+ const afterDoubleClick=await rotateChart(frame,'Double-click after Done restores pointer rotation');
  const stageBox=await page.locator('#stage').boundingBox();await page.mouse.click(stageBox.x+20,stageBox.y+stageBox.height-20);
  await checkLayout('Deselecting keeps a live chart preview');check('Blank canvas click deselects the chart',await page.locator('#stage .figure-item.selected').count()===0);
  await chart.locator('.item-hit').dblclick();check('Re-entering after deselection preserves chart zoom',await frame.locator('#zoom-level').textContent()==='Zoom: 1.2');
@@ -51,16 +70,32 @@ try{
  const chartPosition=await chart.evaluate(el=>{const m=el.transform.baseVal.getItem(0).matrix;return {x:m.e,y:m.f};});
  await page.locator('#add-text').click();
  async function setProperty(key,value){const input=page.locator(`[data-property="${key}"]`);await input.fill(String(value));await input.dispatchEvent('change');}
- await setProperty('x',chartPosition.x+20);await setProperty('y',chartPosition.y+25);await setProperty('color','#00aa33');
+ const chartWidth=Number(await page.locator('#html-chart-overlay').getAttribute('width'));
+ // Cover the rotation pad with part of the text box; leave its right end outside the chart.
+ await setProperty('x',chartPosition.x+chartWidth*.5);await setProperty('y',chartPosition.y+25);await setProperty('color','#00aa33');
  await page.locator('#text-content').fill('FOREGROUND');await page.locator('#text-content').blur();
  const label=page.locator('#stage .figure-item').filter({has:page.locator('text')});
  const labelId=await label.getAttribute('data-item');const labelBox=await label.boundingBox();
  const topItem=await page.evaluate(({x,y})=>document.elementFromPoint(x,y)?.closest('[data-item]')?.dataset.item,{x:labelBox.x+20,y:labelBox.y+20});
  check('Foreground label receives pointer hits over live chart',topItem===labelId);
- const foregroundPng=await page.screenshot({path:path.join(output,'foreground.png'),clip:labelBox});
- const greenPixels=await page.evaluate(async dataUrl=>{const image=new Image();image.src=dataUrl;await image.decode();const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;const ctx=canvas.getContext('2d');ctx.drawImage(image,0,0);const pixels=ctx.getImageData(0,0,canvas.width,canvas.height).data;let count=0;for(let i=0;i<pixels.length;i+=4)if(pixels[i]<40&&pixels[i+1]>140&&pixels[i+1]<195&&pixels[i+2]<90)count++;return count;},'data:image/png;base64,'+foregroundPng.toString('base64'));
- check('Foreground label paints above the live chart',greenPixels>30);
+ async function labelPaints(name){const png=await page.screenshot({path:path.join(output,name+'.png'),clip:labelBox});
+  return await page.evaluate(async dataUrl=>{const image=new Image();image.src=dataUrl;await image.decode();const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;const ctx=canvas.getContext('2d');ctx.drawImage(image,0,0);const pixels=ctx.getImageData(0,0,canvas.width,canvas.height).data;let count=0;for(let i=0;i<pixels.length;i+=4)if(pixels[i]<40&&pixels[i+1]>140&&pixels[i+1]<195&&pixels[i+2]<90)count++;return count>30;},'data:image/png;base64,'+png.toString('base64'));
+ }
+ check('Foreground label paints above the live chart',await labelPaints('foreground'));
  await page.mouse.click(labelBox.x+20,labelBox.y+20);check('Foreground label stays independently selectable',await label.getAttribute('class')==='figure-item selected');await checkAnimation('Editing foreground object preserves chart animation');
+ check('The chart interaction button hides for another selected object',await interact.isHidden());
+ await page.locator('#text-content').fill('FOREGROUND A');
+ await page.locator(`[data-layer="${chartId}"] .layer-select`).click();
+ check('A single layer click selects the chart directly from text editing',await interact.isVisible());
+ await interact.click();
+ check('Re-entering after editing a foreground item preserves orientation',await angle(frame)===afterDoubleClick);
+ check('Foreground label remains visible during interaction',await labelPaints('foreground-interacting'));
+ await rotateChart(frame,'The chart rotates through the foreground label after selecting it and returning');
+ const liveBox=await page.locator('#html-chart-overlay iframe').boundingBox();
+ const outside=await label.evaluate(el=>{const p=new DOMPoint(250,18).matrixTransform(el.getScreenCTM());return {x:p.x,y:p.y};});
+ check('The foreground label extends past the chart in this fixture',outside.x>liveBox.x+liveBox.width+5);
+ await page.mouse.click(outside.x,outside.y);
+ check('The part of the foreground label outside the interactive chart stays selectable',await label.getAttribute('class')==='figure-item selected');
  const saved=page.waitForEvent('download');await page.locator('#save-project').click();const download=await saved;const savedPath=path.join(output,'saved.figure.json');await download.saveAs(savedPath);const deck=JSON.parse(await fs.readFile(savedPath,'utf8'));
  check('Saved project retains source and generated PNG',deck.assets[0].mime==='text/html'&&deck.assets[0].hasSnapshot&&deck.assets[0].posterWidth===1920&&deck.slides[0].items[0].type==='html');
  await page.locator('#new-project').click();await page.locator('#project-input').setInputFiles(savedPath);await page.locator(`[data-layer="${chartId}"] .layer-select`).click();await page.locator('#interact-html').click();

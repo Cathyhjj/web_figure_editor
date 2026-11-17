@@ -1,7 +1,9 @@
 // Isolated synthetic interaction benchmark; never uses the user's editing origin/files.
 // PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs node tests/interaction-performance-browser.mjs
 // PERFORMANCE_APP_SNAPSHOT=/tmp/before-app.js runs the same workload against an earlier app.js.
+// PERFORMANCE_CACHE_SNAPSHOT=/tmp/before-render-cache.js freezes the corresponding helper.
 // PERFORMANCE_ASSERT_REUSE=1 additionally checks that unrelated rendered content survives edits.
+// PERFORMANCE_ASSERT_PANEL_REUSE=1 checks layer/inspector reuse for unchanged selections.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
@@ -49,6 +51,10 @@ try {
     const snapshot = await readFile(process.env.PERFORMANCE_APP_SNAPSHOT, 'utf8');
     await page.route('**/app.js*', route => route.fulfill({ contentType: 'text/javascript', body: snapshot }));
   }
+  if (process.env.PERFORMANCE_CACHE_SNAPSHOT) {
+    const snapshot = await readFile(process.env.PERFORMANCE_CACHE_SNAPSHOT, 'utf8');
+    await page.route('**/render-cache.js*', route => route.fulfill({ contentType: 'text/javascript', body: snapshot }));
+  }
   await page.addInitScript(() => {
     localStorage.setItem('figure-editor-autosave', 'off');
     window.showSaveFilePicker = async () => (await navigator.storage.getDirectory()).getFileHandle('performance.figure.json', { create: true });
@@ -75,9 +81,11 @@ try {
       const handler = element[property];
       element[property] = function(event) {
         if (eventName === 'pointermove' && !event.buttons) return handler.call(this, event);
+        const layer = document.querySelector('[data-layer="item-0-10"]');
+        const inspector = document.querySelector('#inspector [data-property="x"]');
         const phase = window.performancePhase, start = performance.now();
         const value = handler.call(this, event);
-        const sample = { phase, event: eventName, synchronousMs: performance.now() - start };
+        const sample = { phase, event: eventName, synchronousMs: performance.now() - start, layerRetained: layer?.isConnected ?? null, inspectorRetained: inspector?.isConnected ?? null };
         window.performanceSamples.push(sample);
         requestAnimationFrame(() => requestAnimationFrame(() => { sample.nextPaintOpportunityMs = performance.now() - start; }));
         return value;
@@ -100,9 +108,15 @@ try {
   const reuse = {};
   await clickItem('item-0-1');
   await captureNodes();
+  await tag('repeat-selection');
+  for (let i = 0; i < 10; i++) await clickItem('item-0-1');
+  reuse['repeat-selection'] = await retainedNodes();
+  assert.equal(await page.locator('#undo').isDisabled(), true, 'repeated clicks must not add Undo entries');
+  await captureNodes();
   await tag('selection');
   for (let i = 0; i < 10; i++) await clickItem(`item-0-${i % 2 ? 1 : 4}`);
   reuse.selection = await retainedNodes();
+  assert.equal(await page.locator('#undo').isDisabled(), true, 'alternating selection must not add Undo entries');
   await captureNodes();
   await tag('drag');
   const start = await center('item-0-1');
@@ -117,6 +131,8 @@ try {
   const undone = await save(); assert.deepEqual(undone.slides[0].items, original.slides[0].items, 'one Undo restores the whole drag');
   await page.locator('#redo').click();
   assert.deepEqual((await save()).slides[0].items, moved.slides[0].items, 'one Redo restores the whole drag');
+  await tag('zoom-setup');
+  await clickItem('item-0-1');
   await captureNodes();
   await tag('zoom');
   for (let i = 0; i < 10; i++) { await page.locator(i % 2 ? '#zoom-out' : '#zoom-in').click(); await painted(); }
@@ -142,18 +158,30 @@ try {
       for (const [kind, retained] of Object.entries(nodes)) assert.ok(retained, `${phase}: unmodified ${kind} must remain connected`);
     }
   }
+  if (process.env.PERFORMANCE_ASSERT_PANEL_REUSE === '1') {
+    for (const sample of samples.filter(value => value.phase === 'repeat-selection' && ['pointerdown','pointerup'].includes(value.event))) {
+      assert.equal(sample.layerRetained, true, 'repeated selection retains layers');
+      assert.equal(sample.inspectorRetained, true, 'repeated selection retains inspector fields');
+    }
+    for (const sample of samples.filter(value => value.phase === 'selection' && ['pointerdown','pointerup'].includes(value.event))) {
+      assert.equal(sample.layerRetained, true, 'alternating selection retains layer rows');
+      if (sample.event === 'pointerup') assert.equal(sample.inspectorRetained, true, 'selection release retains the new inspector');
+    }
+  }
   const percentile = (values, p) => values.slice().sort((a,b) => a-b)[Math.min(values.length - 1, Math.floor(values.length * p))];
   const summary = {};
-  for (const [phase, event] of [['selection','pointerdown'],['selection','pointerup'],['drag','pointermove'],['drag','pointerup'],['zoom','zoom'],['typing','text']]) {
+  for (const [phase, event] of [['repeat-selection','pointerdown'],['repeat-selection','pointerup'],['selection','pointerdown'],['selection','pointerup'],['drag','pointermove'],['drag','pointerup'],['zoom','zoom'],['typing','text']]) {
     const matching = samples.filter(value => value.phase === phase && value.event === event);
     summary[`${phase}:${event}`] = { samples: matching.length,
+      layerRetainedCount: matching.filter(value => value.layerRetained === true).length,
+      inspectorRetainedCount: matching.filter(value => value.inspectorRetained === true).length,
       synchronousMedianMs: percentile(matching.map(value => value.synchronousMs), .5),
       synchronousP95Ms: percentile(matching.map(value => value.synchronousMs), .95),
       nextPaintOpportunityMedianMs: percentile(matching.map(value => value.nextPaintOpportunityMs).filter(Number.isFinite), .5),
     };
   }
   assert.deepEqual(errors, [], 'no browser script errors');
-  const result = { fixture: { slides: 30, objectsPerSlide, assets: 20 }, browser: await browser.version(), baselineApp: process.env.PERFORMANCE_APP_SNAPSHOT || null, summary, reuse, samples };
+  const result = { fixture: { slides: 30, objectsPerSlide, assets: 20 }, browser: await browser.version(), baselineApp: process.env.PERFORMANCE_APP_SNAPSHOT || null, baselineRenderCache: process.env.PERFORMANCE_CACHE_SNAPSHOT || null, summary, reuse, samples };
   await writeFile(join(output, 'results.json'), JSON.stringify(result, null, 2));
   console.log(JSON.stringify({ ...result, samples: undefined, output }, null, 2));
   console.log('PASS drag save/Undo/Redo, text save/Undo and browser errors');

@@ -156,7 +156,12 @@
     </aside>
 
     <section class="canvas-area" aria-label="Canvas workspace">
-      <div class="workspace-heading"><label class="slide-name-field" for="slide-name"><span>Slide name</span><input id="slide-name" value="Slide 1" spellcheck="false" aria-label="Slide name"></label><div id="html-chart-controls" hidden><button id="html-chart-snapshot" class="button">Save snapshot</button><button id="html-chart-done" class="button">Done</button></div><span class="workspace-hint" title="Drag on blank space to fully enclose objects. Hold Shift to add to the selection.">Drag to select · Shift to add</span></div>
+      <div class="workspace-heading">
+        <label class="slide-name-field" for="slide-name"><span>Slide name</span><input id="slide-name" value="Slide 1" spellcheck="false" aria-label="Slide name"></label>
+        <button id="html-chart-interact" class="button" hidden>Interact with chart</button>
+        <div id="html-chart-controls" hidden><button id="html-chart-snapshot" class="button" title="Save this view for static exports and continue interacting">Save snapshot</button><button id="html-chart-done" class="button" title="Return to moving and resizing the chart">Done</button></div>
+        <span class="workspace-hint" title="Drag on blank space to fully enclose objects. Hold Shift to add to the selection.">Drag to select · Shift to add</span>
+      </div>
       <div id="workspace" tabindex="0" aria-label="Canvas. Click text to edit it in place. Drag objects to move them. Drag on blank space to select objects and hold Shift to add. Use arrow keys to nudge selected objects.">
         <div id="stage-wrap">
           <svg id="stage" xmlns="http://www.w3.org/2000/svg" width="960" height="640" viewBox="0 0 960 640" role="group" aria-label="Paper figure canvas"></svg>
@@ -186,7 +191,8 @@
       <div class="panel-heading" data-window-handle><h2 id="assets-heading"><svg><use href="#i-image"/></svg>Assets</h2><span class="panel-heading-note">PROJECT</span></div>
       <section id="assets-panel" class="library-content" aria-labelledby="assets-heading">
         <button id="add-images" class="button upload-button"><svg><use href="#i-plus"/></svg>Add images / MP4</button>
-        <button id="add-html" class="button upload-button folder-upload-button">Import HTML chart</button>
+        <button id="import-html-figures" class="button upload-button folder-upload-button">Import HTML / ZIP figures</button>
+        <button id="add-html" class="button upload-button folder-upload-button">Import interactive HTML chart</button>
         <button id="add-folders" class="button upload-button folder-upload-button"><svg><use href="#i-folder"/></svg>Add folders</button>
         <p class="library-caption">PNG · JPG · WEBP · SVG · MP4 · HTML</p>
         <p class="hint folder-import-hint">Includes subfolders. Click an asset to select an existing object. Use Place to add a copy.</p>

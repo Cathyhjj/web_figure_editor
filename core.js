@@ -2,6 +2,7 @@ import { validateSVGDocument, svgDataURL, svgDimensions } from './svg-vector.js'
 /** Portable project model and exports. Geometry is measured in CSS pixels (96/in). */
 import { isMP4, isMediaItem, posterSource } from './video.js';
 import { HTML_MIME, looksLikeHTML, requireHTMLSnapshots, validateSnapshot } from './html-chart.js';
+import { validateHTMLFigure } from './html-figure-model.js';
 import { validateCrop, imageContentRect, imageCrop } from './crop.js';
 import { validateShadow, imageShadowSVG, objectShadowSVG, imageBorderSVG, objectBounds } from './shadow.js';
 import { softEdgeSVG, MAX_SOFT_EDGE } from './soft-edge.js';
@@ -56,7 +57,7 @@ function color(value, label, fallback) {
 }
 
 function dataURL(value, mime, label, inertOriginal = false) {
-  if ((!inertOriginal && !RASTER_MIMES.has(mime) && mime !== 'video/mp4' && mime !== HTML_MIME && mime !== 'image/svg+xml') || (inertOriginal && mime !== 'image/svg+xml')) fail(`${label} has an unsupported MIME type.`);
+  if ((!inertOriginal && !RASTER_MIMES.has(mime) && mime !== 'video/mp4' && mime !== HTML_MIME && mime !== 'image/svg+xml') || (inertOriginal && !['image/svg+xml', 'text/html', 'application/zip'].includes(mime))) fail(`${label} has an unsupported MIME type.`);
   const result = string(value, label, Math.ceil(LIMITS.assetBytes / 3) * 4 + 64);
   const prefix = `data:${mime};base64,`;
   if (!result.startsWith(prefix)) fail(`${label} must be an embedded base64 ${mime} image, not a file path or external URL.`);
@@ -160,6 +161,14 @@ function validateProjectInternal(input, assetCache) {
       asset.originalDataUrl = original.value;
       asset.originalMime = originalMime;
       totalBytes += original.byteLength;
+      if (a.originalName !== undefined) asset.originalName = string(a.originalName, 'asset.originalName', 300);
+    }
+    if (a.htmlFigure !== undefined) {
+      if (mime !== 'image/png') fail('Editable HTML Figures require a PNG preview.');
+      asset.htmlFigure = validateHTMLFigure(a.htmlFigure);
+      const bytes = new TextEncoder().encode(asset.htmlFigure.html).length;
+      if (bytes > 12 * 1024 * 1024) fail('editable HTML exceeds 12 MB.');
+      totalBytes += bytes;
     }
     if (totalBytes > LIMITS.totalBytes) fail('embedded assets exceed the 160 MB project limit.');
     project.assets.push(asset);

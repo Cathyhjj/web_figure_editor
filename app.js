@@ -6,6 +6,8 @@ import { moveArrowPoint, rebuildArrow } from './vector-arrow.js';
 import { appendArrowHandles, arrowMidpoints } from './vector-arrow-editor.js';
 import { isMediaItem, posterSource } from './video.js';
 import { createChartFrame } from './html-chart.js';
+import { initHTMLImport } from './html-import.js';
+import { openHTMLFigureEditor, isHTMLFigure } from './html-figure-editor.js';
 import { uid, projectToSVG, exportPNG, downloadBlob } from './core.js';
 import { createDeck, validateDeck, cloneDeck, currentSlide, createAssetItem, slideProject, deckSourceManifest, addSlide, duplicateSlide, moveSlides } from './deck.js';
 import { pickProjectFile, readProjectFile, readProjectFileState, writeProjectFile, checkProjectFileRevision } from './project-files.js';
@@ -39,6 +41,7 @@ import { UNITS, fromPixels, formatMeasurement, showMeasurement, readMeasurement 
 import { applyLayout, selectionBounds } from './layout.js';
 import { initGuideEditor } from './guide-editor.js';
 import { itemContentKey, assetVisualInputs, sameInputs, createAssetLibrarySnapshot, assetLibraryMatches } from './render-cache.js';
+import { createSlidePreviewTracker } from './slide-preview-cache.js';
 
 import { CLIPBOARD_MIME, createSelection, encodeSelection, decodeSelection, pasteSelection, SLIDE_CLIPBOARD_MIME, SLIDES_CLIPBOARD_MIME, createSlidesClipboard, encodeSlides, decodeSlides, pasteSlides } from './clipboard.js';
 import { selectionToPNG } from './clipboard-image.js';
@@ -47,6 +50,7 @@ import { formatTitle, formatSection, formatInspectorMarkup, bindFormatInspector 
 import { createObjectContextMenu } from './object-context-menu.js';
 import { connectAutomation, describeProject, checkSources, inspectSVG, prepareBatch, renderAutomation } from './automation.js';
 import { checkExport } from './export-check.js';
+import { createDraftWriter, sameDraftFile } from './draft-persistence.js';
 
 const $ = id => document.getElementById(id);
 const ns = 'http://www.w3.org/2000/svg';
@@ -58,7 +62,7 @@ let gesture = null, dirty = false, relinkTarget = null, draftTimer, draftDb, pen
 let projectFileHandle = null, projectFileName = '', projectFileRevision = null, projectFilePersistent = true;
 const assetOperations = new Map();
 // Keep file actions unavailable until the initial draft has finished restoring.
-let projectEpoch = 0, editRevision = 0, fileOperation = true, draftWrites = Promise.resolve();
+let projectEpoch = 0, editRevision = 0, fileOperation = true;
 const AUTOSAVE_DELAY = 1500;
 let autosaveEnabled = true, autosaveTimer, autosaveWriting = false, autosaveError = null;
 let draftRevision = -1, draftError = null, lastFileSave = null;
@@ -74,6 +78,8 @@ let activeHTMLChart = null;
 let canvasText = null;
 let panelWindows = null;
 const stageContentCache = new WeakMap(), slidePreviewCache = new WeakMap();
+const slidePreviewTracker = createSlidePreviewTracker();
+let inspectorRenderState = null, stageRenderState = null;
 let assetLibrarySnapshot = null;
 let measurementUnit = 'px';
 try { const saved = localStorage.getItem('figure-editor-unit'); if (Object.hasOwn(UNITS, saved)) measurementUnit = saved; } catch {}
@@ -88,7 +94,7 @@ const escapeHTML = s => String(s ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':
 const chosen = () => slide().items.filter(i=>selected.has(i.id));
 const byId = id => slide().items.find(i=>i.id===id);
 const assetById = id => project.assets.find(a=>a.id===id);
-const fontTools = initFontTools({ getItems: chosen, change, getUnit: () => measurementUnit });
+const fontTools = initFontTools({ getItems: chosen, change: action=>change(action,project.activeSlideId), getUnit: () => measurementUnit });
 const guideEditor = initGuideEditor({
  context: () => ({ project, slide: slide(), revision: editRevision }), getUnit: () => measurementUnit, getZoom: () => zoom,
  point, svg, change, renderStage, status, prepare: () => { flushText(); shapeDrawing?.cancel(); lastTap=null; lastPointerItem=null; }, isBusy: () => !!gesture || fileOperation,
@@ -97,9 +103,9 @@ function status(message, error=false) { $('status').textContent=message; $('stat
 function snapshot(){const copy=clone(project);slideSelectionSnapshots.set(copy,{ids:[...selectedSlideIds],anchor:slideSelectionAnchor});return copy;}
 function resetSlideSelection(){selectedSlideIds=new Set([project.activeSlideId]);slideSelectionAnchor=project.activeSlideId;}
 function restoreSlideSelection(saved){const state=slideSelectionSnapshots.get(saved);if(state){selectedSlideIds=new Set(state.ids);slideSelectionAnchor=state.anchor;}else resetSlideSelection();}
-function record(before){undoStack.push(before); if(undoStack.length>50)undoStack.shift();redoStack=[];changed();}
-function change(action){flushText();const before=snapshot();try{action();validateDeck(project);record(before);render();return true;}catch(error){project=before;restoreSlideSelection(before);render();status(error.message,true);return false;}}
-function changed(){dirty=true;editRevision++;clearTimeout(draftTimer);draftTimer=setTimeout(saveDraft,650);scheduleAutosave();renderAutosave();}
+function record(before,previewSlideId,{alreadyChanged=false}={}){undoStack.push(before); if(undoStack.length>50)undoStack.shift();redoStack=[];if(!alreadyChanged)changed(previewSlideId);}
+function change(action,previewSlideId){settleObjectGesture();flushText();const before=snapshot();try{action();validateDeck(project);record(before,previewSlideId);render();return true;}catch(error){project=before;restoreSlideSelection(before);render();status(error.message,true);return false;}}
+function changed(previewSlideId){if(previewSlideId!==false)slidePreviewTracker.invalidate(previewSlideId);dirty=true;editRevision++;clearTimeout(draftTimer);draftTimer=setTimeout(saveDraft,650);scheduleAutosave();renderAutosave();}
 function base(type, x=80,y=80,width=160,height=80){return {id:uid(),type,name:type==='text'?'Text':type==='rect'?'Rectangle':type==='line'?'Line':'Image',x,y,width,height,rotation:0,opacity:1,locked:false,hidden:false};}
 const cropEditor=createCropEditor((id,crop)=>{
  const item=byId(id);if(!item||item.locked)return false;
@@ -116,10 +122,16 @@ function closeHTMLChart({dispose=false}={}){
  if(!dispose)renderStage();
 }
 function syncHTMLChart(){
+ const selection=selected.size===1?byId(selected.values().next().value):null;
+ const state=activeHTMLChart,item=state&&byId(state.itemId),asset=state&&assetById(state.assetId);
+ if(state){
+  if(state.project!==project||state.slideId!==project.activeSlideId||item?.type!=='html'||item.hidden||item.assetId!==state.assetId||asset?.dataUrl!==state.source)closeHTMLChart({dispose:true});
+  else if(selection!==item)state.interacting=false;
+ }
+ const resume=$('html-chart-interact');
+ resume.hidden=selection?.type!=='html'||selection.hidden||!!activeHTMLChart?.interacting;
+ if(!resume.hidden)resume.textContent=activeHTMLChart?.itemId===selection.id?'Resume interaction':'Interact with chart';
  if(!activeHTMLChart)return;
- const state=activeHTMLChart,item=byId(state.itemId),asset=assetById(state.assetId);
- if(state.project!==project||state.slideId!==project.activeSlideId||!item||item.hidden||asset?.dataUrl!==state.source){closeHTMLChart({dispose:true});return;}
- if(!selected.has(item.id)||selected.size!==1)state.interacting=false;
  const host=state.host,frame=state.viewer.frame;
  host.setAttribute('width',item.width);host.setAttribute('height',item.height);
  host.classList.toggle('is-interacting',state.interacting);
@@ -137,9 +149,10 @@ async function saveHTMLSnapshot(state=activeHTMLChart,{automatic=false}={}){
   // Decode as well as checking PNG signature/dimensions before accepting child data.
   const image=new Image();image.src=captured.posterDataUrl;await image.decode();
   if(activeHTMLChart!==state||state.project!==project||assetById(state.assetId)?.dataUrl!==state.source)return;
-  if(automatic){Object.assign(assetById(state.assetId),captured);changed();render();}
-  else if(!change(()=>Object.assign(assetById(state.assetId),captured)))return;
-  status('Chart snapshot saved for static exports and every placement of this asset. The HTML original remains interactive.');
+  if(automatic){settleObjectGesture();Object.assign(assetById(state.assetId),captured);changed(false);render();}
+  else if(!change(()=>Object.assign(assetById(state.assetId),captured),false))return;
+  if(state.interacting)status('Chart snapshot saved for static exports. You can keep using the chart or choose Done to return to layout.');
+  else if(!automatic)status('Chart snapshot saved for static exports.');
  }catch(error){
   if(activeHTMLChart===state)status(automatic?'Chart is open. Use Save snapshot when it has finished drawing. '+error.message:error.message,!automatic);
  }finally{
@@ -148,7 +161,7 @@ async function saveHTMLSnapshot(state=activeHTMLChart,{automatic=false}={}){
 }
 function openHTMLChart(item){
  const asset=item&&assetById(item.assetId);if(item?.type!=='html'||!asset||item.hidden)return;
- if(activeHTMLChart?.itemId===item.id){activeHTMLChart.interacting=true;selected=new Set([item.id]);render();return;}
+ if(activeHTMLChart?.itemId===item.id){activeHTMLChart.interacting=true;selected=new Set([item.id]);render();status('Chart interaction resumed. Choose Done to move the chart on the slide.');return;}
  closeHTMLChart({dispose:true});flushText();selected=new Set([item.id]);render();
  const state={itemId:item.id,assetId:asset.id,source:asset.dataUrl,project,slideId:project.activeSlideId,capturing:false,interacting:true,
   group:svg('g'),host:svg('foreignObject',{id:'html-chart-overlay'})};
@@ -159,13 +172,14 @@ function openHTMLChart(item){
  activeHTMLChart=state;
  state.host.append(state.viewer.frame);state.group.append(state.host);
  $('html-chart-snapshot').disabled=false;renderStage();
- status('Chart interaction: hover or use its zoom controls. Done / Escape returns to layout. Save snapshot updates static exports.');
+ status('Use the chart’s own controls to rotate, zoom or explore. Choose Done to move the chart on the slide.');
  state.viewer.ready.then(ready=>{
   if(!ready||activeHTMLChart!==state){if(activeHTMLChart===state)status('Chart loading timed out. Check that scripts and data are embedded or available.',true);return;}
   if(!asset.hasSnapshot)setTimeout(()=>{if(activeHTMLChart===state)saveHTMLSnapshot(state,{automatic:true});},500);
  });
 }
-$('html-chart-done').onclick=()=>{closeHTMLChart();$('workspace').focus({preventScroll:true});status('Back to layout. The chart keeps running; double-click to interact with the same view again.');};
+$('html-chart-interact').onclick=()=>openHTMLChart(chosen()[0]);
+$('html-chart-done').onclick=()=>{closeHTMLChart();$('workspace').focus({preventScroll:true});status('Drag to move the chart. Choose Resume interaction or double-click to use the chart again.');};
 $('html-chart-snapshot').onclick=()=>saveHTMLSnapshot();
 $('html-chart-controls').onpointerdown=e=>e.stopPropagation();
 function svgText(item){
@@ -205,6 +219,7 @@ function previewVideo(asset){
 $('video-close').onclick=()=>$('video-dialog').close();
 $('video-dialog').addEventListener('close',()=>{const player=$('video-player');player.pause();player.removeAttribute('src');player.removeAttribute('poster');player.load();});
 function renderSlides(){
+ slidePreviewTracker.prepare(project.assets,project.slides);
  const validIds=new Set(project.slides.map(page=>page.id));
  selectedSlideIds=new Set([...selectedSlideIds].filter(id=>validIds.has(id)));
  if(!selectedSlideIds.has(project.activeSlideId))resetSlideSelection();
@@ -213,10 +228,8 @@ function renderSlides(){
  project.slides.forEach((page,index)=>{
   const card=existing.get(page.id)||document.createElement('button');existing.delete(page.id);card.type='button';card.className='slide-card';card.dataset.slide=page.id;card.draggable=false;
   card.setAttribute('aria-label',`Slide ${index+1}: ${page.name}`);card.title=`${page.name} · Drag to reorder`;
-  // Only layout metadata is serialized. Embedded image/HTML bytes are compared
-  // by value separately, so selecting an object never reparses every thumbnail.
-  const key=JSON.stringify([page.canvas,page.items]);
-  const sources=page.items.filter(item=>!item.hidden&&item.assetId).flatMap(item=>assetVisualInputs(assetById(item.assetId)));
+  // Recheck layout only after a model edit; selecting objects has no preview work.
+  const {key,sources}=slidePreviewTracker.get(page);
   const cached=slidePreviewCache.get(card);
   if(!cached||cached.key!==key||!sameInputs(cached.sources,sources)){
    const preview=svg('svg',{class:'slide-preview',viewBox:`0 0 ${page.canvas.width} ${page.canvas.height}`,'aria-hidden':'true'});
@@ -316,6 +329,7 @@ $('slide-list').addEventListener('keydown',event=>{
 });
 function selectSlide(id,{ids=new Set([id]),anchor=id}={}){
  if(!project.slides.some(page=>page.id===id))return;
+ settleObjectGesture();
  flushText();project.activeSlideId=id;selectedSlideIds=ids;slideSelectionAnchor=anchor;editRevision++;selected.clear();lastTap=null;lastPointerItem=null;
  if(inSlideSorter()){
   syncHTMLChart();renderSlideSelection();fitAfterSorter=true;status(`Selected ${slide().name}.`);
@@ -362,7 +376,7 @@ $('delete-slide').onclick=()=>{
   deck.slides=deck.slides.filter(page=>!ids.has(page.id));deck.activeSlideId=next.id;
  },`${count===1?'Slide':count+' slides'} deleted. Use Undo to restore.`);
 };
-$('slide-name').oninput=e=>{if(!pendingText)pendingText=snapshot();slide().name=e.target.value.trim().slice(0,120)||'Untitled slide';changed();};
+$('slide-name').oninput=e=>{const value=e.target.value;settleObjectGesture();e.target.value=value;if(!pendingText)pendingText=snapshot();slide().name=value.trim().slice(0,120)||'Untitled slide';changed(false);};
 $('slide-name').onblur=()=>{flushText();renderToolbar();};
 initSlideDrag({
  list:$('slide-list'),
@@ -383,32 +397,40 @@ initSlideDrag({
  },
  cancel(reason){status(reason==='changed'?'Slide move cancelled because the project or selection changed.':'Slide move cancelled.');},
 });
-function renderStage(){
+function renderStage(itemId){
  syncHTMLChart();
- const stage=$('stage'),liveGroup=activeHTMLChart?.group;
+ const stage=$('stage'),liveGroup=activeHTMLChart?.group,page=slide(),selectionKey=JSON.stringify([...selected]);
  if(canvasText&&(byId(canvasText.item.id)!==canvasText.item||canvasText.item.locked||canvasText.item.hidden||selected.size!==1||!selected.has(canvasText.item.id))){
   removeCanvasText();flushText();
  }
+ const localItem=typeof itemId==='string'?byId(itemId):null;
+ const localGroup=localItem&&stage.querySelector(`[data-item="${CSS.escape(itemId)}"]`);
+ // Text and inspector previews affect one item. A context/selection/zoom change
+ // or live chart uses the complete reconciliation path instead.
+ const partial=localItem&&!localItem.hidden&&localGroup&&stageRenderState?.page===page&&stageRenderState.zoom===zoom&&stageRenderState.selectionKey===selectionKey&&!activeHTMLChart&&!gesture;
  // Never detach the live iframe or its ancestors during redraws: doing so
  // reloads its document. Likewise a focused textarea must keep its selection and IME.
- const visibleIds=new Set(slide().items.filter(item=>!item.hidden).map(item=>item.id));
- const existing=new Map();
- for(const child of [...stage.children]){
+ const visibleIds=partial?null:new Set(page.items.filter(item=>!item.hidden).map(item=>item.id));
+ const existing=partial?new Map([[itemId,localGroup]]):new Map();
+ if(!partial)for(const child of [...stage.children]){
   const protectedGroup=canvasText&&canvasText.item.id===child.dataset.item?canvasText.group:activeHTMLChart&&activeHTMLChart.itemId===child.dataset.item?liveGroup:null;
   if(protectedGroup&&child!==protectedGroup)child.remove();
   else if(child.dataset.item&&visibleIds.has(child.dataset.item))existing.set(child.dataset.item,child);
   else if(child!==liveGroup&&child!==canvasText?.group)child.remove();
  }
- let next=stage.firstElementChild;
+ let next=partial?null:stage.firstElementChild,aboveInteractiveChart=false;
+ if(!partial){
  stage.setAttribute('viewBox',`0 0 ${slide().canvas.width} ${slide().canvas.height}`);
  stage.style.width=`${slide().canvas.width*zoom}px`;stage.style.height=`${slide().canvas.height*zoom}px`;
  $('stage-wrap').style.width=`${slide().canvas.width*zoom}px`;$('stage-wrap').style.height=`${slide().canvas.height*zoom}px`;
  stage.style.background=slide().canvas.background;
- for(const item of slide().items){
+ }
+ for(const item of partial?[localItem]:page.items){
   if(item.hidden)continue;
   const live=activeHTMLChart?.itemId===item.id?activeHTMLChart:null;
   const editor=canvasText?.item===item?canvasText:null;
   const g=editor?.group||live?.group||existing.get(item.id)||svg('g');
+  let controlsCurrent=false,controlsKey;
   for(const [key,value] of Object.entries({'data-item':item.id,transform:`translate(${item.x} ${item.y}) rotate(${item.rotation} ${item.width/2} ${item.height/2})`,opacity:item.opacity,class:`figure-item ${selected.has(item.id)?'selected':''}`}))if(g.getAttribute(key)!==String(value))g.setAttribute(key,value);
   if(item.type!=='text'||item.locked)g.removeAttribute('data-editable-text');
   if(editor){
@@ -420,18 +442,27 @@ function renderStage(){
   }else if(live){stageContentCache.delete(g);for(const child of [...g.children])if(child!==live.host)child.remove();}
   else{
    const key=itemContentKey(item),sources=assetVisualInputs(assetById(item.assetId)),cached=stageContentCache.get(g);
+   controlsKey=JSON.stringify([selected.has(item.id),selected.has(item.id)?selected.size:0,selected.has(item.id)||isLineShape(item)?zoom:0,aboveInteractiveChart]);
    if(cached&&cached.key===key&&sameInputs(cached.sources,sources)){
-    // Retain the painted SVG/image nodes; only selection controls depend on zoom.
-    for(const child of [...g.childNodes])if(!cached.nodes.has(child))child.remove();
+    controlsCurrent=cached.controlsKey===controlsKey&&!aboveInteractiveChart;
+    if(!controlsCurrent)for(const child of [...g.childNodes])if(!cached.nodes.has(child))child.remove();
    }else{
     g.replaceChildren();appendItemContent(g,item);
     stageContentCache.set(g,{key,sources,nodes:new Set(g.childNodes)});
    }
   }
+  if(!controlsCurrent){
   // Transparent geometry makes whitespace in a text box and thin lines selectable.
   const hit=isLineShape(item)?shapeBounds({...item,strokeWidth:Math.max(item.strokeWidth,8/zoom)}):{x:0,y:0,width:item.width,height:item.height};
   const target=svg('rect',{...hit,fill:'transparent',class:'item-hit',style:live?.interacting?'pointer-events:none':''});
-  if(item.type==='text'&&!item.locked){
+  if(aboveInteractiveChart){
+   // Keep foreground labels and pictures painted in order. Their layout hit
+   // areas sit just behind the live chart, so only the overlapping part yields.
+   g.classList.add('chart-foreground');
+   target.setAttribute('data-hit-item',item.id);
+   target.setAttribute('transform',g.getAttribute('transform'));
+   stage.insertBefore(target,liveGroup);
+  }else if(item.type==='text'&&!item.locked){
    g.setAttribute('data-editable-text','');g.prepend(target);
   }else g.append(target);
   if(selected.has(item.id)){
@@ -450,6 +481,9 @@ function renderStage(){
     appendArrowHandles(g,item,zoom,svg);
    }
   }
+  const cached=stageContentCache.get(g);if(cached)cached.controlsKey=controlsKey;
+  }
+  if(partial)continue;
   if(g===next)next=next.nextElementSibling;
   else if((live||editor)&&g.parentNode===stage){
    // Reorder siblings around a mounted iframe/textarea, never move its ancestor:
@@ -459,14 +493,16 @@ function renderStage(){
    next=g.nextElementSibling;
   }
   else stage.insertBefore(g,next);
+  if(live?.interacting)aboveInteractiveChart=true;
  }
- if(gesture?.mode==='select'&&gesture.moved){
+ if(!partial&&gesture?.mode==='select'&&gesture.moved){
   stage.append(svg('rect',{...selectionRect(gesture.start,gesture.current),class:'selection-marquee','pointer-events':'none','aria-hidden':'true'}));
  }
- guideEditor.render();
+ if(!partial)guideEditor.render();
  $('empty-state').hidden=slide().items.length>0 || !!slide().guides?.length;
  $('zoom-value').textContent=`${Math.round(zoom*100)}%`;
  $('selection-count').textContent=selected.size?`${selected.size} selected`:`${slide().items.length} object${slide().items.length === 1 ? "" : "s"}`;
+ stageRenderState={page,zoom,selectionKey};
 }
 function renderAssets(){
  if(assetLibraryMatches(assetLibrarySnapshot,project.assets)&&$('asset-list').childElementCount){syncAssetSelection();return;}
@@ -523,13 +559,23 @@ function syncAssetSelection(revealAssetId){
  else if(cardBounds.bottom>bottom)panel.scrollTop+=cardBounds.bottom-bottom;
 }
 function renderLayers(){
- const list=$('layer-list');list.replaceChildren();
- if(!slide().items.length){const p=document.createElement('p');p.className='hint';p.textContent='No objects on this slide yet.';list.append(p);}
- for(const i of [...slide().items].reverse()){
-  const row=document.createElement('div');row.className=`layer-row ${selected.has(i.id)?'selected':''}`;row.dataset.layer=i.id;
-  row.innerHTML=`<button class="layer-select" title="Select object">${i.type==='html'?'◇':i.type==='video'?'▶':i.type==='image'?'▧':i.type==='text'?'T':i.type==='ellipse'?'○':i.type==='arrow'?'→':i.type==='doubleArrow'?'↔':i.type==='line'?'╱':'□'} <span>${escapeHTML(i.name)}</span></button><button data-action="hide" title="${i.hidden?'Show':'Hide'}">${i.hidden?'○':'●'}</button><button data-action="lock" title="${i.locked?'Unlock':'Lock'}">${i.locked?'▣':'◇'}</button>`;
-  row.onclick=e=>{const action=e.target.closest('[data-action]')?.dataset.action;if(action)change(()=>{if(action==='hide')i.hidden=!i.hidden;else i.locked=!i.locked;});else{flushText();if(e.shiftKey){selected.has(i.id)?selected.delete(i.id):selected.add(i.id);}else selected=new Set([i.id]);render();}};list.append(row);
+ const list=$('layer-list'),items=[...slide().items].reverse();
+ if(!items.length){if(!list.querySelector('.hint')){const p=document.createElement('p');p.className='hint';p.textContent='No objects on this slide yet.';list.replaceChildren(p);}return;}
+ const existing=new Map([...list.children].filter(row=>row.dataset.layer).map(row=>[row.dataset.layer,row]));
+ list.querySelector('.hint')?.remove();
+ for(const [index,i] of items.entries()){
+  const row=existing.get(i.id)||document.createElement('div');existing.delete(i.id);
+  row.className=`layer-row ${selected.has(i.id)?'selected':''}`;row.dataset.layer=i.id;
+  const key=JSON.stringify([i.type,i.name,i.hidden,i.locked]);
+  if(row.dataset.renderKey!==key){
+   row.innerHTML=`<button class="layer-select" title="Select object">${i.type==='html'?'◇':i.type==='video'?'▶':i.type==='image'?'▧':i.type==='text'?'T':i.type==='ellipse'?'○':i.type==='arrow'?'→':i.type==='doubleArrow'?'↔':i.type==='line'?'╱':'□'} <span>${escapeHTML(i.name)}</span></button><button data-action="hide" title="${i.hidden?'Show':'Hide'}">${i.hidden?'○':'●'}</button><button data-action="lock" title="${i.locked?'Unlock':'Lock'}">${i.locked?'▣':'◇'}</button>`;
+   row.dataset.renderKey=key;
+  }
+  // Undo can replace the model object while retaining its ID and row.
+  row.onclick=e=>{const action=e.target.closest('[data-action]')?.dataset.action;if(action)change(()=>{if(action==='hide')i.hidden=!i.hidden;else i.locked=!i.locked;},project.activeSlideId);else{flushText();if(e.shiftKey){selected.has(i.id)?selected.delete(i.id):selected.add(i.id);}else selected=new Set([i.id]);render();}};
+  if(list.children[index]!==row)list.insertBefore(row,list.children[index]||null);
  }
+ for(const row of existing.values())row.remove();
 }
 function field(label,key,value,type='number',extra=''){
  if(['x','y','width','height','fontSize'].includes(key)){
@@ -549,9 +595,26 @@ function editSVG(item) {
  });}catch(error){status(error.message,true);}
 }
 
+function editHTMLFigure(item) {
+ if(item.locked)return;
+ flushText();const source=assetById(item.assetId),target=project,targetSlide=slide();
+ openHTMLFigureEditor(source,rendered=>{
+  if(project!==target||slide()!==targetSlide||!targetSlide.items.includes(item)||item.locked||item.assetId!==source.id)throw new Error('The selected Figure changed. Open its HTML editor again.');
+  const edited={...source,id:uid(),name:source.name.replace(/(?: \(edited\))?\.png$/i,'')+' (edited).png',dataUrl:rendered.dataUrl,width:rendered.pixelWidth,height:rendered.pixelHeight,htmlFigure:rendered.htmlFigure,size:Math.floor(rendered.dataUrl.split(',')[1].length*3/4),lastModified:Date.now(),rasterizationScale:rendered.effectiveDpi/96};
+  edited.sourceKind='copy';for(const key of ['fingerprint','linkToken','linkPersistence','mcpRootId'])delete edited[key];
+  const fillsSlide=targetSlide.items.length===1&&item.x===0&&item.y===0&&item.width===targetSlide.canvas.width&&item.height===targetSlide.canvas.height&&!isCropped(item);
+  if(!change(()=>{project.assets.push(edited);item.assetId=edited.id;const crop=imageCrop(item);item.height=item.width*rendered.height*crop.height/(rendered.width*crop.width);if(fillsSlide)targetSlide.canvas.height=item.height;},targetSlide.id))throw new Error('Could not save the HTML Figure edit.');
+  status('HTML Figure updated. Its editable source and export image are saved together. Use Undo to restore the previous version.');
+ });
+}
+
 function renderInspector(){
  const items=chosen(), box=$('inspector');
  panelWindows?.setTitle('objects',items.length===1&&canFormat(items[0])?formatTitle(items[0]):'Object properties');
+ const asset=items.length===1?assetById(items[0].assetId):null;
+ const key=JSON.stringify([measurementUnit,items.length===1?items[0]:items.map(item=>item.id),asset&&[asset.name,asset.mime,asset.width,asset.height,asset.duration,asset.originalMime,!!asset.originalDataUrl]]);
+ if(inspectorRenderState?.key===key&&sameInputs(inspectorRenderState.items,items)&&inspectorRenderState.asset===asset)return;
+ inspectorRenderState={key,items,asset};
  if(items.length!==1){box.innerHTML=`<div class="section-heading">${items.length?'Multiple objects':'Object properties'}</div><p class="hint">${items.length?'Drag any selected object to move them together. Shift + click or Shift + drag on blank space to adjust the selection.':'Click text to edit it on the canvas. Drag an object to move it, or drag on blank space to select objects.'}</p>`;return;}
  const i=items[0];
  box.innerHTML=`<div class="section-heading">${i.type==='html'?'HTML chart':i.type==='video'?'Video':i.type==='image'?'Image':i.type==='text'?'Text':'Shape'} properties${i.locked?' · Locked':''}</div>${field('Name','name',i.name,'text')}<div class="field-row">${field('X / px','x',round(i.x),'number','step="1"')}${field('Y / px','y',round(i.y),'number','step="1"')}</div><div class="field-row">${field('Width / px','width',round(i.width),'number',`min="${isLineShape(i)?0:1}" step="1"`)}${field('Height / px','height',round(i.height),'number',`min="${isLineShape(i)?0:1}" step="1"`)}</div>${field('Rotation / °','rotation',round(i.rotation))}${opacityEditorMarkup(i)}`;
@@ -576,16 +639,29 @@ function renderInspector(){
   bindFormatInspector(box,{beforeSwitch:flushText});
  }
  if(i.type==='image'){
+  const source=assetById(i.assetId);
+  if(isHTMLFigure(source)){
+   const edit=document.createElement('button');edit.className='button';edit.id='edit-html-figure';edit.textContent='Edit HTML Figure';edit.disabled=i.locked;edit.onclick=()=>editHTMLFigure(i);box.append(edit);
+   if(source.htmlFigure){const current=document.createElement('button');current.className='button';current.id='download-edited-html';current.textContent='Download edited HTML';current.onclick=()=>downloadBlob(new Blob([source.htmlFigure.html],{type:'text/html;charset=utf-8'}),source.name.replace(/\.png$/i,'.html'));box.append(current);}
+  }
+  if(['text/html','application/zip'].includes(source?.originalMime)){
+   const download=document.createElement('button');download.className='button';download.id='download-html-source';download.textContent='Download original '+(source.originalMime==='application/zip'?'ZIP':'HTML');
+   download.onclick=async()=>{const response=await fetch(source.originalDataUrl);downloadBlob(await response.blob(),source.originalName||('original.'+(source.originalMime==='application/zip'?'zip':'html')));};
+   const note=document.createElement('p');note.className='hint';note.textContent='Double-click to edit native HTML text, colors and positions. Exports use the matching rendered image. Original source remains embedded.';box.append(download,note);
+  }
   if($('edit-svg'))$('edit-svg').onclick=()=>editSVG(i);
   $('crop-image').onclick=()=>{flushText();cropEditor.show(i,assetById(i.assetId));};
   $('restore-image').onclick=()=>{if(i.locked||!isCropped(i))return;if(change(()=>{const restored=cropImage(i);delete i.crop;Object.assign(i,restored);}))status('Full image restored. Use Undo to return to the crop.');};
  }
  if(i.type==='video')$('preview-video').onclick=()=>previewVideo(assetById(i.assetId));
  if(i.type==='html'){
-  const note=document.createElement('p');note.className='hint';note.textContent='Double-click to zoom and hover. Save snapshot updates all copies of this asset for PNG, SVG, PDF, PPTX and HTML reports. View changes are temporary; the original HTML is saved.';
+  const note=document.createElement('p');note.className='hint';note.textContent='Double-click to use the chart’s own controls. Save snapshot saves this view for static exports; you can keep rotating or zooming afterward.';
   const button=document.createElement('button');button.id='interact-html';button.className='button';button.textContent='Interact with chart';button.onclick=()=>openHTMLChart(i);
   box.append(button,note);
  }
+ // Rebuilding the layer buttons on field blur can remove the user's next
+ // click target between pointerdown and click, leaving the old object selected.
+ const finishFieldEdit=()=>{flushText();renderToolbar();};
  box.querySelectorAll('[data-property]').forEach(input=>{
   input.disabled=i.locked;
   const measured=['x','y','width','height','fontSize'].includes(input.dataset.property);
@@ -603,30 +679,34 @@ function renderInspector(){
    if(key==='opacity')val=Math.max(0,Math.min(1,val));if(key==='strokeWidth')val=Math.max(0,Math.min(1000,val));
    if(key==='name')val=val.slice(0,1000);
    if(i[key]===val)return;
-   if(!pendingText)pendingText=snapshot();
+   settleObjectGesture();if(!pendingText)pendingText=snapshot();
    if(isMediaItem(i)&&(key==='width'||key==='height')){Object.assign(i,resizeMediaDimension(i,key,val));val=i[key];const other=box.querySelector(`[data-property="${key==='width'?'height':'width'}"]`);if(other)showMeasurement(other,key==='width'?i.height:i.width,measurementUnit);}
-   i[key]=val;changed();renderStage();
+   i[key]=val;
+   if(key==='name')$('layer-list').querySelector(`[data-layer="${CSS.escape(i.id)}"] .layer-select span`).textContent=val;
+   changed(project.activeSlideId);renderStage(i.id);
+   if(!input.isConnected)renderInspector();
   };
   input.oninput=()=>{if(input.dataset.property!=='fontFamily')apply();};
-  input.onchange=()=>{apply();if(measured)showMeasurement(input,i[input.dataset.property],measurementUnit);else input.value=i[input.dataset.property];flushText();renderLayers();renderToolbar();};
-  input.onblur=()=>{flushText();renderLayers();renderToolbar();};
+  input.onchange=()=>{apply();if(measured)showMeasurement(input,i[input.dataset.property],measurementUnit);else input.value=i[input.dataset.property];finishFieldEdit();};
+  input.onblur=finishFieldEdit;
  });
+ const inspectorContent=box.firstElementChild;
  const styleBindings={
-  begin:()=>{if(!pendingText)pendingText=snapshot();},
-  preview:()=>{changed();renderStage();},
-  commit:()=>{flushText();renderLayers();renderToolbar();},
+  begin:()=>{settleObjectGesture();if(!pendingText)pendingText=snapshot();},
+  preview:()=>{changed(project.activeSlideId);renderStage(i.id);if(box.firstElementChild!==inspectorContent)renderInspector();},
+  commit:finishFieldEdit,
   change,
  };
  bindShadowEditor(i,box,styleBindings);
  bindSoftEdgeEditor(i,box,styleBindings);
  bindShapeEditor(i,box,styleBindings);
  $('object-locked').onchange=e=>change(()=>i.locked=e.target.checked);
- const text=$('text-content');if(text){text.disabled=i.locked;text.maxLength=100000;text.oninput=()=>updateText(i,text.value);text.onblur=()=>{flushText();renderLayers();renderToolbar();};}
+ const text=$('text-content');if(text){text.disabled=i.locked;text.maxLength=100000;text.oninput=()=>{updateText(i,text.value);if(!text.isConnected)renderInspector();};text.onblur=finishFieldEdit;}
 }
 function updateText(item,value){
  const content=value.slice(0,100000);
  if(item.text===content)return;
- if(!pendingText)pendingText=snapshot();
+ settleObjectGesture();if(!pendingText)pendingText=snapshot();
  const rows=content.split('\n').length;
  if(rows>item.text.split('\n').length){
   // An imported box can be tighter than our default line spacing. Keep its
@@ -636,7 +716,7 @@ function updateText(item,value){
   if(field)showMeasurement(field,item.height,measurementUnit);
  }
  item.text=content;
- changed();renderStage();
+ changed(project.activeSlideId);renderStage(item.id);
 }
 function removeCanvasText(){
  const editor=canvasText;canvasText=null;
@@ -645,7 +725,7 @@ function removeCanvasText(){
 function flushText(){
  const editing=!!canvasText;
  if(editing)removeCanvasText();
- if(pendingText){const before=pendingText;pendingText=null;record(before);renderSlides();}
+ if(pendingText){const before=pendingText;pendingText=null;record(before,false,{alreadyChanged:true});renderSlides();}
  if(editing){renderStage();renderToolbar();status('Finished editing text.');}
 }
 const round=n=>Math.round(n*10)/10;
@@ -707,6 +787,16 @@ function insertPowerPointSlide(deck,warnings){
   return applied;
 }
 const targetIsCurrent=target=>target.project===project&&target.slideId===project.activeSlideId&&(!fileOperation||autosaveWriting);
+const htmlFigureImport=initHTMLImport({
+ captureTarget:()=>({...importTarget(),revision:editRevision}),
+ targetIsCurrent:target=>targetIsCurrent(target)&&target.revision===editRevision,
+ insert:(deck,warnings)=>{
+  const applied=change(()=>{const pages=pasteSlides(project,deck);project.activeSlideId=pages[0].id;selectedSlideIds=new Set(pages.map(page=>page.id));slideSelectionAnchor=pages[0].id;selected=new Set([pages[0].items[0].id]);lastPaste=null;});
+  if(!applied)throw new Error($('status').textContent);
+  fit();focusCurrentSlide();status(`Imported ${deck.slides.length} HTML figure${deck.slides.length===1?'':'s'} as new slides. Original source is embedded. Each figure is one image; crop, resize or add annotations.${warnings.length?' '+warnings.join(' '):''}`,!!warnings.length);
+  return true;
+ }
+});
 initPPTXImport({captureTarget:importTarget,targetIsCurrent,insert:insertPowerPointSlide,openProject:(deck,warnings)=>{
  if(dirty&&!confirm('Opening this presentation as a new project will replace the current local draft. Continue?'))return false;
  replaceProject(deck);changed();
@@ -771,7 +861,7 @@ function assetOperationCurrent(target){
 }
 function applyAssetOperation(target,updated,message){
  if(!assetOperationCurrent(target))return;
- if(change(()=>{project.assets=project.assets.map(asset=>asset===target.asset?updated:asset);}))status(message);
+ if(change(()=>{project.assets=project.assets.map(asset=>asset===target.asset?updated:asset);},false))status(message);
 }
 async function relink(a){
  const target=beginAssetOperation(a);
@@ -795,7 +885,7 @@ async function locate(a){
    const saved=await saveClipboardAsset(a);
    if(project!==targetProject||assetById(a.id)!==a){status('Locate cancelled because the project or source image changed.');return;}
    // Source metadata is a persistence update, not a canvas edit or a new undo step.
-   Object.assign(a,{relativePath:saved.relativePath,fingerprint:saved.fingerprint});changed();renderAssets();
+   settleObjectGesture();Object.assign(a,{relativePath:saved.relativePath,fingerprint:saved.fingerprint});changed(false);renderAssets();
   }
   const result=await locateAsset(a);status(result==='cancelled'?'Locate cancelled.':`Asked Finder to show ${a.name}.`);
  }
@@ -823,6 +913,7 @@ $('workspace').ondrop=async e=>{
  if(e.target.closest('#canvas-text-editor')&&!e.dataTransfer.files.length){$('workspace').classList.remove('drag-over');return;}
  e.preventDefault();$('workspace').classList.remove('drag-over');const target=importTarget(),p=point(e);p.x=Math.max(0,p.x);p.y=Math.max(0,p.y);
  const assetId=e.dataTransfer.getData('application/x-figure-asset');if(assetId){status('Click Place on the asset to add it to the canvas.');return;}
+ if(e.dataTransfer.files.length===1&&/\.(html?|zip)$/i.test(e.dataTransfer.files[0].name)){await htmlFigureImport.open(e.dataTransfer.files[0]);return;}
  try{await importResult(await importDroppedFiles(e.dataTransfer),p,target);}catch(error){status(error.message,true);}
 };
 const libraryDropZone=document.querySelector('.library-panel');
@@ -834,6 +925,23 @@ function releaseGesture(){
  const ended=gesture;gesture=null;$('workspace').classList.remove('selecting');
  if($('stage').hasPointerCapture(ended.pointerId))$('stage').releasePointerCapture(ended.pointerId);
  return ended;
+}
+const isObjectGesture=()=>gesture?.mode==='move'||gesture?.mode==='resize';
+function objectGestureCurrent(){return gesture.project===project&&gesture.slideId===project.activeSlideId&&gesture.revision===editRevision;}
+// Finish the drag as its own Undo step before a separate command changes context.
+function settleObjectGesture(){if(isObjectGesture())endGesture({type:'pointercancel',pointerId:gesture.pointerId});}
+function cancelObjectGesture(message='Drag cancelled because the project changed.'){
+ const ended=releaseGesture(),page=ended.project===project&&project.slides.find(page=>page.id===ended.slideId);
+ let restored=false;
+ if(page)for(const original of ended.items){
+  const item=page.items.find(item=>item.id===original.id),last=ended.applied.get(original.id);
+  if(!last||item!==ended.targets.get(original.id))continue;
+  // Revert only fields still equal to this drag's last write. Other edits and
+  // replacement objects belong to the newer context and must remain untouched.
+  for(const [key,value] of Object.entries(last))if(item[key]===value&&value!==original[key]){item[key]=original[key];restored=true;}
+ }
+ if(restored)changed(ended.slideId);
+ lastTap=null;render();status(message,true);
 }
 function finishMarquee(cancel=false,redraw=true){
  const current=marqueeCurrent(),ended=releaseGesture();
@@ -852,6 +960,7 @@ function updateMarquee(e){
 }
 function editCanvasText(item,{offset=item.text.length,selectAll=false}={}){
  if(item.type!=='text'||item.locked||item.hidden||canvasText?.item===item)return;
+ settleObjectGesture();
  flushText();
  if(selected.size!==1||!selected.has(item.id)){selected=new Set([item.id]);render();}
  const group=$('stage').querySelector(`[data-item="${CSS.escape(item.id)}"]`);
@@ -910,9 +1019,10 @@ function showObjectMenu(event,item){
   {id:'delete',label:'Delete',disabled:item.locked,separator:true},
  ]});
 }
+const itemAtTarget=target=>target.dataset.hitItem||target.closest('[data-item]')?.dataset.item;
 $('workspace').addEventListener('contextmenu',event=>{
  if(event.target.closest('#html-chart-overlay'))return;
- const id=event.target.closest('[data-item]')?.dataset.item;
+ const id=itemAtTarget(event.target);
  showObjectMenu(event,id?byId(id):(!event.clientX&&!event.clientY&&selected.size===1?chosen()[0]:null));
 });
 $('layer-list').addEventListener('contextmenu',event=>showObjectMenu(event,byId(event.target.closest('[data-layer]')?.dataset.layer)));
@@ -939,7 +1049,7 @@ new MutationObserver(()=>{
 $('workspace').onpointerdown=e=>{
  if(e.target.closest('#html-chart-overlay,#canvas-text-editor'))return;
  if(e.button!==0||e.ctrlKey&&/Mac/.test(navigator.platform)||gesture)return;
- const id=e.target.closest('[data-item]')?.dataset.item,wasSelected=selected.size===1&&selected.has(id);
+ const id=itemAtTarget(e.target),wasSelected=selected.size===1&&selected.has(id);
  $('workspace').focus({preventScroll:true});flushText();lastPointerItem=id;
  if(!id){
   const start=point(e);lastTap=null;
@@ -962,25 +1072,36 @@ $('workspace').onpointerdown=e=>{
   const hit=textPointerPosition(group,i,e.clientX,e.clientY);
   if(wasSelected||hit.onText)caret=hit.offset;
  }
- if(!selected.has(id))selected=new Set([id]);renderInspector();renderLayers();renderToolbar();renderStage();syncAssetSelection(isMediaItem(i)?i.assetId:undefined);
+ if(!selected.has(id)){
+  selected=new Set([id]);renderInspector();renderLayers();renderToolbar();renderStage();syncAssetSelection(isMediaItem(i)?i.assetId:undefined);
+ }
  if(i.locked)return;
  const start=point(e),resize=!!e.target.dataset.resize;
  const reopenChart=i.type==='html'&&!resize&&lastTap?.id===id&&e.timeStamp-lastTap.time<500&&Math.abs(start.x-lastTap.x)+Math.abs(start.y-lastTap.y)<5;
  lastTap={id,time:e.timeStamp,...start};
+ const targets=chosen().filter(item=>!item.locked&&!item.hidden);
  gesture={mode:resize?'resize':'move',pointerId:e.pointerId,handle:e.target.dataset.resizeHandle||'se',id,start,
-  items:chosen().filter(item=>!item.locked&&!item.hidden).map(item=>({...item})),before:snapshot(),moved:false,
+  items:targets.map(item=>({...item})),targets:new Map(targets.map(item=>[item.id,item])),applied:new Map(),before:null,moved:false,
+  project,slideId:project.activeSlideId,revision:editRevision,
   reopenChart,caret,clientX:e.clientX,clientY:e.clientY};
  $('stage').setPointerCapture(e.pointerId);e.preventDefault();
 };
 $('workspace').onpointermove=e=>{
  if(!gesture||e.pointerId!==gesture.pointerId)return;
  if(gesture.mode==='select'){updateMarquee(e);return;}
+ if(isObjectGesture()&&!objectGestureCurrent()){cancelObjectGesture();return;}
  if(gesture.caret!=null&&!gesture.moved&&Math.hypot(e.clientX-gesture.clientX,e.clientY-gesture.clientY)<3)return;
- const p=point(e),dx=p.x-gesture.start.x,dy=p.y-gesture.start.y;if(Math.abs(dx)+Math.abs(dy)<.2)return;gesture.moved=true;
+ const p=point(e),dx=p.x-gesture.start.x,dy=p.y-gesture.start.y;if(Math.abs(dx)+Math.abs(dy)<.2)return;
+ gesture.before??=snapshot();gesture.moved=true;
  if(gesture.mode==='arrow-point'){const i=byId(gesture.id);Object.assign(i,structuredClone(gesture.original));moveArrowPoint(i,gesture.index,p);}
  else if(gesture.mode==='move'){const delta=guideEditor.snap(selectionBounds(gesture.items),dx,dy,e.altKey);for(const orig of gesture.items){const i=byId(orig.id);i.x=orig.x+delta.dx;i.y=orig.y+delta.dy;}}
  else{const orig=gesture.items.find(i=>i.id===gesture.id);
  Object.assign(byId(orig.id),resizeItem(orig,gesture.handle,dx,dy,{free:e.shiftKey}));
+ }
+ if(isObjectGesture())for(const original of gesture.items){
+  if(gesture.mode==='resize'&&original.id!==gesture.id)continue;
+  const item=byId(original.id),keys=gesture.mode==='move'?['x','y']:['x','y','width','height'];
+  gesture.applied.set(original.id,Object.fromEntries(keys.map(key=>[key,item[key]])));
  }
  if(gesture.mode==='move'){
   // Movement only changes the outer transform. Preserve filters, decoded images,
@@ -994,6 +1115,7 @@ $('workspace').onpointermove=e=>{
 };
 function endGesture(e){
  if(!gesture||e.pointerId!==gesture.pointerId)return;
+ if(isObjectGesture()&&!objectGestureCurrent()){cancelObjectGesture();return;}
  if(gesture.mode==='arrow-point'&&e.type!=='pointerup'){project=gesture.before;restoreSlideSelection(project);releaseGesture();render();return;}
  if(gesture.mode==='select'){
   if(e.type==='pointerup')updateMarquee(e);
@@ -1001,21 +1123,23 @@ function endGesture(e){
  }
  const tapped=!gesture.moved&&e.type==='pointerup',item=byId(gesture.id),{reopenChart,caret}=gesture;
  if(gesture.moved){
-  try{validateDeck(project);record(gesture.before);}
-  catch(error){project=gesture.before;restoreSlideSelection(project);status(error.message,true);}
+  try{validateDeck(project);record(gesture.before,project.activeSlideId);}
+  catch(error){if(isObjectGesture()){cancelObjectGesture(error.message);return;}project=gesture.before;restoreSlideSelection(project);status(error.message,true);}
   lastTap=null;
- }releaseGesture();render();
+ }
+ const moved=gesture.moved;releaseGesture();if(moved)render();
  // Redrawing selection hit targets can suppress the browser's dblclick event.
  if(tapped&&reopenChart){lastTap=null;openHTMLChart(item);}
  else if(tapped&&caret!=null)editCanvasText(item,{offset:caret});
 }
 $('workspace').onpointerup=endGesture;$('workspace').onpointercancel=endGesture;
-$('stage').onlostpointercapture=e=>{if(gesture?.mode==='select'&&e.pointerId===gesture.pointerId)finishMarquee(true);else if(gesture?.mode==='arrow-point')endGesture(e);};
-window.addEventListener('blur',()=>{if(gesture?.mode==='select')finishMarquee(true);else if(gesture?.mode==='arrow-point')endGesture({type:'cancel',pointerId:gesture.pointerId});});
+$('stage').onlostpointercapture=e=>{if(gesture?.mode==='select'&&e.pointerId===gesture.pointerId)finishMarquee(true);else if(gesture?.mode==='arrow-point'||isObjectGesture())endGesture(e);};
+window.addEventListener('blur',()=>{if(gesture?.mode==='select')finishMarquee(true);else if(gesture?.mode==='arrow-point'||isObjectGesture())endGesture({type:'cancel',pointerId:gesture.pointerId});});
 $('stage').ondblclick=e=>{
  if(e.target.closest('#canvas-text-editor,[data-guide],[data-resize],[data-text-border]'))return;
- const i=byId(e.target.closest('[data-item]')?.dataset.item||lastPointerItem);
+ const i=byId(itemAtTarget(e.target)||lastPointerItem);
  if(i?.type==='html'){openHTMLChart(i);return;}
+ if(i?.type==='image'&&isHTMLFigure(assetById(i.assetId))){editHTMLFigure(i);return;}
  if(i?.type==='image'&&editableSVGAsset(assetById(i.assetId))){editSVG(i);return;}
  if(i?.type==='text'&&!i.locked&&selected.size<=1){
   const group=$('stage').querySelector(`[data-item="${CSS.escape(i.id)}"]`);
@@ -1043,8 +1167,8 @@ function positionShapesMenu(){
 $('shapes-menu').addEventListener('toggle',event=>{if(event.newState==='open')positionShapesMenu();});
 $('shapes-menu').addEventListener('keydown',event=>event.stopPropagation());
 window.addEventListener('resize',()=>{if($('shapes-menu').matches(':popover-open'))positionShapesMenu();});
-function undoEdit(){const keepSlideFocus=slideClipboardTarget(document.activeElement);flushText();if(!undoStack.length)return;redoStack.push(snapshot());project=undoStack.pop();restoreSlideSelection(project);selected.clear();changed();render();fit();if(keepSlideFocus)focusCurrentSlide();status('Undone');}
-function redoEdit(){const keepSlideFocus=slideClipboardTarget(document.activeElement);flushText();if(!redoStack.length)return;undoStack.push(snapshot());project=redoStack.pop();restoreSlideSelection(project);selected.clear();changed();render();fit();if(keepSlideFocus)focusCurrentSlide();status('Redone');}
+function undoEdit(){settleObjectGesture();const keepSlideFocus=slideClipboardTarget(document.activeElement);flushText();if(!undoStack.length)return;redoStack.push(snapshot());project=undoStack.pop();restoreSlideSelection(project);selected.clear();changed();render();fit();if(keepSlideFocus)focusCurrentSlide();status('Undone');}
+function redoEdit(){settleObjectGesture();const keepSlideFocus=slideClipboardTarget(document.activeElement);flushText();if(!redoStack.length)return;undoStack.push(snapshot());project=redoStack.pop();restoreSlideSelection(project);selected.clear();changed();render();fit();if(keepSlideFocus)focusCurrentSlide();status('Redone');}
 $('undo').onclick=undoEdit;$('redo').onclick=redoEdit;
 $('duplicate').onclick=()=>{if(!selected.size)return;change(()=>{const copies=chosen().filter(i=>!i.locked).map(i=>({...i,...cloneShape(i),...(i.crop?{crop:{...i.crop}}:{}),id:uid(),name:i.name+' copy',x:i.x+20,y:i.y+20}));slide().items.push(...copies);selected=new Set(copies.map(i=>i.id));});};
 $('delete-item').onclick=()=>{if(!selected.size)return;change(()=>{slide().items=slide().items.filter(i=>!selected.has(i.id)||i.locked);selected=new Set(chosen().map(i=>i.id));});};
@@ -1067,7 +1191,7 @@ for(const axis of ['x','y']){
  $('distribute-'+axis).onclick=()=>layout({op:'distribute',axis});
  $('space-'+axis).onclick=()=>{try{const gap=readMeasurement($('layout-gap'),measurementUnit);if(gap<0)throw new Error('Gap must be zero or greater.');layout({op:'distribute',axis,gap});}catch(error){status(error.message,true);}};
 }
-$('project-name').oninput=e=>{if(!pendingText)pendingText=snapshot();project.name=e.target.value.trim().slice(0,120)||'Untitled figure';changed();};$('project-name').onblur=()=>{flushText();renderToolbar();};
+$('project-name').oninput=e=>{const value=e.target.value;settleObjectGesture();e.target.value=value;if(!pendingText)pendingText=snapshot();project.name=value.trim().slice(0,120)||'Untitled figure';changed(false);};$('project-name').onblur=()=>{flushText();renderToolbar();};
 $('canvas-preset').onchange=e=>{const presets={single:[321,242],double:[680,454],square:[454,454]};if(presets[e.target.value])for(const [j,key] of ['width','height'].entries())showMeasurement($('canvas-'+key),presets[e.target.value][j],measurementUnit);};
 $('apply-canvas').onclick=()=>{try{const w=readMeasurement($('canvas-width'),measurementUnit),h=readMeasurement($('canvas-height'),measurementUnit);if(w<64||h<64||w>8000||h>8000)throw new Error(`Canvas dimensions must be between ${formatMeasurement(64,measurementUnit)} and ${formatMeasurement(8000,measurementUnit)} ${measurementUnit}.`);change(()=>slide().canvas={width:w,height:h,background:$('canvas-background').value});fit();}catch(error){status(error.message,true);}};
 showMeasurement($('layout-gap'),16,measurementUnit);
@@ -1090,7 +1214,7 @@ for(const name of ['precision','guides']){
  // Let Save/Undo shortcuts reach the app; normal form keys never operate on objects.
  window.addEventListener('resize',()=>{if(menu.matches(':popover-open'))position();});
 }
-function setZoom(z){zoom=Math.max(.1,Math.min(3,z));renderStage();}
+function setZoom(z){const next=Math.max(.1,Math.min(3,z));if(next===zoom)return;zoom=next;renderStage();}
 function fit(){
  if(inSlideSorter()){fitAfterSorter=true;return;}
  const r=$('workspace').getBoundingClientRect();setZoom(Math.min((r.width-100)/slide().canvas.width,(r.height-100)/slide().canvas.height,1));
@@ -1138,7 +1262,7 @@ async function saveProject(saveAs=false,{automatic=false,agent=false}={}){
  if(fileOperation){if(agent)throw new Error('A file operation is in progress. Read state and retry.');return;}
  if(agent&&!projectFileHandle)throw new Error('No project file is authorized. Click Save in the page once to choose a file, or save destination=draft for browser recovery only.');
  if(automatic&&(!autosaveEnabled||!dirty||!projectFileHandle||autosaveError))return;
- if(!automatic)flushText();
+ if(!automatic){settleObjectGesture();flushText();}
  clearTimeout(autosaveTimer);
  const savedProject=snapshot(),epoch=projectEpoch,revision=editRevision;
  fileOperation=true;autosaveWriting=automatic;renderFileActions();if(!automatic)status('Saving project…');
@@ -1169,6 +1293,7 @@ $('save-project').onclick=()=>saveProject();
 $('save-project-as').onclick=()=>saveProject(true);
 function replaceProject(p,{handle=null,name='',revision=null}={}){
  const next=validateDeck(p);
+ settleObjectGesture();
  clearTimeout(autosaveTimer);clearTimeout(draftTimer);
  project=next;projectEpoch++;editRevision=0;projectFileHandle=handle;projectFileName=name;projectFileRevision=revision;projectFilePersistent=true;assetOperations.clear();relinkTarget=null;
  autosaveError=null;draftError=null;draftRevision=-1;lastFileSave=null;
@@ -1451,8 +1576,8 @@ document.addEventListener('keydown',e=>{
  if(mod&&e.key.toLowerCase()==='s'){e.preventDefault();if(!e.repeat)$(e.shiftKey?'save-project-as':'save-project').click();return;}
  if(input||$('export-dialog').open)return;
  if(e.key==='Enter'&&e.target.closest?.('#workspace')&&selected.size===1&&chosen()[0]?.type==='text'&&!chosen()[0].locked){e.preventDefault();editCanvasText(chosen()[0]);}
- else if(mod&&e.key.toLowerCase()==='z'){e.preventDefault();$(e.shiftKey?'redo':'undo').click();}
- else if(mod&&e.key.toLowerCase()==='y'){e.preventDefault();$('redo').click();}
+ else if(mod&&e.key.toLowerCase()==='z'){e.preventDefault();(e.shiftKey?redoEdit:undoEdit)();}
+ else if(mod&&e.key.toLowerCase()==='y'){e.preventDefault();redoEdit();}
  else if(mod&&e.key.toLowerCase()==='d'){e.preventDefault();$(slideClipboardTarget(e.target)?'duplicate-slide':'duplicate').click();}
  else if(mod&&e.key.toLowerCase()==='a'){
   e.preventDefault();
@@ -1464,34 +1589,59 @@ document.addEventListener('keydown',e=>{
  else if(!inSlideSorter()&&['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)&&selected.size){e.preventDefault();const n=e.shiftKey?10:1;change(()=>{for(const i of chosen().filter(i=>!i.locked)){if(e.key==='ArrowLeft')i.x-=n;if(e.key==='ArrowRight')i.x+=n;if(e.key==='ArrowUp')i.y-=n;if(e.key==='ArrowDown')i.y+=n;}});}
 });
 async function openDraftDB(){return new Promise((resolve,reject)=>{const r=indexedDB.open('figure-editor-drafts',1);r.onupgradeneeded=()=>r.result.createObjectStore('drafts');r.onerror=()=>reject(r.error);r.onsuccess=()=>resolve(r.result);});}
-function writeDraftRecord(savedProject,file){
+function writeDraftRecord(savedProject,file,tokens){
  return new Promise((resolve,reject)=>{
   const tx=draftDb.transaction('drafts','readwrite'),store=tx.objectStore('drafts');
-  tx.oncomplete=resolve;tx.onerror=tx.onabort=()=>reject(tx.error||new Error('Draft transaction aborted.'));
-  try{store.put(savedProject,'current');store.put(file,'current-file');}
-  catch(error){tx.abort();reject(error);}
+  let result={persistent:true};
+  tx.oncomplete=()=>resolve(result);tx.onerror=tx.onabort=()=>reject(tx.error||new Error('Draft transaction aborted.'));
+  const request=store.get('current-file');
+  request.onsuccess=()=>{
+   const stored=request.result,ownsContent=stored?.draftContentToken===tokens.content;
+   const commit=hasContent=>{
+    if(hasContent&&stored.draftFileToken===tokens.file){result={persistent:!file.handle||!!stored.handle};return;}
+    try{
+     if(!hasContent)store.put(savedProject,'current');
+     store.put({...file,draftContentToken:tokens.content,draftFileToken:tokens.file},'current-file');
+    }catch(error){tx.abort();reject(error);}
+   };
+   // count() checks existence without cloning the large project back into JS.
+   if(ownsContent){const content=store.count('current');content.onsuccess=()=>commit(content.result>0);}
+   else commit(false);
+  };
  });
 }
-function saveDraft(){
- clearTimeout(draftTimer);
- // Capture together before awaiting storage; keep older autosaves ahead of newer ones.
- const savedProject=snapshot(),file={handle:projectFileHandle,name:projectFileName,revision:projectFileRevision,dirty},epoch=projectEpoch,revision=editRevision;
- draftWrites=draftWrites.then(async()=>{
-  // Keep the last recoverable draft if a transient or invalid edit slips through.
-  const validProject=validateDeck(savedProject);
+const draftPersistence=createDraftWriter({
+ validate:validateDeck,
+ async write(savedProject,file,tokens){
   draftDb??=await openDraftDB();
   try{
-   await writeDraftRecord(validProject,file);
-   if(epoch===projectEpoch&&file.handle===projectFileHandle)projectFilePersistent=true;
+   return await writeDraftRecord(savedProject,file,tokens);
   }catch(error){
    if(error.name!=='DataCloneError'||!file.handle)throw error;
-   await writeDraftRecord(validProject,{...file,handle:null});
-   if(epoch===projectEpoch&&file.handle===projectFileHandle)projectFilePersistent=false;
+   await writeDraftRecord(savedProject,{...file,handle:null},tokens);return {persistent:false};
   }
-  if(epoch===projectEpoch){draftRevision=revision;draftError=null;}
-  renderFileActions();
- }).catch(error=>{if(epoch===projectEpoch){draftError=error.message;renderAutosave();status('Could not save the local draft. Use Save to keep a project file. '+error.message,true);}});
- return draftWrites;
+ },
+});
+let deferredDraft=null;
+const draftFile=()=>({handle:projectFileHandle,name:projectFileName,revision:projectFileRevision,dirty});
+const hasTransientDraftGeometry=()=>gesture&&gesture.mode!=='select';
+function saveDraft(){
+ clearTimeout(draftTimer);
+ // Drag geometry is transient until pointerup validates it and advances revision.
+ // Guide and marquee previews do not mutate the project and can save immediately.
+ // Keep the previous recoverable draft; a separate timer survives changed().
+ if(hasTransientDraftGeometry()){
+  if(!deferredDraft)deferredDraft=new Promise(resolve=>{
+   const retry=()=>{if(hasTransientDraftGeometry()){setTimeout(retry,100);return;}deferredDraft=null;resolve(saveDraft());};
+   setTimeout(retry,100);
+  });
+  return deferredDraft;
+ }
+ const file=draftFile(),epoch=projectEpoch,revision=editRevision;
+ const current=()=>epoch===projectEpoch&&revision===editRevision&&sameDraftFile(file,draftFile());
+ return draftPersistence.save({epoch,revision,file,capture:snapshot}).then(result=>{
+  if(current()){projectFilePersistent=result.persistent;draftRevision=revision;draftError=null;renderFileActions();}
+ }).catch(error=>{if(current()){draftError=error.message;renderAutosave();status('Could not save the local draft. Use Save to keep a project file. '+error.message,true);}});
 }
 async function loadDraft(){
  const epoch=projectEpoch,revision=editRevision;

@@ -10,6 +10,8 @@
 !/app.js
 !/canvas-text-geometry.js
 !/render-cache.js
+!/slide-preview-cache.js
+!/draft-persistence.js
 !/automation.js
 !/export-check.js
 !/automation_bridge.py
@@ -51,6 +53,12 @@
 !/pptx_import.py
 !/video.js
 !/html-chart.js
+!/html-import.js
+!/html-render.js
+!/html-freeze.js
+!/html-figure-model.js
+!/html-figure-editor.js
+!/html_import.py
 !/pdf.js
 !/pdf_text.py
 !/windows.js
@@ -77,12 +85,17 @@
 !/tests/video.html
 !/tests/video-browser.js
 !/tests/html-chart-browser.mjs
+!/tests/html-import-browser.mjs
+!/tests/html-figure-editor-browser.mjs
+!/tests/html-import-renderer.py
+!/tests/test_html_import.py
 !/tests/fixtures/
 /tests/fixtures/*
 !/tests/fixtures/video.mp4
 !/tests/fixtures/video-poster.png
 !/tests/fixtures/README.md
 !/tests/fixtures/interactive-chart.html
+!/tests/fixtures/html-figures.html
 !/tests/pdf.html
 !/tests/pdf-browser.js
 !/tests/locate.html
@@ -235,6 +248,9 @@
 !/tests/precision-guides-browser.mjs
 !/tests/interaction-performance-browser.mjs
 !/tests/render-cache-browser.mjs
+!/tests/selection-performance-browser.mjs
+!/tests/draft-performance-browser.mjs
+!/tests/gesture-boundary-browser.mjs
 
 # Source-faithful PDF rendering with local PowerPoint.
 !/powerpoint_pdf.py

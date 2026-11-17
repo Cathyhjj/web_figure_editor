@@ -147,6 +147,34 @@ class PptxImportTests(unittest.TestCase):
                 result = import_pptx({**fixture([slide(content)]), 'slide':1})
                 self.assertEqual(result['items'][0]['paragraphs'][0]['runs'][0]['color'], expected)
 
+    def test_saturation_modulation_preserves_hsl_transform_order_and_alpha(self):
+        cases = [
+            ('D2D4F3', '<a:shade val="100000"/><a:satMod val="115000"/>', '#d0d2f5'),
+            ('FF0000', '<a:satMod val="50000"/>', '#bf4040'),
+            ('FF0000', '<a:lumMod val="50000"/><a:satMod val="50000"/><a:alpha val="50000"/>', '#60202080'),
+            ('800000', '<a:satMod val="200000"/><a:tint val="50000"/>', '#c08080'),
+            ('800000', '<a:tint val="50000"/><a:satMod val="200000"/>', '#e06060'),
+            ('FF0000', '<a:lumOff val="100000"/><a:satMod val="50000"/><a:lumMod val="50000"/>', '#bf4040'),
+        ]
+        for source, transforms, expected in cases:
+            with self.subTest(source=source, transforms=transforms):
+                content = text_shape().replace('<a:srgbClr val="123456"/>',
+                    f'<a:srgbClr val="{source}">{transforms}</a:srgbClr>')
+                result = import_pptx({**fixture([slide(content)]), 'slide':1})
+                self.assertEqual(result['items'][0]['paragraphs'][0]['runs'][0]['color'], expected)
+
+    def test_saturation_modulated_gradient_matches_native_powerpoint_endpoint(self):
+        gradient = ('<a:gradFill><a:gsLst><a:gs pos="0"><a:srgbClr val="FFFFFF"/></a:gs>'
+                    '<a:gs pos="72000"><a:srgbClr val="D2D4F3"><a:shade val="100000"/>'
+                    '<a:satMod val="115000"/></a:srgbClr></a:gs></a:gsLst>'
+                    '<a:path path="circle"><a:fillToRect l="50000" t="50000" r="50000" b="50000"/>'
+                    '</a:path></a:gradFill>')
+        content = text_shape(geometry=xfrm()+'<a:prstGeom prst="ellipse"/>'+gradient)
+        result = import_pptx({**fixture([slide(content)]), 'slide':1})
+        stop = result['items'][0]['fillGradient']['stops'][1]
+        # Matches the native PDF's sampled shading endpoint, not an RGB multiplier.
+        self.assertEqual(stop, {'offset':.72, 'color':'#d0d2f5'})
+
     def test_luminance_clamps_each_step_without_losing_hue_at_endpoints(self):
         cases = [
             ('<a:lumOff val="100000"/><a:lumMod val="50000"/>', '#ff0000'),
@@ -307,6 +335,42 @@ class PptxImportTests(unittest.TestCase):
         self.assertAlmostEqual(first['x'],250)
         self.assertAlmostEqual(first['y'],150)
 
+    def test_group_geometry_does_not_rescale_physical_text_metrics(self):
+        xf = (f'<a:xfrm rot="5400000"><a:off x="{100*EMU}" y="{200*EMU}"/>'
+              f'<a:ext cx="{100*EMU}" cy="{100*EMU}"/><a:chOff x="0" y="0"/>'
+              f'<a:chExt cx="{400*EMU}" cy="{200*EMU}"/></a:xfrm>')
+        label = text_shape(geometry=xfrm(0, 0, 300, 100)).replace(
+            '<a:bodyPr lIns="0" tIns="0" rIns="0" bIns="0"/>',
+            f'<a:bodyPr lIns="{10*EMU}" tIns="{5*EMU}" rIns="{8*EMU}" bIns="0">'
+            '<a:normAutofit fontScale="75000"/></a:bodyPr>').replace(
+            '<a:p><a:r>', f'<a:p><a:pPr marL="{4*EMU}" marR="{2*EMU}" indent="{3*EMU}">'
+            '<a:lnSpc><a:spcPts val="2400"/></a:lnSpc></a:pPr><a:r>')
+        group = f'<p:grpSp><p:grpSpPr>{xf}</p:grpSpPr>{label}</p:grpSp>'
+        item = import_pptx({**fixture([slide(group)]), 'slide': 1})['items'][0]
+        self.assertEqual((item['width'], item['height']), (75, 50))
+        self.assertEqual(item['paragraphs'][0]['runs'][0]['fontSize'], 18)
+        self.assertEqual(item['insets'], {'left': 10, 'top': 5, 'right': 8, 'bottom': 0})
+        self.assertEqual(item['paragraphs'][0]['marginLeft'], 4)
+        self.assertEqual(item['paragraphs'][0]['marginRight'], 2)
+        self.assertEqual(item['paragraphs'][0]['indent'], 3)
+        self.assertEqual(item['scaleY'], 1)
+
+    def test_group_scaling_preserves_physical_shape_and_picture_stroke_width(self):
+        xf = (f'<a:xfrm><a:off x="0" y="0"/><a:ext cx="{100*EMU}" cy="{100*EMU}"/>'
+              f'<a:chOff x="0" y="0"/><a:chExt cx="{400*EMU}" cy="{200*EMU}"/></a:xfrm>')
+        border = '<a:ln w="38100"><a:solidFill><a:srgbClr val="123456"/></a:solidFill></a:ln>'
+        content = text_shape(text='').replace('</p:spPr>', border + '</p:spPr>')
+        content += picture().replace('</p:spPr>', border + '</p:spPr>')
+        result = import_pptx({**fixture([slide(f'<p:grpSp><p:grpSpPr>{xf}</p:grpSpPr>{content}</p:grpSp>')]), 'slide': 1})
+        self.assertEqual([item['strokeWidth'] for item in result['items']], [4, 4])
+        self.assertEqual([item['width'] for item in result['items']], [25, 60])
+
+    def test_empty_mirrored_text_does_not_report_missing_visible_text(self):
+        for value in ('', 'Visible label'):
+            with self.subTest(value=value):
+                result = import_pptx({**fixture([slide(text_shape(text=value, geometry=xfrm(attrs='flipH="1"')))]), 'slide': 1})
+                self.assertEqual(any('Mirrored text' in warning for warning in result['warnings']), bool(value))
+
     def test_external_images_and_charts_report_omissions(self):
         chart=f'<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr name="Chart"/></p:nvGraphicFramePr><p:xfrm><a:off x="0" y="0"/><a:ext cx="{EMU}" cy="{EMU}"/></p:xfrm></p:graphicFrame>'
         extra={'ppt/slides/_rels/slide1.xml.rels':relations([('img','image','https://example.invalid/image.png','TargetMode="External"')])}
@@ -328,6 +392,162 @@ class PptxImportTests(unittest.TestCase):
         pkg=Package(base64.b64decode(fixture()['data']))
         with mock.patch.object(pkg.zip,'read',side_effect=zlib.error('bad deflate')),self.assertRaises(PptxImportError):pkg.read('ppt/presentation.xml')
         pkg.zip.close()
+
+
+# Saved SmartArt layouts are synthetic: no private deck or Office installation.
+def smartart_transform(x, y, w, h, attrs='', prefix='a'):
+    return (f'<{prefix}:xfrm {attrs}><a:off x="{x*EMU}" y="{y*EMU}"/>'
+            f'<a:ext cx="{w*EMU}" cy="{h*EMU}"/></{prefix}:xfrm>')
+
+
+SMARTART_HEADER = ' '.join(f'xmlns:{key}="{value}"' for key, value in NS.items())
+
+
+def smartart_relationships(entries):
+    return ('<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            + ''.join(f'<Relationship Id="{rid}" Type="{NS["r"]}/{kind}" Target="{target}" {attrs}/>'
+                      for rid, kind, target, attrs in entries) + '</Relationships>')
+
+
+def smartart_cached_shape(text='Editable node', with_text_transform=True):
+    text_xf = smartart_transform(50, 40, 60, 60).replace('a:xfrm', 'dsp:txXfrm') if with_text_transform else ''
+    return (f'<dsp:sp modelId="node-1"><dsp:nvSpPr><dsp:cNvPr id="0" name=""/>'
+            f'<dsp:cNvSpPr/></dsp:nvSpPr><dsp:spPr>{smartart_transform(40,30,80,80)}'
+            '<a:prstGeom prst="ellipse"/><a:gradFill><a:gsLst>'
+            '<a:gs pos="0"><a:srgbClr val="FFFFFF"/></a:gs>'
+            '<a:gs pos="100000"><a:srgbClr val="7777AA"/></a:gs>'
+            '</a:gsLst><a:path path="circle"><a:fillToRect l="50000" t="50000" r="50000" b="50000"/>'
+            '</a:path></a:gradFill><a:ln><a:noFill/></a:ln></dsp:spPr>'
+            '<dsp:txBody><a:bodyPr anchor="ctr" lIns="0" tIns="0" rIns="0" bIns="0"/>'
+            '<a:lstStyle/><a:p><a:pPr algn="ctr"/><a:r><a:rPr sz="1200">'
+            '<a:latin typeface="Arial"/><a:solidFill><a:srgbClr val="123456"/></a:solidFill>'
+            f'</a:rPr><a:t>{text}</a:t></a:r></a:p></dsp:txBody>{text_xf}</dsp:sp>')
+
+
+def smartart_fixture(*, group=False, frame_attrs='', overrides=None, data_owner=False, body=None):
+    frame = ('<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="7" name="Diagram 7"/>'
+             f'</p:nvGraphicFramePr>{smartart_transform(200,100,400,300,frame_attrs,"p")}'
+             f'<a:graphic><a:graphicData uri="{NS["dgm"]}"><dgm:relIds r:dm="data"/>'
+             '</a:graphicData></a:graphic></p:graphicFrame>')
+    if group:
+        group_xf = smartart_transform(100,200,400,150).replace('</a:xfrm>',
+            f'<a:chOff x="0" y="0"/><a:chExt cx="{800*EMU}" cy="{600*EMU}"/></a:xfrm>')
+        frame = f'<p:grpSp><p:grpSpPr>{group_xf}</p:grpSpPr>{frame}</p:grpSp>'
+    slide_rels = [('data', 'diagramData', '../diagrams/data.xml', '')]
+    draw_rel = ('drawing', 'diagramDrawing', '../diagrams/layout.xml', '')
+    if not data_owner:
+        slide_rels.append(draw_rel)
+    parts = {
+        'ppt/presentation.xml': f'<p:presentation {SMARTART_HEADER}><p:sldIdLst><p:sldId id="256" r:id="slide"/>'
+            f'</p:sldIdLst><p:sldSz cx="{960*EMU}" cy="{640*EMU}"/></p:presentation>',
+        'ppt/_rels/presentation.xml.rels': smartart_relationships([('slide','slide','slides/slide1.xml','')]),
+        'ppt/slides/slide1.xml': f'<p:sld {SMARTART_HEADER}><p:cSld><p:spTree>{frame}</p:spTree></p:cSld></p:sld>',
+        'ppt/slides/_rels/slide1.xml.rels': smartart_relationships(slide_rels),
+        'ppt/diagrams/data.xml': f'<dgm:dataModel {SMARTART_HEADER}><dgm:extLst><a:ext uri="{NS["dsp"]}">'
+            '<dsp:dataModelExt relId="drawing"/></a:ext></dgm:extLst></dgm:dataModel>',
+        'ppt/diagrams/layout.xml': f'<dsp:drawing {SMARTART_HEADER}><dsp:spTree><dsp:nvGrpSpPr/>'
+            f'<dsp:grpSpPr/>{smartart_cached_shape() if body is None else body}</dsp:spTree></dsp:drawing>',
+    }
+    if data_owner:
+        parts['ppt/diagrams/_rels/data.xml.rels'] = smartart_relationships([draw_rel])
+    parts.update(overrides or {})
+    stream = io.BytesIO()
+    with zipfile.ZipFile(stream, 'w', zipfile.ZIP_DEFLATED) as archive:
+        for path, data in parts.items():
+            if data is not None:
+                archive.writestr(path, data)
+    return {'name': 'smartart.pptx', 'data': base64.b64encode(stream.getvalue()).decode(), 'slide': 1}
+
+
+class SmartArtImportTests(unittest.TestCase):
+    def test_hidden_cached_root_does_not_reveal_its_children(self):
+        root = ('<dsp:nvGrpSpPr><dsp:cNvPr id="1" name="Hidden diagram" hidden="1"/>'
+                '<dsp:cNvGrpSpPr/></dsp:nvGrpSpPr><dsp:grpSpPr/>')
+        drawing = f'<dsp:drawing {SMARTART_HEADER}><dsp:spTree>{root}{smartart_cached_shape()}</dsp:spTree></dsp:drawing>'
+        result = import_pptx(smartart_fixture(overrides={'ppt/diagrams/layout.xml':drawing}))
+        self.assertEqual(result['items'], [])
+        self.assertFalse(any('omitted' in warning for warning in result['warnings']))
+
+    def test_cached_root_effects_without_transform_are_preserved_as_a_group(self):
+        root = ('<dsp:nvGrpSpPr><dsp:cNvPr id="1" name="Diagram effects"/></dsp:nvGrpSpPr>'
+                '<dsp:grpSpPr><a:effectLst><a:outerShdw blurRad="63500" dist="38100" dir="2700000">'
+                '<a:srgbClr val="000000"><a:alpha val="50000"/></a:srgbClr></a:outerShdw>'
+                '<a:softEdge rad="25400"/></a:effectLst></dsp:grpSpPr>')
+        drawing = f'<dsp:drawing {SMARTART_HEADER}><dsp:spTree>{root}{smartart_cached_shape()}</dsp:spTree></dsp:drawing>'
+        result = import_pptx(smartart_fixture(overrides={'ppt/diagrams/layout.xml':drawing}))
+        self.assertEqual(len(result['items']), 1)
+        group = result['items'][0]
+        self.assertEqual(group['type'], 'shadowGroup')
+        self.assertEqual((group['x'],group['y'],group['width'],group['height']), (200,100,400,300))
+        self.assertEqual((group['shadow']['blur'],group['shadow']['distance']), (5,3))
+        self.assertEqual(group['softEdge'], 2)
+        self.assertEqual([item['type'] for item in group['items']], ['shape','textBlock'])
+        self.assertEqual((group['items'][0]['x'],group['items'][0]['y']), (40,30))
+        self.assertEqual((group['items'][1]['x'],group['items'][1]['y']), (50,40))
+
+    def test_saved_layout_imports_editable_geometry_and_separate_text_rectangle(self):
+        result = import_pptx(smartart_fixture())
+        self.assertEqual([item['type'] for item in result['items']], ['shape', 'textBlock'])
+        shape, text = result['items']
+        self.assertEqual((shape['x'], shape['y'], shape['width'], shape['height']), (240,130,80,80))
+        self.assertEqual(shape['fillGradient']['type'], 'radial')
+        self.assertEqual((text['x'], text['y'], text['width'], text['height']), (250,140,60,60))
+        self.assertEqual(text['anchor'], 'ctr')
+        run = text['paragraphs'][0]['runs'][0]
+        self.assertEqual((run['text'], run['fontSize'], run['color']), ('Editable node',16,'#123456'))
+        self.assertEqual(result['media'], [])
+        self.assertTrue(any('automatic SmartArt layout is not retained' in w for w in result['warnings']))
+        self.assertFalse(any('omitted' in w for w in result['warnings']))
+
+    def test_group_scaling_is_not_applied_twice_to_cached_diagram(self):
+        result = import_pptx(smartart_fixture(group=True))
+        shape, text = result['items']
+        self.assertEqual((shape['x'], shape['y'], shape['width'], shape['height']), (240,255,80,80))
+        self.assertEqual((text['x'], text['y'], text['width'], text['height']), (250,265,60,60))
+        self.assertEqual(text['paragraphs'][0]['runs'][0]['fontSize'],16)
+
+    def test_frame_rotation_and_reflection_are_retained(self):
+        for attrs, expected in [('rot="5400000"',(440,90,90)), ('flipH="1"',(480,130,180))]:
+            with self.subTest(attrs=attrs):
+                shape = import_pptx(smartart_fixture(frame_attrs=attrs))['items'][0]
+                self.assertAlmostEqual(shape['x'],expected[0])
+                self.assertAlmostEqual(shape['y'],expected[1])
+                self.assertAlmostEqual(abs(shape['rotation']),expected[2])
+                self.assertEqual((shape['width'],shape['height']),(80,80))
+
+    def test_data_part_relationship_and_absent_text_transform_are_supported(self):
+        result = import_pptx(smartart_fixture(data_owner=True,body=smartart_cached_shape(with_text_transform=False)))
+        self.assertEqual(len(result['items']),2)
+        text = result['items'][1]
+        self.assertEqual((text['x'],text['y'],text['width'],text['height']),(240,130,80,80))
+
+    def test_missing_external_and_unsupported_layouts_are_reported(self):
+        variants = [
+            {'ppt/diagrams/data.xml':None},
+            {'ppt/diagrams/layout.xml':None},
+            {'ppt/slides/_rels/slide1.xml.rels':smartart_relationships([
+                ('data','diagramData','../diagrams/data.xml',''),
+                ('drawing','diagramDrawing','https://example.invalid/layout.xml','TargetMode="External"')])},
+            {'ppt/diagrams/layout.xml':f'<dsp:drawing {SMARTART_HEADER}><dsp:spTree><dsp:pic/></dsp:spTree></dsp:drawing>'},
+            {'ppt/diagrams/layout.xml':f'<p:spTree {SMARTART_HEADER}/>'},
+        ]
+        for overrides in variants:
+            with self.subTest(overrides=overrides):
+                result = import_pptx(smartart_fixture(overrides=overrides))
+                self.assertEqual(result['items'],[])
+                self.assertTrue(any('SmartArt was omitted:' in w for w in result['warnings']))
+
+    def test_multiple_saved_nodes_keep_order_and_independent_editable_text(self):
+        result=import_pptx(smartart_fixture(body=smartart_cached_shape('First')+smartart_cached_shape('Second')))
+        self.assertEqual([item['type'] for item in result['items']],['shape','textBlock','shape','textBlock'])
+        self.assertEqual([item['paragraphs'][0]['runs'][0]['text'] for item in result['items'] if item['type']=='textBlock'],['First','Second'])
+        self.assertEqual(len({item['id'] for item in result['items']}),4)
+
+    def test_layout_object_limit_still_applies(self):
+        with self.assertRaises(PptxImportError) as caught:
+            import_pptx(smartart_fixture(body=smartart_cached_shape()*1001))
+        self.assertEqual(caught.exception.status,413)
+
 
 
 if __name__=='__main__':unittest.main()
