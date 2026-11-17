@@ -32,7 +32,14 @@ MAX_IMPORT_BYTES = 24 * 1024 * 1024
 MAX_CHECK_BYTES = 256 * 1024 * 1024
 PLACEMENT_FIELDS = {**{key: NUMBER for key in ("x", "y", "width", "height", "rotation", "opacity")},
                     "name": {"type": "string", "maxLength": 20000}}
-PROPERTIES = obj({**PLACEMENT_FIELDS, "fontSize": NUMBER,
+STROKE_FIELDS = {"stroke": STRING, "strokeWidth": {**NUMBER, "minimum": 0, "maximum": 1000},
+                 "strokeOpacity": {**NUMBER, "minimum": 0, "maximum": 1}, "strokeDash": {"enum": ["solid", "dash", "dot"]}}
+SHAPE_FIELDS = {**STROKE_FIELDS, "fill": STRING, "fillOpacity": {**NUMBER, "minimum": 0, "maximum": 1},
+                "cornerRadius": {**NUMBER, "minimum": 0, "maximum": 0.5}}
+CANVAS = {**obj({"width": {**NUMBER, "minimum": 64, "maximum": 8000},
+                 "height": {**NUMBER, "minimum": 64, "maximum": 8000}, "background": STRING}), "minProperties": 1}
+SLIDE_FIELDS = {"name": {**STRING, "pattern": r"\S"}, "canvas": CANVAS}
+PROPERTIES = obj({**PLACEMENT_FIELDS, **SHAPE_FIELDS, "fontSize": NUMBER,
                   **{key: {"type": "string", "maxLength": 20000} for key in ("text", "fontFamily", "fontStyle", "color", "align")},
                   "fontWeight": {"enum": [400, 700, "400", "700"]}})
 TARGETS = {"slideId": STRING, "itemIds": {"type": "array", "items": STRING, "minItems": 1, "maxItems": 2000}}
@@ -52,11 +59,17 @@ SVG_PATCH = {"oneOf": [
     obj({"path": SVG_PATH, "attributes": SVG_ATTRIBUTES, **SVG_TEXT}, ["path", "attributes", *SVG_TEXT]),
 ]}
 OPERATIONS = {"oneOf": [
+    obj({"op": {"const": "add_slide"}, "slideId": {**STRING, "maxLength": 100, "pattern": r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$"},
+         **SLIDE_FIELDS}, ["op", "slideId"]),
+    obj({"op": {"const": "set_slide"}, "slideId": STRING, **SLIDE_FIELDS}, ["op", "slideId"]),
     obj({"op": {"const": "set"}, **TARGETS, "properties": PROPERTIES}, ["op", "slideId", "itemIds", "properties"]),
     obj({"op": {"const": "align"}, **TARGETS, "alignment": {"enum": ["left", "center", "right", "top", "middle", "bottom"]}}, ["op", "slideId", "itemIds", "alignment"]),
     obj({"op": {"const": "distribute"}, **TARGETS, "axis": {"enum": ["x", "y"]}, "gap": {"type": "number", "minimum": 0, "maximum": 100000}}, ["op", "slideId", "itemIds", "axis"]),
     obj({"op": {"const": "add_text"}, "slideId": STRING, "properties": PROPERTIES}, ["op", "slideId", "properties"]),
-    obj({"op": {"const": "place_asset"}, "slideId": STRING, "assetId": STRING, "properties": obj(PLACEMENT_FIELDS)}, ["op", "slideId", "assetId"]),
+    obj({"op": {"const": "add_shape"}, "slideId": STRING,
+         "shapeType": {"enum": ["rect", "roundRect", "ellipse", "line", "arrow", "doubleArrow"]},
+         "properties": obj({**PLACEMENT_FIELDS, **SHAPE_FIELDS})}, ["op", "slideId", "shapeType"]),
+    obj({"op": {"const": "place_asset"}, "slideId": STRING, "assetId": STRING, "properties": obj({**PLACEMENT_FIELDS, **STROKE_FIELDS})}, ["op", "slideId", "assetId"]),
     obj({"op": {"const": "swap_asset"}, "slideId": STRING, "itemId": STRING, "assetId": STRING}, ["op", "slideId", "itemId", "assetId"]),
     obj({"op": {"const": "duplicate"}, **TARGETS, "offsetX": NUMBER, "offsetY": NUMBER}, ["op", "slideId", "itemIds"]),
     obj({"op": {"const": "delete"}, **TARGETS}, ["op", "slideId", "itemIds"]),
@@ -77,7 +90,7 @@ def tool(name, description, schema, readonly=False):
 
 TOOLS = [
     tool("sessions", "List connected editor pages. Choose the exact session; never guess when multiple pages are open. Summary may lag; get_state reads live state.", obj({}), True),
-    tool("get_state", "Read live project/slide/object IDs, geometry, text, selection, revision, busy and save status. "
+    tool("get_state", "Read live project/slide/object IDs, geometry, text, shape fill/stroke styles, selection, revision, busy and save status. "
          "Assets are metadata only. Each asset's usedBy lists its placements across all slides. "
          "Use relativePath and fingerprint when available to identify the source. Defaults to the active slide. Pass slideId to inspect another slide.",
          obj({**SESSION, "slideId": STRING}, SESSION), True),
@@ -97,6 +110,12 @@ TOOLS = [
          obj({**SESSION, "slideId": STRING, "itemId": STRING, "offset": {"type": "integer", "minimum": 0},
               "limit": {"type": "integer", "minimum": 1, "maximum": 100}}, [*SESSION, "slideId", "itemId"]), True),
     tool("batch_edit", "Apply 1–200 operations atomically as one Undo step. Use the revision from get_state. "
+         "add_slide inserts and selects a blank slide after the active slide. Supply a NEW unique slideId (1–100 letters/digits/_/-, beginning with a letter/digit), "
+         "optional name and canvas {width,height,background}; omitted canvas fields inherit the active slide. Later operations in this batch can use that slideId. "
+         "set_slide changes name or partial canvas without moving/rescaling objects. Returns createdSlideIds and changedSlideIds. "
+         "add_shape creates editable rect, roundRect, ellipse, line, arrow or doubleArrow objects. "
+         "Set geometry and fill/stroke/strokeWidth/strokeDash/fillOpacity/strokeOpacity; cornerRadius (0–0.5) is for roundRect. "
+         "Line/arrow width or height may be zero. Use set for subsequent style edits; fill/stroke changes replace that gradient with a solid paint. "
          "place_asset adds a slide object linked to a project asset. Use an assetId from get_state.assets. "
          "Omit properties for the editor's Place defaults. Set only width or height to preserve media proportions, or both to stretch. Geometry uses CSS px. "
          "swap_asset replaces one unlocked image object's source with an existing project SVG or raster image. "
@@ -165,7 +184,7 @@ def validate(value, schema, path="arguments"):
         if len(value) < schema.get(lower, 0) or len(value) > schema.get(upper, float("inf")):
             raise ValueError(path + " has an invalid length.")
         if kind == "string" and "pattern" in schema and not re.search(schema["pattern"], value):
-            raise ValueError(path + " must contain a non-whitespace character.")
+            raise ValueError(path + " does not match the required pattern.")
         if kind == "array":
             for child in value:
                 validate(child, schema["items"], path + "[]")
@@ -397,7 +416,7 @@ class MCPServer:
             self.initialized = True
             result = {"protocolVersion": version, "capabilities": {"tools": {"listChanged": False}},
                       "serverInfo": {"name": "figure-editor", "version": "0.1.0"},
-                      "instructions": "List sessions, select the intended page, then get_state. Mutations require its exact revision. Use preview_batch to inspect a proposed edit, then batch_edit to apply it in one Undo step. Use duplicate_slide for a new slide variant. Use check_export for format-specific findings before exporting. Distinguish a browser draft from a saved project file. On timeout, inspect state before retrying. All geometry uses CSS px (96 px/inch)."}
+                      "instructions": "List sessions, select the intended page, then get_state. Mutations require its exact revision. Use preview_batch to inspect a proposed edit, then batch_edit to apply it in one Undo step. Build editable figures with add_slide, add_shape, add_text and place_asset operations; set_slide configures the canvas. Use duplicate_slide for a new slide variant. Use check_export for format-specific findings before exporting. Distinguish a browser draft from a saved project file. On timeout, inspect state before retrying. All geometry uses CSS px (96 px/inch)."}
         elif method == 'ping':
             result = {}
         elif not self.initialized:

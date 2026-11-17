@@ -240,3 +240,15 @@
 !/powerpoint_pdf.py
 !/scripts/powerpoint_pdf.applescript
 !/tests/test_powerpoint_pdf.py
+
+# Agent authoring, one-shot CLI and portable workflow instructions.
+!/AGENTS.md
+!/CLAUDE.md
+!/figure_cli.py
+!/tests/test_figure_cli.py
+!/docs/
+/docs/*
+!/docs/agent-workflow.md
+!/examples/
+/examples/*
+!/examples/agent-composition.json

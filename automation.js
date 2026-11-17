@@ -6,13 +6,17 @@ import { generateHTMLReport } from './report.js';
 import { isMediaItem } from './video.js';
 import { applyLayout } from './layout.js';
 import { inspectSVGAsset, patchSVGAsset } from './svg-edit.js';
+import { SHAPE_TYPES, SHAPE_NAMES, isShapeItem, isLineShape } from './shapes.js';
 import { checkLinkedAssetSource, isProjectRelativePath, MAX_IMPORT_BYTES } from './assets.js?v=locate-1';
 
 // Small, explicit editing vocabulary. Neither document replacement nor arbitrary
 // JavaScript/asset writes are accepted through the live control interface.
 const geometry = ['x', 'y', 'width', 'height', 'rotation', 'opacity'];
 const textFields = ['text', 'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'color', 'align'];
-const fields = ['name', ...geometry, ...textFields];
+const fillFields = ['fill', 'fillOpacity'];
+const strokeFields = ['stroke', 'strokeWidth', 'strokeOpacity', 'strokeDash'];
+const shapeFields = [...fillFields, ...strokeFields, 'cornerRadius'];
+const fields = ['name', ...geometry, ...textFields, ...shapeFields];
 const fail = message => { throw new Error(message); };
 function object(value, label) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail(`${label} must be an object.`);
@@ -26,19 +30,43 @@ function properties(item, patch, { allowEmpty = false } = {}) {
   if (!allowEmpty && !Object.keys(patch).length) fail('Supply at least one property.');
   for (const [key, value] of Object.entries(patch)) {
     if (textFields.includes(key) && item.type !== 'text') fail(`${key} is only supported on text objects.`);
-    if ([...geometry, 'fontSize'].includes(key)) {
+    const shape = isShapeItem(item) || item.type === 'shape';
+    if (fillFields.includes(key) && (!shape || isLineShape(item))) fail(`${key} requires a filled shape.`);
+    if (strokeFields.includes(key) && !shape && item.type !== 'image') fail(`${key} requires a shape or image.`);
+    if (key === 'cornerRadius' && item.type !== 'roundRect') fail('cornerRadius requires a rounded rectangle.');
+    if ([...geometry, 'fontSize', 'fillOpacity', 'strokeWidth', 'strokeOpacity', 'cornerRadius'].includes(key)) {
       if (typeof value !== 'number' || !Number.isFinite(value)) fail(`${key} must be a finite number.`);
-      if (['width', 'height', 'fontSize'].includes(key) && value <= 0) fail(`${key} must be positive.`);
+      if (['width', 'height', 'fontSize'].includes(key) && value <= 0 && !(isLineShape(item) && key !== 'fontSize' && value === 0)) fail(`${key} must be positive (line dimensions may be zero).`);
     } else if (key === 'fontWeight') {
       if (![400, 700, '400', '700'].includes(value)) fail('fontWeight must be 400 or 700.');
     } else if (typeof value !== 'string') fail(`${key} must be a string.`);
   }
+  // A solid paint change must be visible even on an existing gradient object.
+  if ('fill' in patch) delete item.fillGradient;
+  if ('stroke' in patch) delete item.strokeGradient;
   // Keep the requested size exact. Deck validation rejects an out-of-range proportional dimension.
   if (isMediaItem(item) && (('width' in patch) !== ('height' in patch))) {
     if ('width' in patch) item.height = patch.width * (item.height / item.width);
     else item.width = patch.height * (item.width / item.height);
   }
   Object.assign(item, patch);
+}
+
+function configureSlide(slide, op) {
+  if (op.name !== undefined) {
+    if (typeof op.name !== 'string' || !op.name.trim() || op.name.length > 300) fail('Slide name must contain 1–300 characters.');
+    slide.name = op.name;
+  }
+  if (op.canvas !== undefined) {
+    keys(op.canvas, ['width', 'height', 'background'], 'canvas');
+    if (!Object.keys(op.canvas).length) fail('Supply at least one canvas property.');
+    // Match the frontend canvas controls so agent-created pages remain adjustable there.
+    for (const key of ['width', 'height']) if (key in op.canvas) {
+      const value = op.canvas[key];
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 64 || value > 8000) fail(`Canvas ${key} must be between 64 and 8000 px.`);
+    }
+    Object.assign(slide.canvas, op.canvas);
+  }
 }
 function targets(slide, ids, { allowLocked = false } = {}) {
   if (!Array.isArray(ids) || !ids.length || ids.length > 2000 || new Set(ids).size !== ids.length) fail('itemIds must contain unique object IDs.');
@@ -55,6 +83,7 @@ export function prepareBatch(project, operations) {
   if (!Array.isArray(operations) || !operations.length || operations.length > 200) fail('Supply 1–200 operations.');
   const next = cloneDeck(project), changed = new Set(), created = [], deleted = [], duplicatedItems = [];
   const createdAssetIds = [], assetReplacements = [], warnings = [];
+  const createdSlideIds = [], changedSlideIds = new Set();
   for (const op of operations) {
     object(op, 'operation');
     const allowed = {
@@ -62,6 +91,9 @@ export function prepareBatch(project, operations) {
       align: ['op', 'slideId', 'itemIds', 'alignment'],
       distribute: ['op', 'slideId', 'itemIds', 'axis', 'gap'],
       add_text: ['op', 'slideId', 'properties'],
+      add_shape: ['op', 'slideId', 'shapeType', 'properties'],
+      add_slide: ['op', 'slideId', 'name', 'canvas'],
+      set_slide: ['op', 'slideId', 'name', 'canvas'],
       place_asset: ['op', 'slideId', 'assetId', 'properties'],
       swap_asset: ['op', 'slideId', 'itemId', 'assetId'],
       duplicate: ['op', 'slideId', 'itemIds', 'offsetX', 'offsetY'],
@@ -72,10 +104,27 @@ export function prepareBatch(project, operations) {
       replace_asset: ['op', 'slideId', 'itemIds', 'assetId'],
       edit_svg: ['op', 'slideId', 'itemId', 'assetId', 'patches'],
     }[op.op];
-    if (!Array.isArray(allowed)) fail('Supported operations: set, align, distribute, add_text, place_asset, swap_asset, duplicate, delete, reorder, set_hidden, set_locked, replace_asset, edit_svg.');
+    if (!Array.isArray(allowed)) fail('Supported operations: set, align, distribute, add_text, add_shape, add_slide, set_slide, place_asset, swap_asset, duplicate, delete, reorder, set_hidden, set_locked, replace_asset, edit_svg.');
     keys(op, allowed, op.op);
+    if (op.op === 'add_slide') {
+      if (typeof op.slideId !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,99}$/.test(op.slideId)) fail('New slideId must be a safe ID of 1–100 characters.');
+      if (next.slides.some(slide => slide.id === op.slideId)) fail(`Slide ${op.slideId} already exists. Choose a new slideId.`);
+      const activeIndex = next.slides.findIndex(slide => slide.id === next.activeSlideId);
+      const slide = { id: op.slideId, name: `Slide ${next.slides.length + 1}`, canvas: { ...next.slides[activeIndex].canvas }, items: [] };
+      configureSlide(slide, op);
+      next.slides.splice(activeIndex + 1, 0, slide);
+      next.activeSlideId = slide.id;
+      createdSlideIds.push(slide.id); changedSlideIds.add(slide.id);
+      continue;
+    }
     const slide = next.slides.find(slide => slide.id === op.slideId);
     if (!slide) fail(`Unknown slide: ${op.slideId}.`);
+    changedSlideIds.add(slide.id);
+    if (op.op === 'set_slide') {
+      if (op.name === undefined && op.canvas === undefined) fail('Supply a slide name or canvas properties.');
+      configureSlide(slide, op);
+      continue;
+    }
     if (op.op === 'edit_svg') {
       const [item] = targets(slide, [op.itemId]);
       if (item.type !== 'image' || item.assetId !== op.assetId) fail('SVG object or asset changed. Inspect the SVG again.');
@@ -152,9 +201,16 @@ export function prepareBatch(project, operations) {
       changed.add(item.id);
       continue;
     }
-    if (op.op === 'place_asset' || op.op === 'add_text') {
+    if (['place_asset', 'add_text', 'add_shape'].includes(op.op)) {
       let item;
-      if (op.op === 'place_asset') {
+      if (op.op === 'add_shape') {
+        if (!SHAPE_TYPES.includes(op.shapeType)) fail(`shapeType must be one of: ${SHAPE_TYPES.join(', ')}.`);
+        item = { id: uid(), type: op.shapeType, name: SHAPE_NAMES[op.shapeType], x: 80, y: 80,
+          width: 160, height: ['line', 'arrow', 'doubleArrow'].includes(op.shapeType) ? 0 : 100,
+          rotation: 0, opacity: 1, locked: false, hidden: false,
+          fill: ['line', 'arrow', 'doubleArrow'].includes(op.shapeType) ? 'none' : '#ffffff', stroke: '#111827', strokeWidth: 2 };
+        if (op.properties !== undefined) properties(item, op.properties, { allowEmpty: true });
+      } else if (op.op === 'place_asset') {
         const asset = next.assets.find(asset => asset.id === op.assetId);
         if (!asset) fail(`Unknown asset: ${op.assetId}. Use an assetId from get_state.assets.`);
         item = createAssetItem(slide, asset);
@@ -179,7 +235,7 @@ export function prepareBatch(project, operations) {
     for (const item of items) changed.add(item.id);
   }
   return { project: validateDeck(next), changedItemIds: [...changed], createdItemIds: created, deletedItemIds: deleted,
-    duplicatedItems, createdAssetIds, assetReplacements, warnings };
+    duplicatedItems, createdAssetIds, createdSlideIds, changedSlideIds: [...changedSlideIds], assetReplacements, warnings };
 }
 
 export function inspectSVG(project, { slideId, itemId, offset, limit }) {
@@ -229,7 +285,8 @@ export async function checkSources(project, assetIds, ensureActive) {
 export function describeProject(project, slideId = project.activeSlideId) {
   const slide = project.slides.find(slide => slide.id === slideId);
   if (!slide) fail(`Unknown slide: ${slideId}.`);
-  const visibleFields = ['id', 'type', ...fields, 'locked', 'hidden', 'assetId', 'crop', 'imageFit'];
+  const visibleFields = ['id', 'type', ...fields, 'locked', 'hidden', 'assetId', 'crop', 'imageFit',
+    'fillGradient', 'strokeGradient', 'connector', 'connectorFlipX', 'connectorFlipY'];
   const usage = deckAssetUsage(project);
   return {
     project: { id: project.id, name: project.name }, activeSlideId: project.activeSlideId,

@@ -12,6 +12,8 @@
 
 ### 本地 AI 控制（轻量 MCP）
 
+支持 **Codex / Claude Code 作图 → 前端继续精调**。完整配置、原生图形操作、CLI 和可直接改用的 JSON 示例见 [Agent 作图指南](docs/agent-workflow.md)。`add_slide` / `set_slide` 管理画布，`add_shape` 创建可编辑形状，`set` 可修改形状颜色和描边；文字、形状、素材放置可以在同一批次完成并整体撤销。
+
 启动新版 `python3 server.py`（默认端口 **8766**）并刷新编辑器后，页面的 **AI connected** 表示当前标签页已连接本地控制桥。点击可暂停，再次点击重新连接。MCP 操作的是此页面正在编辑的项目，修改立即可见，并复用同一套校验、Undo、浏览器草稿与文件 AutoSave。
 
 适配器 `figure_mcp.py` 使用 Python 标准库和 MCP stdio，无须安装额外服务依赖。把下面的路径换成你的仓库绝对路径，在终端注册一次：

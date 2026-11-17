@@ -1,6 +1,7 @@
 // Owns an ephemeral localhost server, isolated Chrome contexts and synthetic files.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
@@ -151,6 +152,71 @@ async function saveTestProject(page, sessionId, revision) {
   const result = (await call('save', { sessionId, expectedRevision: revision, destination: 'file' })).structuredContent;
   assert.equal(result.saved, true);
   return readTestProject(page);
+}
+async function checkAgentAuthoring(page, sessionId) {
+  await openTestProject(page, createDeck());
+  const state = async () => (await call('get_state', { sessionId })).structuredContent;
+  const initial = await state(), slideId = 'agent-composition';
+  const operations = [
+    { op: 'add_slide', slideId, name: 'Agent composition', canvas: { width: 720, height: 360, background: '#ffffff' } },
+    { op: 'add_shape', slideId, shapeType: 'roundRect', properties: { name: 'Editable panel', x: 40, y: 100, width: 180, height: 120, fill: '#dcecff', stroke: '#24558a', cornerRadius: 0.1 } },
+    { op: 'add_shape', slideId, shapeType: 'arrow', properties: { x: 250, y: 160, width: 160, height: 0, stroke: '#24558a', strokeWidth: 4 } },
+    { op: 'add_shape', slideId, shapeType: 'ellipse', properties: { x: 440, y: 100, width: 180, height: 120, fill: '#ddf4e7', stroke: '#347352' } },
+    { op: 'add_text', slideId, properties: { name: 'Title', text: 'Editable workflow', x: 40, y: 30, width: 500, height: 40, fontSize: 26 } },
+  ];
+  const args = { sessionId, expectedRevision: initial.revision, operations };
+  const preview = await call('preview_batch', args);
+  assert.deepEqual(preview.structuredContent.createdSlideIds, [slideId]);
+  assert.equal(preview.structuredContent.width, 720);
+  await checkImagePixels(page, preview, 'authoring-proposal.png', [[100, 150, '#dcecff'], [520, 150, '#ddf4e7']]);
+  assert.equal((await state()).revision, initial.revision);
+  assert.deepEqual((await state()).slides, initial.slides);
+  const argumentsFile = join(output, 'authoring-command.json');
+  await writeFile(argumentsFile, JSON.stringify(args));
+  const runCLI = promisify(execFile);
+  const response = await runCLI(python, ['figure_cli.py', '--port', String(port), '--output-dir', output, 'call', 'batch_edit', '--args', argumentsFile]);
+  const created = JSON.parse(response.stdout).result;
+  assert.equal(created.activeSlideId, slideId);
+  assert.deepEqual(created.selectedSlideIds, [slideId]);
+  assert.equal(created.history.undo, initial.history.undo + 1);
+  const undone = (await call('history', { sessionId, expectedRevision: created.revision, action: 'undo' })).structuredContent;
+  assert.deepEqual(undone.slides, initial.slides);
+  const redone = (await call('history', { sessionId, expectedRevision: undone.revision, action: 'redo' })).structuredContent;
+  assert.deepEqual(redone.slide.items, created.slide.items);
+  const panel = created.slide.items[0], title = created.slide.items[3];
+  await page.locator(`[data-layer="${panel.id}"] .layer-select`).click();
+  await page.locator('#stage [data-item="' + panel.id + '"]').dblclick({ position: { x: 40, y: 40 } });
+  await page.locator('[data-format-tab="paint"]').click();
+  const fill = page.locator('[data-shape-color="fill"]');
+  await fill.fill('#ffcc88'); await fill.dispatchEvent('input'); await fill.dispatchEvent('change');
+  await page.locator('[data-format-tab="size"]').click();
+  const x = page.locator('#inspector [data-property="x"]');
+  await x.fill('65'); await x.press('Tab');
+  // Finish the inspector's blur/render cycle before selecting a different layer.
+  await page.locator('#status').click();
+  await page.locator(`[data-layer="${title.id}"] .layer-select`).click();
+  assert.deepEqual((await state()).selectedItemIds, [title.id]);
+  const size = page.locator('#inspector [data-property="fontSize"]');
+  await size.fill('30'); await size.press('Tab');
+  const manual = await state();
+  assert.equal(manual.slide.items[0].fill, '#ffcc88');
+  assert.equal(manual.slide.items[0].x, 65);
+  assert.equal(manual.slide.items[3].fontSize, 30);
+  await call('batch_edit', { sessionId, expectedRevision: redone.revision, operations: [{ op: 'set_slide', slideId, canvas: { width: 800 } }] }, /revision changed/);
+  const resized = (await call('batch_edit', { sessionId, expectedRevision: manual.revision, operations: [{ op: 'set_slide', slideId, name: 'Refined figure', canvas: { width: 800 } }] })).structuredContent;
+  assert.equal(resized.slide.items[0].x, 65);
+  assert.equal(resized.slide.canvas.width, 800);
+  await saveTestProject(page, sessionId, resized.revision);
+  await openTestProject(page);
+  const reopened = await state();
+  assert.deepEqual(reopened.slide, resized.slide);
+  await writeFile(argumentsFile, JSON.stringify({ sessionId, maxSize: 1600 }));
+  const cliPreview = JSON.parse((await runCLI(python, ['figure_cli.py', '--port', String(port), '--output-dir', output, 'call', 'preview', '--args', argumentsFile])).stdout);
+  assert.equal((await readFile(cliPreview.images[0].path)).subarray(1, 4).toString(), 'PNG');
+  assert.equal(cliPreview.result.renderedRevision, reopened.revision);
+  await checkPreviewPixels(page, sessionId, reopened, 'authoring-refined.png', [[100, 150, '#ffcc88']]);
+  await page.screenshot({ path: join(output, 'authoring-editor.png') });
+  pass('MCP preview → CLI native figure → one-step Undo/Redo → manual fill/position/font edits → save/reopen');
 }
 async function checkAssetImport(page, sessionId) {
   await openTestProject(page, createDeck());
@@ -748,6 +814,7 @@ try {
   await checkPrintSize(secondId, source, active, settled.revision);
   const baseline = await checkProposedLayouts(second.page, secondId, source, settled);
   await checkSlideCopy(second.page, secondId, source, baseline);
+  await checkAgentAuthoring(second.page, secondId);
   await second.page.locator('#ai-control-toggle').click();
   await sessions(1);
   await call('get_state', { sessionId: secondId }, /disconnected|expired/);

@@ -1602,15 +1602,21 @@ async function executeAutomation(method,params,ensureActive){
   if(method==='preview_batch'){
    const result=await renderAutomation(prepared.project,{slideId:params.slideId,maxSize:params.maxSize},true);
    return {...result,proposed:true,baseRevision:revision,currentRevision:automationRevision(),
-    affectedSlideIds:[...new Set(params.operations.map(op=>op.slideId))],warnings:prepared.warnings};
+    affectedSlideIds:prepared.changedSlideIds,createdSlideIds:prepared.createdSlideIds,warnings:prepared.warnings};
   }
+  const activeChanged=project.activeSlideId!==prepared.project.activeSlideId;
+  const oldCanvas=slide().canvas,newCanvas=prepared.project.slides.find(page=>page.id===prepared.project.activeSlideId).canvas;
   if(!change(()=>{
    project.slides=prepared.project.slides;
+   project.activeSlideId=prepared.project.activeSlideId;
    if(prepared.createdAssetIds.length)project.assets=prepared.project.assets;
+   if(activeChanged){resetSlideSelection();selected.clear();lastTap=null;lastPointerItem=null;lastPaste=null;}
    selected=new Set([...selected].filter(id=>slide().items.some(item=>item.id===id&&!item.hidden)));
   }))throw new Error('The edit failed validation and was rolled back.');
-  status(`AI updated ${prepared.changedItemIds.length} objects. Undo restores the whole batch.`);
+  if(activeChanged||oldCanvas.width!==newCanvas.width||oldCanvas.height!==newCanvas.height)fit();
+  status(`AI updated ${prepared.changedSlideIds.length} slide(s) and ${prepared.changedItemIds.length} objects. Undo restores the whole batch.`);
   return {...automationState(),changedItemIds:prepared.changedItemIds,createdItemIds:prepared.createdItemIds,
+   createdSlideIds:prepared.createdSlideIds,changedSlideIds:prepared.changedSlideIds,
    deletedItemIds:prepared.deletedItemIds,duplicatedItems:prepared.duplicatedItems,
    createdAssetIds:prepared.createdAssetIds,assetReplacements:prepared.assetReplacements,warnings:prepared.warnings};
  }
