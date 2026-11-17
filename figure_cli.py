@@ -6,13 +6,38 @@ import hashlib
 import json
 from pathlib import Path
 import secrets
+import shlex
 import sys
 
-from figure_mcp import EditorClient, TOOLS
+from figure_mcp import AssetRoot, EditorClient, TOOLS
+
+
+REPO_DIR = Path(__file__).resolve().parent
+DEFAULT_OUTPUT_DIR = REPO_DIR / 'output' / 'mcp'
 
 
 def tool_name(name):
     return name if name.startswith('figure_') else 'figure_' + name
+
+
+def setup_commands(args):
+    """Generate commands for this checkout and interpreter without changing client settings."""
+    port = ['--port', str(args.port)] if args.port != 8766 else []
+    server = [sys.executable, str(REPO_DIR / 'server.py'), *port]
+    adapter = [sys.executable, str(REPO_DIR / 'figure_mcp.py'), *port]
+    if args.asset_root is not None:
+        adapter.extend(['--asset-root', str(AssetRoot(args.asset_root).path)])
+    if args.output_dir != DEFAULT_OUTPUT_DIR:
+        adapter.extend(['--output-dir', str(args.output_dir.expanduser().resolve())])
+    return {
+        'ok': True,
+        'startServer': shlex.join(server),
+        'editorUrl': f'http://127.0.0.1:{args.port}/',
+        'register': {
+            'codex': shlex.join(['codex', 'mcp', 'add', 'figure_editor', '--', *adapter]),
+            'claude': shlex.join(['claude', 'mcp', 'add', '--transport', 'stdio', 'figure_editor', '--', *adapter]),
+        },
+    }
 
 
 def read_arguments(source):
@@ -54,14 +79,27 @@ def compact_result(reply, output_dir):
     return result
 
 
+def list_sessions(client):
+    try:
+        result = compact_result(client.call('figure_sessions', {}), client.output_dir)
+    except (ValueError, OSError) as error:
+        raise ValueError(f'{error} Check {client.origin}/. Run figure_cli.py setup with the same port for the launch command.') from error
+    if result['result']['sessions']:
+        result['nextStep'] = 'Identify the intended page by its project and slide, then call get_state with its sessionId.'
+    else:
+        result['nextStep'] = f'Open {client.origin}/ or resume AI control in the editor until it shows AI connected. Then list sessions again.'
+    return result
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port', type=int, default=8766)
     parser.add_argument('--asset-root', type=Path)
-    parser.add_argument('--output-dir', type=Path, default=Path(__file__).resolve().parent / 'output' / 'mcp')
+    parser.add_argument('--output-dir', type=Path, default=DEFAULT_OUTPUT_DIR)
     commands = parser.add_subparsers(dest='command', required=True)
     catalog = commands.add_parser('tools', help='Show tool schemas without connecting to the editor.')
     catalog.add_argument('tool', nargs='?', help='Optional tool name, with or without figure_ prefix.')
+    commands.add_parser('setup', help='Print local server and MCP registration commands for Codex and Claude Code.')
     commands.add_parser('sessions', help='List connected pages; never selects one automatically.')
     call = commands.add_parser('call', help='Run a tool once. On timeout read state before retrying.')
     call.add_argument('tool')
@@ -70,17 +108,20 @@ def main(argv=None):
     try:
         if not 1 <= args.port <= 65535:
             raise ValueError('port must be between 1 and 65535')
-        if args.command == 'tools':
+        if args.command == 'setup':
+            result = setup_commands(args)
+        elif args.command == 'tools':
             definitions = [tool for tool in TOOLS if not args.tool or tool['name'] == tool_name(args.tool)]
             if not definitions:
                 raise ValueError('Unknown Figure Editor tool.')
             result = {'ok': True, 'tools': definitions}
         else:
-            name = 'figure_sessions' if args.command == 'sessions' else tool_name(args.tool)
-            arguments = {} if args.command == 'sessions' else read_arguments(args.args)
             client = EditorClient(args.port, args.output_dir, args.asset_root)
-            result = compact_result(client.call(name, arguments), args.output_dir)
-        print(json.dumps(result, ensure_ascii=False, allow_nan=False))
+            if args.command == 'sessions':
+                result = list_sessions(client)
+            else:
+                result = compact_result(client.call(tool_name(args.tool), read_arguments(args.args)), args.output_dir)
+        print(json.dumps(result, ensure_ascii=False, allow_nan=False, indent=2 if args.command == 'setup' else None))
         return 0
     except (ValueError, OSError, RecursionError) as error:
         print(json.dumps({'ok': False, 'error': str(error)}, ensure_ascii=False), file=sys.stderr)

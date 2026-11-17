@@ -15,7 +15,7 @@ export function formatInspectorMarkup(item, { geometry, opacity, appearance, pic
   const kind = item.type === 'image' ? 'picture' : 'shape';
   const effectSections = (softEdges ? formatSection('soft-edges', 'Soft Edges', softEdges) : '') + formatSection('shadow', 'Shadow', effects);
   const tabs = kind === 'picture'
-    ? [['picture', 'Picture', formatSection('picture-transparency', 'Picture Transparency', opacity) + formatSection('crop', 'Crop & Source', picture)], ['effects', 'Effects', effectSections]]
+    ? [['picture', 'Picture', formatSection('picture-transparency', 'Picture Transparency', opacity) + formatSection('crop', 'Fit, Crop & Source', picture)], ['effects', 'Effects', effectSections]]
     : [['paint', 'Fill & Line', appearance + formatSection('object-transparency', 'Object Transparency', opacity)], ['effects', 'Effects', effectSections]];
   tabs.push(['size', 'Size & Properties', geometry + formatSection('properties', 'Properties', properties)]);
   const selected = tabs.some(([key]) => key === preferences.get(kind)) ? preferences.get(kind) : tabs[0][0];

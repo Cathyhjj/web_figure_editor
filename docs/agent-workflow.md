@@ -4,16 +4,15 @@ Agent 和前端操作同一份可编辑项目。Agent 可以准备素材、新�
 
 ## 1. 启动与连接
 
-在仓库运行 `python3 server.py`，打开 `http://127.0.0.1:8766/`，等待 **AI connected**。Agent 控制需要该页面保持打开。
-
-将以下路径替换为仓库和绘图输出目录的绝对路径。按所用客户端注册一次，然后重新加载客户端的 MCP 工具：
+首次使用，在仓库运行以下命令。把素材目录换成存放绘图输出的现有目录。若图片已经在编辑器的素材库里，可直接运行 `python3 figure_cli.py setup`。
 
 ```sh
-codex mcp add figure-editor -- python3 /absolute/path/web_figure_editor/figure_mcp.py --asset-root /absolute/path/plot-output
-claude mcp add --transport stdio figure-editor -- python3 /absolute/path/web_figure_editor/figure_mcp.py --asset-root /absolute/path/plot-output
+python3 figure_cli.py --asset-root "/你的素材目录" setup
 ```
 
-`--asset-root` 是 agent 导入 SVG、PNG、JPEG 的目录；传给 `import_assets.paths` 的路径必须相对此目录。服务端口不是 8766 时，在适配器参数中追加 `--port`。无需额外 Python 依赖。更新代码后重启 MCP 进程并刷新编辑器，让两端加载新操作。
+运行输出中的 `register.codex` 或 `register.claude` 命令，重新加载对应客户端的 MCP 工具。已有本地服务时直接打开输出中的 `editorUrl`（默认 `http://127.0.0.1:8766/`）。首次启动服务用 `startServer` 中的命令。保持编辑器页面打开，等到 **AI connected** 后即可作图。更新代码后，先保存手上的图，再刷新页面并重新加载 MCP 工具。
+
+`import_assets.paths` 使用相对于 `--asset-root` 的路径，可导入 SVG、PNG、JPEG。若服务使用其他端口，在 `setup` 前加上 `--port` 和端口号。
 
 仓库的 `AGENTS.md` / `CLAUDE.md` 提供操作约定。可以直接告诉 agent：
 
@@ -39,7 +38,23 @@ claude mcp add --transport stdio figure-editor -- python3 /absolute/path/web_fig
 
 ## 3. 科学绘图与修改源图
 
-Agent 用你的数据和绘图脚本输出 SVG/PNG/JPEG，再通过 `figure_import_assets` 导入，通过 `place_asset` 放置。只指定 `width` 或 `height` 会保持图片比例。建议把面板标号、说明文字、箭头等做成独立对象。
+Agent 用你的数据和绘图脚本输出 SVG/PNG/JPEG，再通过 `figure_import_assets` 导入，通过 `place_asset` 放置。只指定 `width` 或 `height` 会保持图框比例。面板标号、说明文字、箭头可分别建成独立对象。
+
+要把长宽比不同的谱图放进同样大的图框，在 `place_asset` 的 `properties` 中指定 `width`、`height` 和 `"imageFit": "contain"`。编辑器会等比居中显示谱图。`set` 也支持相同的图片属性。例如，保留原图右半幅并保持现有图框，可用以下操作，两个 ID 均从实际页面读取。
+
+```json
+{
+  "op": "set",
+  "slideId": "实际页面ID",
+  "itemIds": ["实际图片对象ID"],
+  "properties": {
+    "imageFit": "contain",
+    "crop": { "x": 0.5, "y": 0, "width": 0.5, "height": 1 }
+  }
+}
+```
+
+`crop` 的坐标和宽高是相对于完整原图的比例。用 `"crop": null` 恢复原图。在 `contain` 模式下裁剪会保留外框。在默认的 `stretch` 模式下裁剪会保持源图缩放并调整外框。一次同时指定多项属性时，依次处理适配方式、裁剪、显式位置和尺寸。
 
 SVG 可以在前端 **Edit SVG elements** 中修改文本和属性，也可以通过 `inspect_svg` / `edit_svg` 操作。生成 SVG 时保留文本有助于后续改字；已转为路径的文字不能直接当文本修改。PNG/JPEG 只能整体裁剪、缩放和调整效果，不会自动恢复内部曲线或坐标轴数据。
 
@@ -58,17 +73,27 @@ python3 figure_cli.py call preview_batch --args composition.json
 python3 figure_cli.py call batch_edit --args composition.json
 ```
 
-`state.json` 内容为 `{"sessionId":"实际页面ID"}`；`composition.json` 使用上述示例的完整结构。`--args -` 从标准输入读取 JSON。全局参数放在子命令之前，例如：
+`state.json` 内容为 `{"sessionId":"实际页面ID"}`，`composition.json` 使用上述示例的完整结构。`--args -` 从标准输入读取 JSON。
+
+如果 agent 刚生成了一张谱图，而已注册的 MCP 没有配置素材目录，可用 CLI 为这次导入指定输出目录。然后直接用返回的 `assetId` 在原 MCP 会话中排版。例如，目录里有 `spectrum.svg` 时，准备以下 `imports.json`，填入实时读取的 session 和 revision。
+
+```json
+{"sessionId":"实际页面ID","expectedRevision":"当前版本","paths":["spectrum.svg"]}
+```
 
 ```sh
-python3 figure_cli.py --asset-root /absolute/path/plot-output --output-dir /absolute/path/previews call import_assets --args imports.json
+python3 figure_cli.py --asset-root /absolute/path/plot-output call import_assets --args imports.json
 ```
 
 成功输出 JSON：`{"ok":true,"result":{...}}`。预览图写入新的 PNG 文件，路径在 `images[].path`；不会把图片 base64 塞进终端上下文。`tools` 可离线查看完整 JSON Schema。失败返回非零退出码和标准错误中的 JSON，不自动重试。CLI 不会自动挑选 session 或覆盖 revision。
 
 ## 5. 前端交接与保存
 
-在图层列表选择对象，直接拖动或调整属性。形状使用 **Fill & Line** / **Size & Properties**；文字可以改内容、字号和字体；图片可以裁剪或编辑 SVG 元素。前端修改后旧 revision 会失效，防止 agent 覆盖刚才的手工调整。
+在图层列表选择图片，进入 **Format Picture → Picture → Fit, Crop & Source**。用 **Picture fit** 选择等比居中（**Fit proportionally**）或拉伸填满（**Stretch to frame**）。在同一区域可裁剪、恢复原图或编辑 SVG 元素。面板标号等独立文字可直接在画布上点选修改。
+
+需要让 agent 接着改时，选中图层，多选可用 Shift 加点。点击 **Layers → Copy AI reference**，将引用和修改要求一起粘贴给 Codex 或 Claude Code。例如：“只把这两张图等宽、顶部对齐，保留我刚调好的裁剪。” 没有选中图层时，复制的是当前页引用。
+
+Agent 用引用里的 `sessionId`、`slideId` 调用 `figure_get_state`，核对 `project.id` 和所选对象 ID，按当前 revision 预览和应用。引用记录点击复制时的对象。换选图层后可重新复制。标签页重连会生成新 session，需从目标页复制新引用。
 
 首次保存 `.figure.json` 时在页面点击 **Save** 选择文件；之后 `figure_save(destination="file")` 可以保存到该已授权文件。`destination="draft"` 只保存浏览器恢复草稿。导出的 PNG/PDF 等不是可继续编辑的项目文件。
 

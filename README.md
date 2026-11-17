@@ -1,30 +1,23 @@
 # Figure Editor
 
-### 精确排版与辅助线
+## 用 Codex 或 Claude Code 作图
 
-工具栏的 **px / mm / pt** 切换同时用于画布尺寸、对象位置／尺寸、字号、间距和辅助线坐标。内部仍保存原始 CSS px（96 px = 25.4 mm = 72 pt），切换显示单位不改变项目、不增加 Undo。阴影等效果保留各自明确标出的单位。
-
-**Align** 支持左／中／右和上／中／底对齐，单个对象相对画布，多选对象相对选择范围；旋转对象按旋转后外接矩形对齐，不计算阴影或描边。横向／纵向等距保留两端对象，需要至少三个对象。**Size & spacing** 提供等宽、等高和指定横／纵间距（至少两个对象，间距允许为零）。等宽／等高以第一个选中的对象为准，图片、视频和 HTML 图表保持比例，文本和形状只改变框尺寸。选中隐藏或锁定对象时排版命令不可用，避免部分修改。
-
-**Guides** 可新增水平／垂直辅助线，在画布拖动或输入距左／上边缘的精确坐标；选中后按 Delete 或点击 **Delete guide** 删除。支持显示／隐藏和吸附，移动对象时将整体选择的边缘／中心吸附到辅助线，按住 **Alt** 临时跳过。每条辅助线的拖动可单步 Undo／Redo；Escape 取消当前拖动。辅助线按页保存，复制页面或跨项目粘贴页面时保留，普通对象复制不包含辅助线。所有导出和缩略图均不显示辅助线；单位、显示和吸附偏好仅保存在当前浏览器。
-
-回归验证：`npm test`、`node tests/precision-layout-browser.mjs`、`node tests/precision-guides-browser.mjs`。浏览器检查需要 Playwright 和 Chrome，可通过 `PLAYWRIGHT_MODULE` 指定模块；使用随机本地端口、隔离浏览器与合成项目，不修改日常打开的项目。
-
-### 本地 AI 控制（轻量 MCP）
-
-支持 **Codex / Claude Code 作图 → 前端继续精调**。完整配置、原生图形操作、CLI 和可直接改用的 JSON 示例见 [Agent 作图指南](docs/agent-workflow.md)。`add_slide` / `set_slide` 管理画布，`add_shape` 创建可编辑形状，`set` 可修改形状颜色和描边；文字、形状、素材放置可以在同一批次完成并整体撤销。
-
-启动新版 `python3 server.py`（默认端口 **8766**）并刷新编辑器后，页面的 **AI connected** 表示当前标签页已连接本地控制桥。点击可暂停，再次点击重新连接。MCP 操作的是此页面正在编辑的项目，修改立即可见，并复用同一套校验、Undo、浏览器草稿与文件 AutoSave。
-
-适配器 `figure_mcp.py` 使用 Python 标准库和 MCP stdio，无须安装额外服务依赖。把下面的路径换成你的仓库绝对路径，在终端注册一次：
+在仓库目录运行以下命令，获取当前电脑的本地启动命令、编辑器地址和两个客户端各自的 MCP 注册命令。
 
 ```sh
-codex mcp add figure_editor -- python3 /absolute/path/web_figure_editor/figure_mcp.py
+python3 figure_cli.py setup
 ```
 
-其他 MCP 客户端配置 `command: "python3"`、`args: ["/absolute/path/web_figure_editor/figure_mcp.py"]` 即可。使用非默认服务端口时追加 `--port 8767`；导出目录默认是仓库内的 `output/mcp/`，可通过 `--output-dir /absolute/output/directory` 指定。注册后按客户端要求重新加载 MCP 工具。
+1. 首次使用时，运行输出中与你的客户端对应的 `register.codex` 或 `register.claude` 命令，随后重新加载客户端的 MCP 工具。若要从磁盘导入 SVG、PNG 或 JPEG，请先用 `python3 figure_cli.py --asset-root "/你的素材目录" setup` 生成带素材目录的注册命令。
+2. 运行 `startServer` 中的命令，打开 `editorUrl`（默认 `http://127.0.0.1:8766/`），等到页面显示 **AI connected**。若编辑器已启动，直接使用打开的页面。运行 `python3 figure_cli.py sessions` 可查看已连接的页面和项目。
+3. 告诉 agent，例如“把素材库中的两张谱图等宽并排，分别添加可编辑的 a、b 标签。先看预览再应用。” 应用后即可在画布上拖动图片、裁剪或修改标签。若要让 agent 继续调整某几个对象，选中它们，点击 **Layers → Copy AI reference**，把引用与修改要求一起粘贴到聊天中。
+4. 点击 **Save** 选定文件，保存为可继续修改的 `.figure.json`。一个 agent 排版批次可以在页面里用一次 Undo 撤销。
 
-要让 AI 从磁盘导入图片，在适配器的启动参数末尾加上 `--asset-root "/absolute/path/to/figures"`，把路径换成你的素材目录。该选项支持 macOS 和 Linux。调用时只给相对路径，例如 `results/Fe_K_edge.svg`。路径中的文件和子目录须为非隐藏的普通文件或目录，不可使用符号链接。省略该参数时，仍可检查通过浏览器链接的原图。
+`setup` 仅打印命令。使用自定义端口或导出目录时，把 `--port`、`--output-dir` 放在 `setup` 前。适配器使用 Python 标准库，默认导出到仓库的 `output/mcp/`。操作示例和 CLI 用法见 [Agent 作图指南](docs/agent-workflow.md)。
+
+### 本地 AI 工具
+
+使用 `--asset-root` 时，向 `figure_import_assets` 传入相对路径，例如 `results/Fe_K_edge.svg`。路径中的文件和子目录须为非隐藏的普通文件或目录，且不使用符号链接。磁盘素材导入支持 macOS 和 Linux。
 
 | 工具 | 支持的操作 |
 | --- | --- |
@@ -91,6 +84,16 @@ MCP 不会打开原生文件选择器或请求新的文件权限。首次保存�
 预览／导出复用现有渲染器和格式限制：HTML 图表使用已保存快照，视频使用封面；PDF 文字仍需 macOS 本地轮廓服务。AI 桥单次导出最多 **24 MiB**，更大的文件使用页面 Export。桥仅监听 loopback，复用同源、Host 与随机 token 检查，不提供远程公网端点。
 
 验证：`npm test`；`python3 -m unittest discover -s tests -p 'test_automation.py'`；`npm run test:automation`。最后一项需要 Playwright 和 Chrome（可用 `PLAYWRIGHT_MODULE` 指定已安装模块），会自动启动随机测试端口，使用隔离浏览器、合成项目和临时导出目录，不连接你的日常编辑页面。
+
+### 精确排版与辅助线
+
+工具栏的 **px / mm / pt** 切换同时用于画布尺寸、对象位置／尺寸、字号、间距和辅助线坐标。内部仍保存原始 CSS px（96 px = 25.4 mm = 72 pt），切换显示单位不改变项目、不增加 Undo。阴影等效果保留各自明确标出的单位。
+
+**Align** 支持左／中／右和上／中／底对齐，单个对象相对画布，多选对象相对选择范围；旋转对象按旋转后外接矩形对齐，不计算阴影或描边。横向／纵向等距保留两端对象，需要至少三个对象。**Size & spacing** 提供等宽、等高和指定横／纵间距（至少两个对象，间距允许为零）。等宽／等高以第一个选中的对象为准，图片、视频和 HTML 图表保持比例，文本和形状只改变框尺寸。选中隐藏或锁定对象时排版命令不可用，避免部分修改。
+
+**Guides** 可新增水平／垂直辅助线，在画布拖动或输入距左／上边缘的精确坐标；选中后按 Delete 或点击 **Delete guide** 删除。支持显示／隐藏和吸附，移动对象时将整体选择的边缘／中心吸附到辅助线，按住 **Alt** 临时跳过。每条辅助线的拖动可单步 Undo／Redo；Escape 取消当前拖动。辅助线按页保存，复制页面或跨项目粘贴页面时保留，普通对象复制不包含辅助线。所有导出和缩略图均不显示辅助线；单位、显示和吸附偏好仅保存在当前浏览器。
+
+回归验证：`npm test`、`node tests/precision-layout-browser.mjs`、`node tests/precision-guides-browser.mjs`。浏览器检查需要 Playwright 和 Chrome，可通过 `PLAYWRIGHT_MODULE` 指定模块；使用随机本地端口、隔离浏览器与合成项目，不修改日常打开的项目。
 
 ### 完整 HTML / ZIP 组图导入
 
@@ -277,9 +280,11 @@ PNG、SVG、PDF、HTML 报告及复制为图片使用封面帧；这些静态输
 
 ## 图片裁切
 
-选中一张图片，在 **Format Picture → Picture** 点击 **Crop**（已裁切时为 **Edit crop**）。在完整原图预览上拖动四边、四角调整范围，拖动框内移动选区，然后点击 **Apply crop**。**Cancel** 或 `Esc` 放弃本次调整；**Full image** 将预览选区恢复为完整图片，仍需点击 Apply。
+选中一张图片，在 **Format Picture → Picture → Fit, Crop & Source** 中调整。**Fit proportionally** 将内容等比居中，适合已有固定面板尺寸的谱图。**Stretch to frame** 把内容拉伸到整个图框。切换时会保留当前图框、裁剪范围和旋转角度。
 
-点击 **Restore original** 可恢复完整图片；裁切和恢复都支持撤销/重做。原图字节保存在共享素材中，每个图片对象有独立裁切范围；重复裁切、复制对象或页面、保存再打开均保留范围。裁切不会改变源图片的显示比例、旋转或原有位置；恢复时会沿当前图片的缩放和旋转展开。锁定图片需先解锁。
+点击 **Crop**（已裁切时为 **Edit crop**）。在完整原图预览上拖动四边、四角调整范围，拖动框内移动选区，然后点击 **Apply crop**。**Cancel** 或 `Esc` 放弃本次调整。**Full image** 将预览选区恢复为完整图片，仍需点击 Apply。
+
+点击 **Restore original** 可恢复完整图片。裁切和恢复均支持撤销与重做。原图保存在共享素材中，每个图片对象有独立裁切范围，复制对象或页面、保存再打开均保留范围。等比居中时，裁切和恢复都使用现有外框。拉伸填满时，裁切和恢复会按源图片当前的缩放和旋转调整图框。锁定图片需先解锁。
 
 PNG、SVG、PDF、HTML 报告、页面缩略图和跨应用复制均显示裁切后的区域。PPT 导出使用原生可编辑裁切并保留完整嵌入图片。SVG、HTML、PPT 和项目文件仍包含完整源图，裁切只控制可见范围。刷新或重新链接素材后，沿用原有的相对裁切范围。
 

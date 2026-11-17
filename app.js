@@ -608,6 +608,23 @@ function editHTMLFigure(item) {
  });
 }
 
+function pictureInspectorMarkup(item, asset) {
+ const crop = imageCrop(item), cropped = isCropped(item), contained = item.imageFit === 'contain';
+ const area = imageContentRect(item, asset);
+ const dpi = Math.round(Math.min(asset.width * crop.width / area.width, asset.height * crop.height / area.height) * 96);
+ const disabled = item.locked ? 'disabled' : '';
+ return `<label class="field"><span id="picture-fit-label">Picture fit</span><select id="picture-fit" aria-labelledby="picture-fit-label" ${disabled}>
+   <option value="stretch" ${contained ? '' : 'selected'}>Stretch to frame</option>
+   <option value="contain" ${contained ? 'selected' : ''}>Fit proportionally</option></select></label>
+  <div class="image-crop-actions"><button id="crop-image" class="button" ${disabled}>${cropped ? 'Edit crop' : 'Crop'}</button>
+   <button id="restore-image" class="button" ${item.locked || !cropped ? 'disabled' : ''}>Restore original</button></div>
+  <p class="hint">Source: ${escapeHTML(asset.name)}<br>Original size: ${asset.width} × ${asset.height} px
+   ${cropped ? `<br>Cropped area: ${Math.round(asset.width * crop.width)} × ${Math.round(asset.height * crop.height)} px` : ''}
+   <br>${asset.mime === 'image/svg+xml' ? 'Vector SVG · resolution independent' : `Effective resolution: ${dpi} DPI`}
+   <br>${contained ? 'The picture stays centered as you resize its frame.' : 'Drag a side handle to stretch one dimension. Drag the bottom-right corner to scale proportionally, or hold Shift to resize freely. Width and height fields keep proportions.'}</p>
+  ${editableSVGAsset(asset) ? `<button id="edit-svg" class="button" ${disabled}>${asset.mime === 'image/svg+xml' ? 'Edit SVG elements' : 'Restore editable SVG'}</button>` : ''}`;
+}
+
 function renderInspector(){
  const items=chosen(), box=$('inspector');
  panelWindows?.setTitle('objects',items.length===1&&canFormat(items[0])?formatTitle(items[0]):'Object properties');
@@ -619,19 +636,16 @@ function renderInspector(){
  const i=items[0];
  box.innerHTML=`<div class="section-heading">${i.type==='html'?'HTML chart':i.type==='video'?'Video':i.type==='image'?'Image':i.type==='text'?'Text':'Shape'} properties${i.locked?' · Locked':''}</div>${field('Name','name',i.name,'text')}<div class="field-row">${field('X / px','x',round(i.x),'number','step="1"')}${field('Y / px','y',round(i.y),'number','step="1"')}</div><div class="field-row">${field('Width / px','width',round(i.width),'number',`min="${isLineShape(i)?0:1}" step="1"`)}${field('Height / px','height',round(i.height),'number',`min="${isLineShape(i)?0:1}" step="1"`)}</div>${field('Rotation / °','rotation',round(i.rotation))}${opacityEditorMarkup(i)}`;
  if(i.type==='text')box.innerHTML+=`<label class="field"><span>Text content</span><textarea id="text-content" rows="4">${escapeHTML(i.text)}</textarea></label>${field('Font','fontFamily',i.fontFamily,'text','list="font-families" maxlength="200" autocomplete="off" spellcheck="false"')}<div class="field-row">${field('Size / px','fontSize',i.fontSize,'number','min="1" max="2000" step="any"')}${field('Color','color',i.color,'color')}</div><div class="field-row"><label class="field"><span>Weight</span><select data-property="fontWeight"><option value="400" ${String(i.fontWeight)==='400'?'selected':''}>Regular</option><option value="700" ${String(i.fontWeight)==='700'?'selected':''}>Bold</option></select></label><label class="field"><span>Style</span><select data-property="fontStyle"><option value="normal" ${i.fontStyle==='normal'?'selected':''}>Normal</option><option value="italic" ${i.fontStyle==='italic'?'selected':''}>Italic</option></select></label></div><label class="field"><span>Text alignment</span><select data-property="align">${[['left','Left'],['center','Center'],['right','Right']].map(([v,t])=>`<option value="${v}" ${i.align===v?'selected':''}>${t}</option>`).join('')}</select></label><p class="hint">Uses fonts installed on this computer. SVG does not embed fonts. Press Enter for a new line.</p>`;
- if(i.type==='image'){const a=assetById(i.assetId),c=imageCrop(i);const area=a&&imageContentRect(i,a);const effectiveDPI=area?Math.round(Math.min(a.width*c.width/area.width,a.height*c.height/area.height)*96):0;box.innerHTML+=`<div class="image-crop-actions"><button id="crop-image" class="button" ${i.locked?'disabled':''}>${isCropped(i)?'Edit crop':'Crop'}</button><button id="restore-image" class="button" ${i.locked||!isCropped(i)?'disabled':''}>Restore original</button></div><p class="hint">Source: ${escapeHTML(a?.name)}<br>Original size: ${a?.width} × ${a?.height} px${isCropped(i)?`<br>Cropped area: ${Math.round(a.width*c.width)} × ${Math.round(a.height*c.height)} px`:''}${a?.mime==='image/svg+xml'?'<br>Vector SVG · resolution independent':`<br>Effective resolution: ${effectiveDPI} DPI`}<br>${i.imageFit==='contain'?'The picture fits proportionally inside its frame. Drag the side handles to resize the frame.':'Drag the bottom-right corner to keep proportions; hold Shift to resize freely. Drag side handles to stretch width or height. Width and height fields keep proportions.'}</p>`;}
  if(i.type==='video'){const a=assetById(i.assetId);box.innerHTML+=`<div class="image-crop-actions"><button id="preview-video" class="button">▶ Preview video</button></div><p class="hint">MP4 · ${a.width} × ${a.height} px · ${a.duration.toFixed(1)} s<br>Embedded in PowerPoint; click the video during Slide Show to play. H.264 video with AAC audio is recommended.<br>PNG, SVG, PDF, and HTML reports use the poster frame.</p>`;}
- if(i.type==='image'&&editableSVGAsset(assetById(i.assetId)))box.innerHTML+=`<button id="edit-svg" class="button" ${i.locked?'disabled':''}>${assetById(i.assetId).mime==='image/svg+xml'?'Edit SVG elements':'Restore editable SVG'}</button>`;
  if(!['video','html'].includes(i.type))box.innerHTML+=shadowEditorMarkup(i)+formatSection('soft-edges','Soft Edges',softEdgeEditorMarkup(i));
  box.innerHTML+=shapeEditorMarkup(i);
  box.innerHTML+=`<label class="field inline"><input id="object-locked" type="checkbox" ${i.locked?'checked':''}> Lock object</label>`;
  if(canFormat(i)){
-  const crop=box.querySelector('.image-crop-actions');
   box.innerHTML=formatInspectorMarkup(i,{
    geometry:formatSection('size','Size',`<div class="field-row">${field('Width / px','width',round(i.width),'number',`min="${isLineShape(i)?0:1}" step="1"`)}${field('Height / px','height',round(i.height),'number',`min="${isLineShape(i)?0:1}" step="1"`)}</div>${field('Rotation / °','rotation',round(i.rotation))}`)+formatSection('position','Position',`<div class="field-row">${field('Horizontal / px','x',round(i.x),'number','step="1"')}${field('Vertical / px','y',round(i.y),'number','step="1"')}</div>`),
    opacity:opacityEditorMarkup(i),
    appearance:shapeEditorMarkup(i),
-   picture:crop?crop.outerHTML+crop.nextElementSibling.outerHTML+(box.querySelector('#edit-svg')?.outerHTML||'')+shapeEditorMarkup(i):'',
+   picture:i.type==='image'?pictureInspectorMarkup(i,asset)+shapeEditorMarkup(i):'',
    effects:shadowEditorMarkup(i),
    softEdges:softEdgeEditorMarkup(i),
    properties:field('Name','name',i.name,'text')+`<label class="field inline"><input id="object-locked" type="checkbox" ${i.locked?'checked':''}> Lock object</label>`,
@@ -640,6 +654,15 @@ function renderInspector(){
  }
  if(i.type==='image'){
   const source=assetById(i.assetId);
+  $('picture-fit').onchange=event=>{
+   const fit=event.target.value;
+   if(i.locked||fit===(i.imageFit||'stretch'))return;
+   change(()=>{
+    if(fit==='contain')i.imageFit='contain';
+    else delete i.imageFit;
+   },slide().id);
+   $('picture-fit')?.focus({preventScroll:true});
+  };
   if(isHTMLFigure(source)){
    const edit=document.createElement('button');edit.className='button';edit.id='edit-html-figure';edit.textContent='Edit HTML Figure';edit.disabled=i.locked;edit.onclick=()=>editHTMLFigure(i);box.append(edit);
    if(source.htmlFigure){const current=document.createElement('button');current.className='button';current.id='download-edited-html';current.textContent='Download edited HTML';current.onclick=()=>downloadBlob(new Blob([source.htmlFigure.html],{type:'text/html;charset=utf-8'}),source.name.replace(/\.png$/i,'.html'));box.append(current);}
@@ -1790,7 +1813,23 @@ async function executeAutomation(method,params,ensureActive){
  const result=await renderAutomation(source,params,method==='preview');
  return {...result,renderedRevision,currentRevision:automationRevision()};
 }
+function enableAIReference(sessionId){
+ const button=$('copy-ai-reference');
+ button.disabled=!sessionId;
+ if(!sessionId){button.onclick=null;return;}
+ button.onclick=async()=>{
+  const selectedItemIds=[...selected];
+  const reference=JSON.stringify({sessionId,projectId:project.id,slideId:project.activeSlideId,selectedItemIds});
+  try{
+   await navigator.clipboard.writeText(reference);
+   const target=selectedItemIds.length?`${selectedItemIds.length} selected layer${selectedItemIds.length===1?'':'s'}`:'this slide';
+   status(`Copied a reference to ${target}. Paste it into Codex or Claude Code with your request.`);
+  }catch{
+   window.prompt('Copy this reference and paste it into Codex or Claude Code.',reference);
+  }
+ };
+}
 render();panelWindows=initWindows({onLayoutChange:fit});requestAnimationFrame(fit);await Promise.all([loadDraft(),recentProjects.load()]);recentMenu.render();fileOperation=false;renderFileActions();scheduleAutosave();
-connectAutomation({execute:executeAutomation,summary:()=>({name:project.name,projectId:project.id,slideId:project.activeSlideId,revision:automationRevision()}),button:$('ai-control-toggle')});
+connectAutomation({execute:executeAutomation,summary:()=>({name:project.name,projectId:project.id,slideId:project.activeSlideId,revision:automationRevision()}),button:$('ai-control-toggle'),onSessionChange:enableAIReference});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden'){if(dirty)void saveDraft();if(!fileOperation&&!gesture)void saveProject(false,{automatic:true});}});
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});

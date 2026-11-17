@@ -32,6 +32,10 @@ MAX_IMPORT_BYTES = 24 * 1024 * 1024
 MAX_CHECK_BYTES = 256 * 1024 * 1024
 PLACEMENT_FIELDS = {**{key: NUMBER for key in ("x", "y", "width", "height", "rotation", "opacity")},
                     "name": {"type": "string", "maxLength": 20000}}
+CROP_FIELDS = {key: {**NUMBER, "minimum": 0.00001 if key in ("width", "height") else 0, "maximum": 1}
+               for key in ("x", "y", "width", "height")}
+IMAGE_FIELDS = {"imageFit": {"enum": ["contain", "stretch"]},
+                "crop": {"oneOf": [obj(CROP_FIELDS, CROP_FIELDS), {"const": None}]}}
 STROKE_FIELDS = {"stroke": STRING, "strokeWidth": {**NUMBER, "minimum": 0, "maximum": 1000},
                  "strokeOpacity": {**NUMBER, "minimum": 0, "maximum": 1}, "strokeDash": {"enum": ["solid", "dash", "dot"]}}
 SHAPE_FIELDS = {**STROKE_FIELDS, "fill": STRING, "fillOpacity": {**NUMBER, "minimum": 0, "maximum": 1},
@@ -39,9 +43,9 @@ SHAPE_FIELDS = {**STROKE_FIELDS, "fill": STRING, "fillOpacity": {**NUMBER, "mini
 CANVAS = {**obj({"width": {**NUMBER, "minimum": 64, "maximum": 8000},
                  "height": {**NUMBER, "minimum": 64, "maximum": 8000}, "background": STRING}), "minProperties": 1}
 SLIDE_FIELDS = {"name": {**STRING, "pattern": r"\S"}, "canvas": CANVAS}
-PROPERTIES = obj({**PLACEMENT_FIELDS, **SHAPE_FIELDS, "fontSize": NUMBER,
-                  **{key: {"type": "string", "maxLength": 20000} for key in ("text", "fontFamily", "fontStyle", "color", "align")},
-                  "fontWeight": {"enum": [400, 700, "400", "700"]}})
+OBJECT_FIELDS = {**PLACEMENT_FIELDS, **SHAPE_FIELDS, "fontSize": NUMBER,
+                 **{key: {"type": "string", "maxLength": 20000} for key in ("text", "fontFamily", "fontStyle", "color", "align")},
+                 "fontWeight": {"enum": [400, 700, "400", "700"]}}
 TARGETS = {"slideId": STRING, "itemIds": {"type": "array", "items": STRING, "minItems": 1, "maxItems": 2000}}
 SVG_VALUE = {"type": "string", "maxLength": 20000}
 SVG_ATTRIBUTES = {**obj({key: SVG_VALUE for key in (
@@ -62,14 +66,14 @@ OPERATIONS = {"oneOf": [
     obj({"op": {"const": "add_slide"}, "slideId": {**STRING, "maxLength": 100, "pattern": r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$"},
          **SLIDE_FIELDS}, ["op", "slideId"]),
     obj({"op": {"const": "set_slide"}, "slideId": STRING, **SLIDE_FIELDS}, ["op", "slideId"]),
-    obj({"op": {"const": "set"}, **TARGETS, "properties": PROPERTIES}, ["op", "slideId", "itemIds", "properties"]),
+    obj({"op": {"const": "set"}, **TARGETS, "properties": obj({**OBJECT_FIELDS, **IMAGE_FIELDS})}, ["op", "slideId", "itemIds", "properties"]),
     obj({"op": {"const": "align"}, **TARGETS, "alignment": {"enum": ["left", "center", "right", "top", "middle", "bottom"]}}, ["op", "slideId", "itemIds", "alignment"]),
     obj({"op": {"const": "distribute"}, **TARGETS, "axis": {"enum": ["x", "y"]}, "gap": {"type": "number", "minimum": 0, "maximum": 100000}}, ["op", "slideId", "itemIds", "axis"]),
-    obj({"op": {"const": "add_text"}, "slideId": STRING, "properties": PROPERTIES}, ["op", "slideId", "properties"]),
+    obj({"op": {"const": "add_text"}, "slideId": STRING, "properties": obj(OBJECT_FIELDS)}, ["op", "slideId", "properties"]),
     obj({"op": {"const": "add_shape"}, "slideId": STRING,
          "shapeType": {"enum": ["rect", "roundRect", "ellipse", "line", "arrow", "doubleArrow"]},
          "properties": obj({**PLACEMENT_FIELDS, **SHAPE_FIELDS})}, ["op", "slideId", "shapeType"]),
-    obj({"op": {"const": "place_asset"}, "slideId": STRING, "assetId": STRING, "properties": obj({**PLACEMENT_FIELDS, **STROKE_FIELDS})}, ["op", "slideId", "assetId"]),
+    obj({"op": {"const": "place_asset"}, "slideId": STRING, "assetId": STRING, "properties": obj({**PLACEMENT_FIELDS, **STROKE_FIELDS, **IMAGE_FIELDS})}, ["op", "slideId", "assetId"]),
     obj({"op": {"const": "swap_asset"}, "slideId": STRING, "itemId": STRING, "assetId": STRING}, ["op", "slideId", "itemId", "assetId"]),
     obj({"op": {"const": "duplicate"}, **TARGETS, "offsetX": NUMBER, "offsetY": NUMBER}, ["op", "slideId", "itemIds"]),
     obj({"op": {"const": "delete"}, **TARGETS}, ["op", "slideId", "itemIds"]),
@@ -91,6 +95,8 @@ def tool(name, description, schema, readonly=False):
 TOOLS = [
     tool("sessions", "List connected editor pages. Choose the exact session; never guess when multiple pages are open. Summary may lag; get_state reads live state.", obj({}), True),
     tool("get_state", "Read live project/slide/object IDs, geometry, text, shape fill/stroke styles, selection, revision, busy and save status. "
+         "For a pasted Layers / Copy AI reference, pass only sessionId and slideId. Match project.id and the copied selectedItemIds against slide.items before editing with the returned revision. "
+         "For images, omitted crop means the full source and omitted imageFit means stretch. "
          "Assets are metadata only. Each asset's usedBy lists its placements across all slides. "
          "Use relativePath and fingerprint when available to identify the source. Defaults to the active slide. Pass slideId to inspect another slide.",
          obj({**SESSION, "slideId": STRING}, SESSION), True),
@@ -117,7 +123,10 @@ TOOLS = [
          "Set geometry and fill/stroke/strokeWidth/strokeDash/fillOpacity/strokeOpacity; cornerRadius (0–0.5) is for roundRect. "
          "Line/arrow width or height may be zero. Use set for subsequent style edits; fill/stroke changes replace that gradient with a solid paint. "
          "place_asset adds a slide object linked to a project asset. Use an assetId from get_state.assets. "
-         "Omit properties for the editor's Place defaults. Set only width or height to preserve media proportions, or both to stretch. Geometry uses CSS px. "
+         "Omit properties for the editor's Place defaults. Set only width or height to preserve frame proportions, or both for an exact frame in CSS px. "
+         "On images, place_asset and set accept imageFit and crop. Use contain to center proportional content or stretch (default) to fill the frame. "
+         "Specify crop as {x,y,width,height} in original source fractions or null to restore. Fit applies first, followed by native crop and explicit frame geometry. "
+         "Cropping keeps a contain frame fixed. In stretch mode it keeps the source scale and adjusts the frame like the editor Crop dialog. "
          "swap_asset replaces one unlocked image object's source with an existing project SVG or raster image. "
          "Specify slideId, itemId and the replacement assetId. The replacement resets the crop and fits proportionally inside the same frame, centered. "
          "The object keeps its rotation and layer order. Library assets and other placements are unaffected. "

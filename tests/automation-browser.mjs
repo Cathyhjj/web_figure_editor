@@ -153,6 +153,71 @@ async function saveTestProject(page, sessionId, revision) {
   assert.equal(result.saved, true);
   return readTestProject(page);
 }
+async function checkPictureHandoff(page, sessionId) {
+  await openTestProject(page, createDeck());
+  const initial = (await call('get_state', { sessionId })).structuredContent;
+  const slideId = initial.activeSlideId;
+  // Keep this isolated run from replacing anything on the user's clipboard.
+  await page.evaluate(() => Object.defineProperty(navigator, 'clipboard', {
+    configurable: true, value: { writeText: async text => { window.copiedReference = text; } },
+  }));
+  const copyReference = async () => {
+    await page.getByRole('button', { name: 'Copy AI reference' }).click();
+    return JSON.parse(await page.evaluate(() => window.copiedReference));
+  };
+  const slideReference = { sessionId, projectId: initial.project.id, slideId, selectedItemIds: [] };
+  assert.deepEqual(await copyReference(), slideReference);
+
+  const path = 'handoff.svg';
+  await writeFile(join(assetRoot, path), '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><rect width="200" height="100" fill="#c04020"/><rect x="100" width="100" height="100" fill="#187050"/></svg>');
+  // A client without a registered asset root can import its plot through the CLI, then use MCP to draw.
+  const importArgs = join(output, 'handoff-import.json');
+  await writeFile(importArgs, JSON.stringify({ sessionId, expectedRevision: initial.revision, paths: [path] }));
+  const cli = await promisify(execFile)(python, ['figure_cli.py', '--port', String(port), '--asset-root', assetRoot, 'call', 'import_assets', '--args', importArgs]);
+  const imported = JSON.parse(cli.stdout).result;
+  const assetId = imported.assets[0].assetId;
+  const crop = { x: 0.5, y: 0, width: 0.5, height: 1 };
+  const properties = { name: 'Panel A', x: 40, y: 40, width: 200, height: 100, crop, imageFit: 'contain' };
+  const placement = { sessionId, expectedRevision: imported.revision, operations: [
+    { op: 'place_asset', slideId, assetId, properties },
+    { op: 'add_text', slideId, properties: { text: 'a', x: 15, y: 20, width: 20, height: 28 } },
+  ] };
+  const proposed = await call('preview_batch', placement);
+  const contained = [[60, 90, '#ffffff'], [140, 90, '#187050']];
+  await checkImagePixels(page, proposed, 'picture-handoff-preview.png', contained);
+  const placed = (await call('batch_edit', placement)).structuredContent;
+  await checkPreviewPixels(page, sessionId, placed, 'picture-handoff-applied.png', contained);
+
+  const [itemId, labelId] = placed.createdItemIds;
+  const layer = id => page.locator(`[data-layer="${id}"] .layer-select`);
+  await layer(itemId).click();
+  await layer(labelId).click({ modifiers: ['Shift'] });
+  assert.deepEqual(await copyReference(), { ...slideReference, selectedItemIds: [itemId, labelId] });
+  await layer(itemId).click();
+  await page.locator('[data-format-tab="picture"]').click();
+  await page.locator('#picture-fit').selectOption('stretch');
+  const reference = await copyReference();
+  assert.deepEqual(reference, { ...slideReference, selectedItemIds: [itemId] });
+  const target = { sessionId: reference.sessionId, slideId: reference.slideId };
+  const manual = (await call('get_state', target)).structuredContent;
+  assert.equal(manual.project.id, reference.projectId);
+  assert.deepEqual(manual.slide.items[0].crop, crop);
+  await checkPreviewPixels(page, sessionId, manual, 'picture-handoff-manual.png', [[60, 90, '#187050']]);
+
+  const restore = { sessionId, expectedRevision: manual.revision, operations: [
+    { op: 'set', slideId: reference.slideId, itemIds: reference.selectedItemIds, properties: { crop: null, imageFit: 'contain' } },
+  ] };
+  await call('batch_edit', { ...restore, expectedRevision: placed.revision }, /revision changed/);
+  const original = [[60, 90, '#c04020'], [210, 90, '#187050']];
+  await checkImagePixels(page, await call('preview_batch', restore), 'picture-handoff-restore-preview.png', original);
+  const restored = (await call('batch_edit', restore)).structuredContent;
+  await saveTestProject(page, sessionId, restored.revision);
+  await openTestProject(page);
+  const reopened = (await call('get_state', target)).structuredContent;
+  assert.deepEqual(reopened.slide, restored.slide);
+  await checkPreviewPixels(page, sessionId, reopened, 'picture-handoff-restored.png', original);
+  pass('agent places a cropped SVG, user adjusts its fit, copied layer IDs round-trip to MCP, and restored source survives save/reopen');
+}
 async function checkAgentAuthoring(page, sessionId) {
   await openTestProject(page, createDeck());
   const state = async () => (await call('get_state', { sessionId })).structuredContent;
@@ -815,11 +880,16 @@ try {
   const baseline = await checkProposedLayouts(second.page, secondId, source, settled);
   await checkSlideCopy(second.page, secondId, source, baseline);
   await checkAgentAuthoring(second.page, secondId);
+  await checkPictureHandoff(second.page, secondId);
   await second.page.locator('#ai-control-toggle').click();
   await sessions(1);
+  assert.equal(await second.page.locator('#copy-ai-reference').isDisabled(), true);
   await call('get_state', { sessionId: secondId }, /disconnected|expired/);
   await second.page.locator('#ai-control-toggle').click();
-  assert.notEqual((await sessions(2)).find(s => s.sessionId !== sessionId).sessionId, secondId);
+  const reconnected = (await sessions(2)).find(s => s.sessionId !== sessionId).sessionId;
+  assert.notEqual(reconnected, secondId);
+  await second.page.locator('#copy-ai-reference').click();
+  assert.equal(await second.page.evaluate(() => JSON.parse(window.copiedReference).sessionId), reconnected);
   pass('multiple pages are isolated; pause/reconnect invalidates old sessions');
   assert.deepEqual(errors, []); assert.equal(stderr, '');
   console.log(JSON.stringify({ passed: checks.length, output }));

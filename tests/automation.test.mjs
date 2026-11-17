@@ -110,6 +110,57 @@ function swapFixture() {
   return validateDeck(deck);
 }
 
+test('agent crops use the native rotated-image geometry and restore the full source', () => {
+  const deck = swapFixture(), [slide, other] = deck.slides, original = slide.items[0];
+  const before = structuredClone(deck);
+  const edit = (project, properties) => prepareBatch(project, [{ op: 'set', slideId: slide.id, itemIds: [original.id], properties }]).project;
+  const crop = { x: 0.4, y: 0.1, width: 0.2, height: 0.75 };
+  const cropped = edit(deck, { crop });
+  assert.deepEqual(cropped.slides[0].items[0], cropImage(original, crop));
+  const restored = edit(cropped, { crop: null }).slides[0].items[0];
+  const expected = cropImage(original);
+  for (const key of ['x', 'y', 'width', 'height']) assert.ok(Math.abs(restored[key] - expected[key]) < 1e-9);
+  assert.equal('crop' in restored, false);
+  assert.deepEqual(cropped.assets, before.assets);
+  assert.deepEqual(cropped.slides[1], other);
+  assert.deepEqual(deck, before);
+});
+
+test('place_asset and set apply crop and fit before explicit frame geometry', () => {
+  const deck = vectorDeck(), crop = { x: 0.25, y: 0, width: 0.5, height: 1 };
+  const placement = { x: 10, y: 20, width: 160, height: 100, crop, imageFit: 'contain' };
+  const placed = prepareBatch(deck, [op(deck, { op: 'place_asset', assetId: 'vector', properties: placement })]).project;
+  const image = placed.slides[0].items[0];
+  for (const [key, value] of Object.entries(placement)) assert.deepEqual(image[key], value);
+  assert.deepEqual(imageContentRect(image, placed.assets[0]), { x: 30, y: 0, width: 100, height: 100 });
+  const edited = prepareBatch(placed, [op(placed, { op: 'set', itemIds: [image.id], properties: {
+    width: 240, x: 5, y: 7, imageFit: 'stretch', crop: null,
+  } })]).project;
+  const stretched = edited.slides[0].items[0];
+  assert.deepEqual([stretched.x, stretched.y, stretched.width, stretched.height], [5, 7, 240, 75]);
+  assert.equal('crop' in stretched || 'imageFit' in stretched, false);
+  assert.deepEqual(validateDeck(JSON.parse(JSON.stringify(edited))), edited);
+});
+
+test('invalid or locked image adjustments reject all edits in a batch', () => {
+  const deck = swapFixture(), [slide, other] = deck.slides;
+  other.items[0].locked = true;
+  const edit = { op: 'set', slideId: slide.id, itemIds: ['panel'] }, before = structuredClone(deck);
+  const crop = { x: 0, y: 0, width: 1, height: 1 };
+  for (const invalid of [
+    { ...edit, properties: { crop: { ...crop, x: 0.1 } } },
+    { ...edit, properties: { crop: { ...crop, width: 0 } } },
+    { ...edit, properties: { crop: { ...crop, unknown: 42 } } },
+    { ...edit, properties: { imageFit: 'cover' } },
+    { ...edit, itemIds: ['panel', 'label'], properties: { imageFit: 'contain' } },
+    { ...edit, itemIds: ['label'], properties: { crop: null } },
+    { ...edit, slideId: other.id, itemIds: ['other'], properties: { crop } },
+  ]) {
+    assert.throws(() => prepareBatch(deck, [{ ...edit, properties: { x: 25 } }, invalid]));
+    assert.deepEqual(deck, before);
+  }
+});
+
 test('replace_asset preserves crop, frame, fit and effects on explicit placements across slides', () => {
   const deck = swapFixture();
   deck.slides[1].items[0].imageFit = 'contain';

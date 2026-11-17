@@ -313,6 +313,22 @@ class MCPTests(unittest.TestCase):
             with self.assertRaises(ValueError), patch.object(client, 'request', side_effect=AssertionError('must not connect')):
                 client.call('figure_inspect_svg', {**inspect, **overrides})
 
+    def test_crop_and_fit_are_available_for_image_placement_and_updates(self):
+        batch = {'sessionId': 's', 'expectedRevision': '1:0'}
+        crop = {'x': .1, 'y': .2, 'width': .9, 'height': .8}
+        for tool in TOOLS:
+            if tool['name'] not in ('figure_preview_batch', 'figure_batch_edit'):
+                continue
+            schema = tool['inputSchema']
+            for operation in [{'op': 'place_asset', 'slideId': 'slide', 'assetId': 'asset'},
+                              {'op': 'set', 'slideId': 'slide', 'itemIds': ['image']}]:
+                for props in [{'crop': crop, 'imageFit': 'contain'}, {'crop': None, 'imageFit': 'stretch'}]:
+                    validate({**batch, 'operations': [{**operation, 'properties': props}]}, schema)
+                for props in [{'imageFit': 'cover'}, {'crop': False}, {'crop': {**crop, 'width': 0}},
+                              {'crop': {**crop, 'z': 0}}, {'crop': {**crop, 'y': -1}}, {'crop': {'x': 0, 'y': 0}}]:
+                    with self.subTest(properties=props), self.assertRaises(ValueError):
+                        validate({**batch, 'operations': [{**operation, 'properties': props}]}, schema)
+
     def test_exports_write_new_files_only_and_report_hash(self):
         with tempfile.TemporaryDirectory() as directory:
             client = EditorClient(1, directory)

@@ -3,6 +3,7 @@ from contextlib import redirect_stdout, redirect_stderr
 import io
 import json
 from pathlib import Path
+import shlex
 import sys
 import tempfile
 import unittest
@@ -14,6 +15,39 @@ from figure_mcp import EditorClient, TOOLS, validate
 
 
 class AuthoringTests(unittest.TestCase):
+    def test_setup_commands_run_from_any_directory_and_quote_custom_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory, "Researcher's figure editor")
+            images = Path(directory, 'plots & figures')
+            images.mkdir()
+            exports = Path(directory, 'article exports')
+            output = io.StringIO()
+            with patch('figure_cli.REPO_DIR', repo), patch('figure_cli.EditorClient', side_effect=AssertionError('offline')), redirect_stdout(output):
+                self.assertEqual(main(['--port', '8767', '--asset-root', str(images), '--output-dir', str(exports), 'setup']), 0)
+            commands = json.loads(output.getvalue())
+            self.assertEqual(commands['editorUrl'], 'http://127.0.0.1:8767/')
+            self.assertEqual(shlex.split(commands['startServer']), [sys.executable, str(repo / 'server.py'), '--port', '8767'])
+            adapter = [sys.executable, str(repo / 'figure_mcp.py'), '--port', '8767', '--asset-root', str(images.resolve()), '--output-dir', str(exports.resolve())]
+            self.assertEqual(shlex.split(commands['register']['codex']), ['codex', 'mcp', 'add', 'figure_editor', '--', *adapter])
+            self.assertEqual(shlex.split(commands['register']['claude']), ['claude', 'mcp', 'add', '--transport', 'stdio', 'figure_editor', '--', *adapter])
+            self.assertFalse(exports.exists())
+
+    def test_sessions_reports_next_steps_without_contacting_a_page(self):
+        for sessions, hint in [([], 'http://127.0.0.1:8899/'), ([{'sessionId': 'one'}, {'sessionId': 'two'}], 'get_state')]:
+            with self.subTest(sessions=sessions), patch('figure_cli.EditorClient') as client, redirect_stdout(io.StringIO()) as output:
+                client.return_value.origin = 'http://127.0.0.1:8899'
+                client.return_value.call.return_value = {'structuredContent': {'sessions': sessions}, 'content': []}
+                self.assertEqual(main(['--port', '8899', 'sessions']), 0)
+                report = json.loads(output.getvalue())
+                self.assertEqual(report['result']['sessions'], sessions)
+                self.assertIn(hint, report['nextStep'])
+                client.return_value.call.assert_called_once_with('figure_sessions', {})
+        with patch('figure_cli.EditorClient') as client, redirect_stderr(io.StringIO()) as errors:
+            client.return_value.origin = 'http://127.0.0.1:8899'
+            client.return_value.call.side_effect = ValueError('Bridge unreachable.')
+            self.assertEqual(main(['--port', '8899', 'sessions']), 1)
+            self.assertIn('http://127.0.0.1:8899/', json.loads(errors.getvalue())['error'])
+
     def test_schema_supports_editable_authoring_and_rejects_invalid_fields_before_network(self):
         schema = next(t['inputSchema'] for t in TOOLS if t['name'] == 'figure_batch_edit')
         batch = {'sessionId': 's', 'expectedRevision': '1:0', 'operations': [

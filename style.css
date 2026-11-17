@@ -118,7 +118,8 @@ dialog{border:1px solid var(--drx-border);border-radius:15px;padding:0;width:min
 .properties-panel{grid-column:4;grid-row:1;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(210px,.43fr) minmax(0,1fr);overflow:hidden;border-top:0}
 .layers-panel{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;border-bottom:1px solid var(--drx-border);background:#fff}
 .layers-panel .panel-heading{border-bottom:0;flex-shrink:0}
-.layer-note{padding:0 16px 9px;font-size:9px;flex-shrink:0}
+.layer-note{display:flex;align-items:center;justify-content:space-between;gap:2px 8px;flex-wrap:wrap;padding:0 16px 9px;font-size:9px;flex-shrink:0}
+.layer-note .hint{font-size:inherit;margin:0}
 .layers-panel .layer-list{margin:0;padding:0 12px 13px;flex:1;min-height:0;overflow:auto;scrollbar-width:thin;gap:5px}
 .layers-panel .layer-list:empty::after{content:"No objects on this slide.";font-size:10px;color:#a093a8;line-height:1.8;padding:12px 4px}
 .layers-panel .layer-row{flex-shrink:0;min-height:34px;padding:7px 8px}

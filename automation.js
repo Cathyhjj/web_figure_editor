@@ -4,6 +4,7 @@ import { exportPDF } from './pdf.js';
 import { exportPPTX } from './pptx.js';
 import { generateHTMLReport } from './report.js';
 import { isMediaItem } from './video.js';
+import { cropImage } from './crop.js';
 import { applyLayout } from './layout.js';
 import { inspectSVGAsset, patchSVGAsset } from './svg-edit.js';
 import { SHAPE_TYPES, SHAPE_NAMES, isShapeItem, isLineShape } from './shapes.js';
@@ -25,9 +26,24 @@ function keys(value, allowed, label) {
   object(value, label);
   for (const key of Object.keys(value)) if (!allowed.includes(key)) fail(`Unsupported ${label} field: ${key}.`);
 }
-function properties(item, patch, { allowEmpty = false } = {}) {
-  keys(patch, fields, 'properties');
-  if (!allowEmpty && !Object.keys(patch).length) fail('Supply at least one property.');
+function properties(item, values, { allowEmpty = false } = {}) {
+  keys(values, [...fields, 'crop', 'imageFit'], 'properties');
+  if (!allowEmpty && !Object.keys(values).length) fail('Supply at least one property.');
+  const { crop, imageFit, ...patch } = values;
+  if (('crop' in values || 'imageFit' in values) && item.type !== 'image') fail('crop and imageFit require an image object.');
+  // The fit mode determines how the native Crop dialog sizes the frame. Any explicit
+  // geometry below then describes the final, visible frame, irrespective of key order.
+  if ('imageFit' in values) {
+    if (imageFit === 'stretch') delete item.imageFit;
+    else if (imageFit === 'contain') item.imageFit = imageFit;
+    else fail('imageFit must be contain or stretch.');
+  }
+  if ('crop' in values) {
+    if (crop !== null) keys(crop, ['x', 'y', 'width', 'height'], 'crop');
+    const cropped = cropImage(item, crop ?? undefined);
+    delete item.crop;
+    Object.assign(item, cropped);
+  }
   for (const [key, value] of Object.entries(patch)) {
     if (textFields.includes(key) && item.type !== 'text') fail(`${key} is only supported on text objects.`);
     const shape = isShapeItem(item) || item.type === 'shape';
@@ -338,7 +354,7 @@ export async function renderAutomation(project, params, preview = false) {
 }
 
 /** Same-origin long polling keeps the active browser document authoritative. */
-export function connectAutomation({ execute, summary, button, fetcher = fetch }) {
+export function connectAutomation({ execute, summary, button, onSessionChange, fetcher = fetch }) {
   let enabled = true, resumeEnabled = true, stopped = false, sessionId = null, token = null, controller = null;
   let delay = 500;
   const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -352,6 +368,7 @@ export function connectAutomation({ execute, summary, button, fetcher = fetch })
   }
   async function disconnect() {
     const old = sessionId; sessionId = null;
+    if (old) onSessionChange?.(null);
     if (old && token) { try { await request('disconnect', { sessionId: old }); } catch { /* Expiration also removes closed tabs. */ } }
   }
   if (button) button.onclick = () => {
@@ -368,6 +385,7 @@ export function connectAutomation({ execute, summary, button, fetcher = fetch })
           token = info.token;
           sessionId = (await request('register', { summary: summary() })).sessionId;
           if (!enabled || stopped) { await disconnect(); continue; }
+          onSessionChange?.(sessionId);
         }
         show('AI connected', `Local AI tools can control this page. Click to pause. Session: ${sessionId}`);
         const current = sessionId;

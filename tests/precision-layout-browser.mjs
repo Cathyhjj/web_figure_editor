@@ -143,6 +143,30 @@ try {
   await set('[data-property="width"]', 25.4); result = await save();
   near(result.slides[0].items[2].width, 96); near(result.slides[0].items[2].height, 48);
   pass('equal dimensions and Format Picture measurement fields preserve media aspect ratio');
+
+  const picture = imageDeck.slides[0].items[2];
+  Object.assign(picture, { width: 180, height: 140, rotation: 15, crop: { x: .25, y: 0, width: .5, height: 1 } });
+  const croppedDeck = validateDeck(imageDeck);
+  await load(croppedDeck); await select('c'); await page.locator('[data-format-tab="picture"]').click();
+  const fit = page.getByLabel('Picture fit', { exact: true });
+  assert.equal(await fit.inputValue(), 'stretch');
+  await fit.selectOption('contain');
+  const fitted = await save();
+  assert.deepEqual(fitted.slides[0].items[2], { ...croppedDeck.slides[0].items[2], imageFit: 'contain' });
+  assert.deepEqual(fitted.assets, croppedDeck.assets);
+  const viewport = page.locator('#stage [data-item="c"] svg[overflow="hidden"]');
+  assert.equal(await viewport.getAttribute('width'), '140');
+  assert.equal(await viewport.getAttribute('x'), '20');
+  await page.locator('#undo').click();
+  assert.deepEqual((await save()).slides[0].items[2], croppedDeck.slides[0].items[2]);
+  await page.locator('#redo').click(); assert.deepEqual((await save()).slides[0].items[2], fitted.slides[0].items[2]);
+  await load(fitted); await select('c');
+  assert.equal(await fit.inputValue(), 'contain');
+  await fit.selectOption('stretch'); assert.deepEqual((await save()).slides[0].items[2], croppedDeck.slides[0].items[2]);
+  assert.equal(await viewport.getAttribute('width'), '180');
+  await page.locator('[data-format-tab="size"]').click(); await page.locator('#object-locked').check();
+  await page.locator('[data-format-tab="picture"]').click(); assert.equal(await fit.isDisabled(), true);
+  pass('picture fit centers cropped art, preserves frame and source, persists, respects locking and supports Undo/Redo');
   await page.screenshot({ path: join(output, 'precision-layout.png'), fullPage: true });
   assert.deepEqual(errors, []); console.log(`${checks} precision layout browser checks passed. ${output}`);
 } catch (error) {
