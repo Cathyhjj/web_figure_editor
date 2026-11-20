@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="./style.css?v=canvas-text-1">
   <link rel="stylesheet" href="./format-inspector.css">
   <link rel="stylesheet" href="./object-context-menu.css">
+  <link rel="stylesheet" href="./sac-styles.css">
 </head>
 <body class="drx-ui" data-drx-theme="light">
   <svg class="icon-definitions" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -87,6 +88,10 @@
           <button data-add-shape="doubleArrow"><svg viewBox="0 0 32 24"><path d="M3 12H29M21 6L29 12L21 18M11 6L3 12L11 18"/></svg><span>Double arrow</span></button>
         </div>
       </div>
+    </div>
+    <div class="toolbar-group insert-tools">
+      <button id="sac-styles-toggle" class="button quiet" popovertarget="sac-styles-menu" aria-controls="sac-styles-menu"><svg><use href="#i-rect"/></svg><span>SAC styles</span><span aria-hidden="true">⌄</span></button>
+      <div id="sac-styles-menu" class="sac-styles-menu" popover="auto" aria-label="SAC styles"></div>
     </div>
     <div class="toolbar-group font-tools" role="group" aria-label="Text formatting" title="Format selected unlocked text">
       <label class="toolbar-label" for="font-family">Font</label>

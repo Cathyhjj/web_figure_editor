@@ -62,6 +62,19 @@ test('cropped pictures cast their visible alpha and inactive shadows add no rend
   }
 });
 
+test('a radial fade follows the contained photo and scales with its shadow', () => {
+  const project = fixture({
+    width: 100, height: 100, imageFit: 'contain',
+    softEdgeMode: 'radial', softEdgeAngle: 315, softEdgeRadius: 50,
+    shadow: enabled({ size: 150, distance: 0, blur: 0 }),
+  });
+  const svg = projectToSVG(project);
+  const circles = [...svg.matchAll(/<radialGradient\b([^>]+)>/g)].map(([, attrs]) =>
+    ['cx', 'cy', 'r'].map(key => Number(attrs.match(new RegExp(key + '="([^"]+)"'))?.[1])));
+  // The centered 2:1 image occupies y=25..75. Its shadow is 1.5× larger.
+  assert.deepEqual(circles, [[-25, 87.5, 37.5], [0, 75, 25]]);
+});
+
 test('clipboard bounds include size, offset, blur and subsequent item rotation without changing sources', () => {
   const shadow = enabled({ blur: 6, angle: 0, distance: 30 });
   const input = fixture({ rotation: 90, shadow });

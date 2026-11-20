@@ -17,7 +17,7 @@ const textFields = ['text', 'fontFamily', 'fontSize', 'fontWeight', 'fontStyle',
 const fillFields = ['fill', 'fillOpacity'];
 const strokeFields = ['stroke', 'strokeWidth', 'strokeOpacity', 'strokeDash'];
 const shapeFields = [...fillFields, ...strokeFields, 'cornerRadius'];
-const fields = ['name', ...geometry, ...textFields, ...shapeFields];
+const fields = ['name', ...geometry, ...textFields, ...shapeFields, 'softEdge', 'softEdgeMode', 'softEdgeAngle', 'softEdgeRadius', 'softEdgeStrength'];
 const fail = message => { throw new Error(message); };
 function object(value, label) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail(`${label} must be an object.`);
@@ -50,7 +50,8 @@ function properties(item, values, { allowEmpty = false } = {}) {
     if (fillFields.includes(key) && (!shape || isLineShape(item))) fail(`${key} requires a filled shape.`);
     if (strokeFields.includes(key) && !shape && item.type !== 'image') fail(`${key} requires a shape or image.`);
     if (key === 'cornerRadius' && item.type !== 'roundRect') fail('cornerRadius requires a rounded rectangle.');
-    if ([...geometry, 'fontSize', 'fillOpacity', 'strokeWidth', 'strokeOpacity', 'cornerRadius'].includes(key)) {
+    if (['softEdgeMode', 'softEdgeAngle', 'softEdgeRadius', 'softEdgeStrength'].includes(key) && item.type !== 'image') fail(`${key} requires an image object.`);
+    if ([...geometry, 'fontSize', 'fillOpacity', 'strokeWidth', 'strokeOpacity', 'cornerRadius', 'softEdge', 'softEdgeAngle', 'softEdgeRadius', 'softEdgeStrength'].includes(key)) {
       if (typeof value !== 'number' || !Number.isFinite(value)) fail(`${key} must be a finite number.`);
       if (['width', 'height', 'fontSize'].includes(key) && value <= 0 && !(isLineShape(item) && key !== 'fontSize' && value === 0)) fail(`${key} must be positive (line dimensions may be zero).`);
     } else if (key === 'fontWeight') {

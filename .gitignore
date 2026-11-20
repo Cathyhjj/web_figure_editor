@@ -268,3 +268,19 @@
 !/examples/
 /examples/*
 !/examples/agent-composition.json
+
+# Built-in SAC poster styles and editable native components.
+!/sac-theme.js
+!/sac-motifs.js
+!/sac-styles.js
+!/sac-styles.css
+!/docs/sac-styles.md
+!/tests/sac-styles-browser.mjs
+!/sac-poster.js
+!/sac-poster-parts.js
+!/assets/sac-poster/
+/assets/sac-poster/*
+!/assets/sac-poster/drxas-logo.png
+!/assets/sac-poster/ecosystem-wordmark.png
+!/assets/sac-poster/vascular-image.png
+!/assets/sac-poster/specimen-image.png

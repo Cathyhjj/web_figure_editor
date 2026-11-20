@@ -63,7 +63,15 @@ test('eligible single PNG retains exact original pixels without requiring browse
   const result = await selectionToPNG(selection([image({ width: 100, height: 100 })]));
   assert.equal(result.type, 'image/png');
   assert.deepEqual(Buffer.from(await result.arrayBuffer()), Buffer.from(PIXEL, 'base64'));
-  for (const change of [{ rotation: 12 }, { opacity: .5 }, { width: 200 }]) {
+  for (const effect of [
+    { softEdgeMode: 'single', softEdge: 20, softEdgeStrength: 0 },
+    { softEdgeMode: 'radial', softEdgeRadius: 0 },
+    { softEdgeMode: 'radial', softEdgeRadius: 75, softEdgeStrength: 0 },
+  ]) {
+    const off = selection([image({ width: 100, height: 100, ...effect })]);
+    assert.deepEqual(Buffer.from(await (await selectionToPNG(off)).arrayBuffer()), Buffer.from(PIXEL, 'base64'));
+  }
+  for (const change of [{ rotation: 12 }, { opacity: .5 }, { width: 200 }, { softEdgeMode: 'radial' }]) {
     await assert.rejects(selectionToPNG(selection([image({ width: 100, height: 100, ...change })])), /requires a browser/);
   }
 });

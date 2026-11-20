@@ -5,6 +5,9 @@ import { isMediaItem } from './video.js';
 import { htmlPosterDeck } from './html-chart.js';
 import { isLineShape } from './shapes.js';
 import { imageContentRect } from './crop.js';
+import { withRasterCanvas } from './core.js';
+import { objectBounds } from './shadow.js';
+import { hasSoftEdge, isGradientFeather } from './soft-edge.js';
 
 const EMU_PER_PX = 9525;
 const EMU_PER_PT = 12700;
@@ -194,7 +197,7 @@ function textShape(item, id, layout) {
 }
 function objectEffects(item, layout) {
   const shadow = item.shadow;
-  const softEdge = item.softEdge > 0 ? `<a:softEdge rad="${Math.round(item.softEdge * EMU_PER_PT * layout.scale)}"/>` : '';
+  const softEdge = !isGradientFeather(item) && hasSoftEdge(item) ? `<a:softEdge rad="${Math.round(item.softEdge * EMU_PER_PT * layout.scale)}"/>` : '';
   if (!shadow?.enabled) return softEdge ? `<a:effectLst>${softEdge}</a:effectLst>` : '';
   // Native DrawingML keeps the effect editable in PowerPoint's Shadow panel.
   // Shadow lengths are points; percentages and clockwise angles are independent
@@ -217,6 +220,36 @@ function cropInsets(c) {
   const left = Math.min(99999, percent(c.x)), top = Math.min(99999, percent(c.y));
   return [left, top, Math.min(99999 - left, percent(1 - c.x - c.width)), Math.min(99999 - top, percent(1 - c.y - c.height))];
 }
+// PowerPoint's native softEdge only supports all four sides. Keep a separate
+// transparent picture for each gradient-feathered placement, including its crop/border.
+function rasterizedFeather(item) {
+  return isGradientFeather(item) && hasSoftEdge(item);
+}
+
+async function featheredPictureBytes(item, asset) {
+  const bounds = objectBounds(item);
+  const rect = imageContentRect(item, asset);
+  const sourceScale = Math.max(asset.width * (item.crop?.width ?? 1) / rect.width,
+    asset.height * (item.crop?.height ?? 1) / rect.height);
+  // Preserve source detail up to the same raster budget used for SVG fallback pictures.
+  const scale = Math.min(Math.max(3, sourceScale), 8192 / bounds.width, 8192 / bounds.height,
+    Math.sqrt(24000000 / bounds.width / bounds.height), 25);
+  const local = { format: 'figure-editor', version: 1, id: 'picture', name: 'Feathered picture', assets: [asset],
+    canvas: { width: 1, height: 1, background: 'transparent' },
+    items: [{ ...item, x: -bounds.x, y: -bounds.y, rotation: 0, opacity: 1, shadow: undefined }] };
+  const bytes = await withRasterCanvas(local, scale * 96, async canvas => {
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+    if (!blob) error(`could not encode the feathered picture “${item.name}”.`);
+    return new Uint8Array(await blob.arrayBuffer());
+  }, 'PowerPoint feathered picture', { gradientRotation: item.rotation, patchSize: bounds });
+  // The patch extends symmetrically by half its border. Its center and rotation
+  // stay aligned with the original frame, and opacity and shadow remain native.
+  const picture = { ...item, x: item.x + bounds.x, y: item.y + bounds.y, width: bounds.width, height: bounds.height,
+    crop: undefined, imageFit: undefined, strokeWidth: 0, softEdge: 0, softEdgeMode: undefined,
+    softEdgeAngle: undefined, softEdgeRadius: undefined, softEdgeStrength: undefined };
+  return { extension: 'png', bytes, picture };
+}
+
 function imageShape(item, asset, id, relationship, layout, svgRelationship, insets) {
   const svgExtension = svgRelationship ? `<a:extLst><a:ext uri="{96DAC541-7B7A-43D3-8B79-37D633B846F1}"><asvg:svgBlip xmlns:asvg="http://schemas.microsoft.com/office/drawing/2016/SVG/main" r:embed="${svgRelationship}"/></a:ext></a:extLst>` : '';
   const alpha = Math.round(item.opacity * 100000);
@@ -293,21 +326,23 @@ function slideXML(slide, layout, assets, media) {
       shapes.push(videoShape(item, assets.get(item.assetId), id, videoRelationships.get(item.assetId), layout));
       videoIds.push(id);
     } else if (item.type === 'image') {
-      if (!imageRelationships.has(item.assetId)) {
+      const key = rasterizedFeather(item) ? item : item.assetId;
+      const file = media.get(key);
+      if (!imageRelationships.has(key)) {
         const relationship = `rId${relationshipsList.length + 1}`;
-        const file = media.get(item.assetId);
         relationshipsList.push({ id: relationship, type: 'image', target: `../media/${file.fallback?.filename || file.filename}` });
         let svgRelationship;
         if (file.fallback) {
           svgRelationship = `rId${relationshipsList.length + 1}`;
           relationshipsList.push({ id: svgRelationship, type: 'image', target: `../media/${file.filename}` });
         }
-        imageRelationships.set(item.assetId, { relationship, svgRelationship });
+        imageRelationships.set(key, { relationship, svgRelationship });
       }
-      const refs = imageRelationships.get(item.assetId);
+      const refs = imageRelationships.get(key);
       const asset = assets.get(item.assetId);
-      shapes.push(item.imageFit === 'contain' ? containedPicture(item, asset, id, refs, layout, nextId)
-        : imageShape(item, asset, id, refs.relationship, layout, refs.svgRelationship));
+      const picture = file.picture ?? item;
+      shapes.push(picture.imageFit === 'contain' ? containedPicture(picture, asset, id, refs, layout, nextId)
+        : imageShape(picture, asset, id, refs.relationship, layout, refs.svgRelationship));
     } else shapes.push(item.type === 'text' ? textShape(item, id, layout) : shape(item, id, layout));
   }
   // PowerPoint has one common page boundary. Cover fitted-canvas margins so objects
@@ -474,15 +509,16 @@ export async function exportPPTX(input) {
   const media = new Map();
   let mediaSize = 0;
   for (const slide of deck.slides) for (const item of slide.items) {
-    if (!isMediaItem(item) || item.hidden || media.has(item.assetId)) continue;
+    const key = rasterizedFeather(item) ? item : item.assetId;
+    if (!isMediaItem(item) || item.hidden || media.has(key)) continue;
     const asset = assets.get(item.assetId);
     const encoded = asset.mime === 'video/mp4'
       ? { bytes: Uint8Array.from(atob(asset.dataUrl.slice(asset.dataUrl.indexOf(',') + 1)), c => c.charCodeAt(0)), extension: 'mp4', poster: { ...await imageBytes({ mime: 'image/png', dataUrl: asset.posterDataUrl }), filename: `poster${media.size + 1}.png` } }
-      : await imageBytes(asset);
+      : rasterizedFeather(item) ? await featheredPictureBytes(item, asset) : await imageBytes(asset);
     mediaSize += encoded.bytes.length + (encoded.poster?.bytes.length || 0) + (encoded.fallback?.bytes.length || 0);
     if (encoded.fallback) encoded.fallback.filename = `fallback${media.size + 1}.png`;
     checkBudget(xmlBudget + mediaSize);
-    media.set(item.assetId, { ...encoded, filename: `${item.type === 'video' ? 'video' : 'image'}${media.size + 1}.${encoded.extension}` });
+    media.set(key, { ...encoded, filename: `${item.type === 'video' ? 'video' : 'image'}${media.size + 1}.${encoded.extension}` });
   }
   const presentation = `${XML}<p:presentation ${namespaces} autoCompressPictures="0"><p:sldMasterIdLst><p:sldMasterId id="2147483648" r:id="rId1"/></p:sldMasterIdLst><p:sldIdLst>${deck.slides.map((_, i) => `<p:sldId id="${256 + i}" r:id="rId${i + 2}"/>`).join('')}</p:sldIdLst><p:sldSz cx="${emu(layout.width)}" cy="${emu(layout.height)}" type="custom"/><p:notesSz cx="6858000" cy="9144000"/></p:presentation>`;
   const entries = [

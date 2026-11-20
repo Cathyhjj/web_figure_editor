@@ -1,6 +1,6 @@
 /** Picture shadows use PowerPoint-style points; item geometry uses 96 CSS px/in. */
 import { imageContentRect, imageCrop } from './crop.js';
-import { softEdgeSVG } from './soft-edge.js';
+import { isGradientFeather, softEdgeSVG } from './soft-edge.js';
 import { shapeBounds as vectorBounds } from './shape.js';
 import { isShapeItem, shapeBounds as presetBounds, shapeSVG as presetSVG } from './shapes.js';
 
@@ -69,6 +69,12 @@ export function imageBorderSVG(item,id){
   return presetSVG({...item,type:'rect',fill:'none'},id);
 }
 
+/** Keep the mask large enough for the border, and start the fade at the displayed pixels. */
+export function softEdgeBounds(item, asset) {
+  const bounds = objectBounds(item);
+  return asset && isGradientFeather(item) ? { ...bounds, content: imageContentRect(item, asset) } : bounds;
+}
+
 function shadowGeometry(item, sourceBounds = objectBounds(item)) {
   if (item.shadow === undefined) return null;
   const shadow = validateShadow(item.shadow);
@@ -122,6 +128,9 @@ export function imageShadowSVG(item, asset, filterId) {
   const border=imageBorderSVG(item,filterId+'-border');
   if(border)picture+=`<g transform="translate(${n(x)} ${n(y)}) scale(${n(shadow.size/100)})">${border}</g>`;
   const source = objectBounds(item);
-  picture = softEdgeSVG({ ...item, softEdge: (item.softEdge || 0) * scale }, picture, filterId + '-soft-edge', { x: x + source.x * scale, y: y + source.y * scale, width: source.width * scale, height: source.height * scale });
+  picture = softEdgeSVG({ ...item, softEdge: (item.softEdge || 0) * scale }, picture, filterId + '-soft-edge', {
+    x: x + source.x * scale, y: y + source.y * scale, width: source.width * scale, height: source.height * scale,
+    content: { x: left, y: top, width, height },
+  });
   return `<defs><filter id="${filterId}" filterUnits="userSpaceOnUse" x="${n(bounds.x)}" y="${n(bounds.y)}" width="${n(bounds.width)}" height="${n(bounds.height)}" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceAlpha" stdDeviation="${n(sigma)}" result="shadow-blur"/><feFlood flood-color="${shadow.color}" flood-opacity="${n(1 - shadow.transparency / 100)}"/><feComposite in2="shadow-blur" operator="in"/></filter></defs><g filter="url(#${filterId})" pointer-events="none">${picture}</g>`;
 }

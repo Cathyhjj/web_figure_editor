@@ -325,6 +325,16 @@ test('PDF crops an image with a vector clip while preserving original source pix
   });
 });
 
+test('zero-strength feather keeps original PDF source pixels at high export DPI', async () => {
+  await withBrowser({}, async state => {
+    const project = imageFixture({ softEdge: 20, softEdgeMode: 'single', softEdgeAngle: 45, softEdgeStrength: 0 });
+    const objects = await parsePDF(await exportPDF(project, 600));
+    assert.match(images(objects)[0].dictionary, /\/Width 2 \/Height 2\b/);
+    assert.deepEqual(state.reads, [[0, 0, 2, 2]]);
+    assertReleased(state);
+  });
+});
+
 test('PDF contains a cropped source in its rotated frame without resampling it', async () => {
   await withBrowser({}, async state => {
     const project = imageFixture({ imageFit: 'contain', rotation: 90, crop: { x: .25, y: 0, width: .5, height: 1 } });

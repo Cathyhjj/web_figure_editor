@@ -1,0 +1,16 @@
+#sac-styles-toggle { color: #00609c; }
+.sac-styles-menu { position: fixed; inset: auto; margin: 0; width: 430px; max-width: calc(100vw - 16px); max-height: min(720px, calc(100vh - 24px)); overflow: auto; padding: 18px; border: 1px solid #d7e2ea; border-radius: 12px; background: #fff; color: #232425; box-shadow: 0 12px 36px #18283626; }
+.sac-styles-menu h2 { margin: 0 0 5px; font-size: 17px; color: #00609c; }
+.sac-hint { margin: 0 0 14px; font-size: 12px; line-height: 1.5; color: #676b73; }
+.sac-styles-menu .shape-search { box-sizing: border-box; width: 100%; }
+.sac-category h3 { margin: 18px 0 9px; color: #00609c; font-size: 12px; }
+.sac-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.sac-grid button { display: flex; flex-direction: column; gap: 7px; align-items: center; min-width: 0; padding: 9px 5px; border: 1px solid #e2e8ed; border-radius: 7px; background: #fff; color: #232425; cursor: pointer; font: inherit; }
+.sac-grid button:hover { border-color: #0082ca; background: #f4f9fc; }
+.sac-grid button:focus-visible { outline: 2px solid #0082ca; outline-offset: 2px; }
+.sac-grid button[hidden], .sac-category[hidden] { display: none; }
+.sac-grid button > svg { width: 100%; height: 65px; display: block; fill: initial; stroke: none; }
+.sac-grid button > span { font-size: 11px; line-height: 1.3; text-align: center; white-space: normal; }
+@media (max-width: 480px) { .sac-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.sac-grid button:not(:has(> svg))::before { content: ""; display: block; height: 65px; }

@@ -1,6 +1,7 @@
 import { imageContentRect, imageCrop } from './crop.js';
 import { pptxLayoutForDeck } from './pptx.js';
 import { objectBounds, shadowBounds } from './shadow.js';
+import { hasSoftEdge, isGradientFeather } from './soft-edge.js';
 import { isLineShape, shapeColor } from './shapes.js';
 import { fromPixels } from './units.js';
 import { isMediaItem } from './video.js';
@@ -43,7 +44,8 @@ function orientedBounds(item, asset) {
 function vectorOutput(format, item, asset) {
   const svg = asset?.mime === 'image/svg+xml';
   if (format === 'png') return 'rasterized';
-  if (format === 'pdf' && (svg || item.fillGradient || item.strokeGradient || item.shadow?.enabled || item.softEdge > 0)) return 'rasterized';
+  if (format === 'pdf' && (svg || item.fillGradient || item.strokeGradient || item.shadow?.enabled || hasSoftEdge(item))) return 'rasterized';
+  if (format === 'pptx' && isGradientFeather(item) && hasSoftEdge(item)) return 'rasterized';
   if (format === 'pptx' && svg) return 'vector_with_png_fallback';
   return 'vector';
 }
@@ -119,7 +121,7 @@ export function checkExport(project, params) {
   return { format, minRasterDpi, slides, findings, notes: [
     'Print width is the width of the entire output page. PPTX centers each source canvas on the common PowerPoint page. Other formats use each slide’s canvas. Without an override, 96 output CSS px equal one inch. HTML viewer or printer scaling can change the final size.',
     'Raster DPI uses the visible source pixels on each local axis and the fitted picture dimensions. The lower axis is compared before rounding. HTML snapshots and video posters use their own pixel dimensions.',
-    'Vector entries have no source DPI. PNG rasterizes the page. PDF rasterizes SVG pictures and effect or gradient patches at the selected export DPI. PPTX embeds SVG with a PNG fallback.',
+    'Vector entries have no source DPI. PNG rasterizes the page. PDF rasterizes SVG pictures and effect or gradient patches at the selected export DPI. PPTX embeds SVG with a PNG fallback and renders single-edge and radial feathering as transparent PNGs.',
     'Bounds use original slide CSS px, including painted borders and shadows. PowerPoint covers the margins around the fitted canvas. Rotated bounds are conservative. Text bounds depend on available fonts, and image bounds include transparent pixels within the source.',
   ] };
 }

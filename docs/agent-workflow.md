@@ -56,6 +56,10 @@ Agent 用你的数据和绘图脚本输出 SVG/PNG/JPEG，再通过 `figure_impo
 
 `crop` 的坐标和宽高是相对于完整原图的比例。用 `"crop": null` 恢复原图。在 `contain` 模式下裁剪会保留外框。在默认的 `stretch` 模式下裁剪会保持源图缩放并调整外框。一次同时指定多项属性时，依次处理适配方式、裁剪、显式位置和尺寸。
 
+图片支持单边羽化。例如在 `set` 或 `place_asset` 的 `properties` 中使用 `{"softEdgeMode":"single","softEdge":15,"softEdgeAngle":90,"softEdgeStrength":50}`，即可让图片从上边向内渐显。宽度单位为 pt，范围为 0–100。强度 `softEdgeStrength` 可设为 0–300，省略时为 100。0 关闭单边羽化，50 使最外缘保留一半原有不透明度，100 使最外缘完全透明。超过 100 后，渐变区域内部会进一步变淡，宽度保持不变。例如 200 时，渐变中点保留四分之一的原有不透明度。0°、90°、180°、270° 分别对应左、上、右、下，中间角度对应斜向渐变。将 `softEdge` 设为 0 可关闭羽化，将 `softEdgeMode` 设为 `all` 可切回四边羽化。
+
+使用 `{"softEdgeMode":"radial","softEdgeAngle":315,"softEdgeRadius":50}` 可从图片左下角向内做圆形羽化。角度沿图片周边定位圆心，半径按当前显示图像短边的百分比计算，范围为 0–200，默认 50。径向羽化使用同一强度设置，半径或强度设为 0 即可关闭。
+
 SVG 可以在前端 **Edit SVG elements** 中修改文本和属性，也可以通过 `inspect_svg` / `edit_svg` 操作。生成 SVG 时保留文本有助于后续改字；已转为路径的文字不能直接当文本修改。PNG/JPEG 只能整体裁剪、缩放和调整效果，不会自动恢复内部曲线或坐标轴数据。
 
 源图重算后，使用 `check_sources` 找到变化 → `import_assets` 导入新版本 → 预览 `replace_asset` → 应用到明确选中的面板。它保留前端调好的位置、图框、裁剪和样式；`swap_asset` 则清除裁剪并把完整新图按比例放入原图框。源图比例改变后应检查裁剪内容。

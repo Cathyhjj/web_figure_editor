@@ -94,6 +94,16 @@ test('vectors have no source-DPI findings; flattened SVGs, chart snapshots and v
   }
 });
 
+test('PPTX checks classify only visibly feathered SVG pictures as rasterized', () => {
+  const svg = { ...raster, mime: 'image/svg+xml' };
+  const items = ['single', 'radial'].flatMap(mode => [0, 50, 300].map(strength => panel(mode + strength, {
+    softEdgeMode: mode, softEdge: mode === 'single' ? 20 : 0, softEdgeStrength: strength,
+  })));
+  const vectors = checkExport(deck([svg], items), { format: 'pptx' }).slides[0].vectors;
+  assert.deepEqual(vectors.map(item => item.output), ['vector_with_png_fallback', 'rasterized', 'rasterized',
+    'vector_with_png_fallback', 'rasterized', 'rasterized']);
+});
+
 test('all formats report missing snapshots on the inspected slide, skipping hidden and transparent objects', () => {
   const project = deck([{ id: 'chart', mime: 'text/html', hasSnapshot: false }],
     [panel('h', { type: 'html', assetId: 'chart', hidden: true }), panel('t', { type: 'html', assetId: 'chart', opacity: 0 })],

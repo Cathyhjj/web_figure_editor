@@ -50,6 +50,71 @@ try{
   await page.locator('#format-tab-size').click();await page.locator('#object-locked').uncheck();await page.locator('#format-tab-effects').click();
   await page.locator('#soft-edge-preset').selectOption('0');
   check('No soft edges removes the selected object filter',await page.locator('#stage .figure-item.selected filter').count()===0);
+  await open(fixture);
+  check('Older pictures default to all edges',await page.locator('#soft-edge-mode').inputValue()==='all'&&await page.locator('#soft-edge-angle').count()===0);
+  await page.locator('#soft-edge-mode').selectOption('single');
+  check('One edge starts with a visible width and a left-edge fade',await page.locator('#soft-edge-size').inputValue()==='10'&&await page.locator('#soft-edge-direction').inputValue()==='0');
+  const strength=page.locator('#soft-edge-strength');
+  const strengthSlider=page.getByRole('slider',{name:'Soft edges strength slider'});
+  check('A newly enabled one-edge fade starts at the original 100% strength',await strength.inputValue()==='100'&&await strengthSlider.inputValue()==='100');
+  await strengthSlider.evaluate(el=>{
+    for(const value of ['70','40']){el.value=value;el.dispatchEvent(new Event('input',{bubbles:true}));}
+    el.dispatchEvent(new Event('change',{bubbles:true}));
+  });
+  check('Strength and width are independent',await strength.inputValue()==='40'&&await page.locator('#soft-edge-size').inputValue()==='10');
+  await page.locator('#undo').click();await page.locator('#workspace').focus();await page.keyboard.press('Meta+a');
+  check('One undo restores the entire strength gesture',await strength.inputValue()==='100');
+  await strength.fill('50');await strength.press('Tab');
+  check('Typing a strength updates its slider',await strengthSlider.inputValue()==='50');
+  await page.locator('#soft-edge-mode').selectOption('all');
+  check('All-edge mode hides the one-edge strength setting',await strength.count()===0);
+  await page.locator('#soft-edge-mode').selectOption('single');
+  check('Returning to one edge remembers its strength',await strength.inputValue()==='50');
+  await strength.fill('225');await strength.press('Tab');
+  check('Typing a boosted strength updates its slider',await strengthSlider.inputValue()==='225');
+  await strengthSlider.focus();await strengthSlider.press('End');
+  check('The strength slider reaches 300% without changing width',await strength.inputValue()==='300'&&await page.locator('#soft-edge-size').inputValue()==='10');
+  await page.locator('#soft-edge-direction').selectOption({label:'Top'});
+  check('Choosing Top sets the angle to 90 degrees',await page.locator('#soft-edge-angle').inputValue()==='90');
+  const angleSlider=page.getByRole('slider',{name:'Soft edges angle slider'});
+  await angleSlider.evaluate(el=>{
+    for(const value of ['62','37']){el.value=value;el.dispatchEvent(new Event('input',{bubbles:true}));}
+    el.dispatchEvent(new Event('change',{bubbles:true}));
+  });
+  check('Rotating the fade updates the number and direction',await page.locator('#soft-edge-angle').inputValue()==='37'&&await page.locator('#soft-edge-direction').inputValue()==='custom');
+  await page.locator('#undo').click();await page.locator('#workspace').focus();await page.keyboard.press('Meta+a');
+  check('One undo restores the entire angle gesture',await page.locator('#soft-edge-angle').inputValue()==='90');
+  await page.locator('#redo').click();await page.locator('#workspace').focus();await page.keyboard.press('Meta+a');
+  const angled=await saved();
+  await open(angled);
+  check('Reopening preserves the angle, mode and active width',await page.locator('#soft-edge-angle').inputValue()==='37'&&await page.locator('#soft-edge-mode').inputValue()==='single'&&await page.locator('#soft-edge-size').inputValue()==='10');
+  check('Saving and reopening preserves 300% strength',angled.slides[0].items[0].softEdgeStrength===300&&await strength.inputValue()==='300'&&await strengthSlider.inputValue()==='300');
+  await page.locator('#format-tab-size').click();await page.locator('#object-locked').check();await page.locator('#format-tab-effects').click();
+  check('Locking the picture disables direction and angle',await page.locator('#soft-edge-mode').isDisabled()&&await page.locator('#soft-edge-direction').isDisabled()&&await angleSlider.isDisabled());
+  check('Locking also disables the strength slider and number',await strength.isDisabled()&&await strengthSlider.isDisabled());
+  await open(fixture);
+  await page.locator('#soft-edge-mode').selectOption('radial');
+  const radius=page.locator('#soft-edge-radius');
+  const radiusSlider=page.getByRole('slider',{name:'Soft edges radius slider'});
+  check('Radial opens directly on an unfeathered picture with a visible default radius',
+    await radius.inputValue()==='50'&&await page.locator('#stage radialGradient').count()>0&&await page.locator('#soft-edge-size,#soft-edge-preset').count()===0);
+  check('Radial provides eight edge and corner positions',await page.locator('#soft-edge-direction option:enabled').count()===8);
+  await page.locator('#soft-edge-direction').selectOption('315');
+  check('The bottom-left radial center corresponds to 315 degrees',await page.locator('#soft-edge-angle').inputValue()==='315');
+  await page.locator('#soft-edge-angle').fill('22');await page.locator('#soft-edge-angle').press('Tab');
+  check('Radial accepts intermediate angles',await page.locator('#soft-edge-direction').inputValue()==='custom');
+  await radius.fill('125');await radius.press('Tab');
+  check('Typing a radial size updates its slider',await radiusSlider.inputValue()==='125');
+  await radiusSlider.focus();await radiusSlider.press('End');
+  check('The radial radius slider reaches 200%',await radius.inputValue()==='200');
+  await strength.fill('275');await strength.press('Tab');
+  const radialProject=await saved();await open(radialProject);
+  check('Saving and reopening restores radial mode, radius, angle and boosted strength',
+    await page.locator('#soft-edge-mode').inputValue()==='radial'&&await radius.inputValue()==='200'&&await page.locator('#soft-edge-angle').inputValue()==='22'&&await strength.inputValue()==='275');
+  const shapeFixture=structuredClone(fixture);
+  shapeFixture.slides[0].items=[{id:'shape',type:'rect',name:'Shape',x:30,y:30,width:80,height:60,fill:'#2864dc'}];
+  await open(shapeFixture);
+  check('Only pictures offer the one-edge mode',await page.locator('#soft-edge-mode').count()===0&&await page.locator('#soft-edge-size').inputValue()==='0');
   snapshot.slides[0].items[0].softEdge=10;
   await open(snapshot);
   await page.screenshot({path:path.join(output,'soft-edge-editor.png')});
@@ -76,18 +141,82 @@ try{
     const combined=await pixels(await exportPNG(shadow,96));check('Feather and shadow compose without losing the shadow',combined(250,120)[3]>0&&combined(250,120)[1]>150);
     const copied=await pixels(await selectionToPNG(p));check('Copy as PNG retains feather rather than raw image bytes',copied(20,80)[3]<80&&copied(40,80)[3]>245);
     const svg=projectToSVG(p);check('SVG retains an editable embedded effect',svg.includes('soft-edge-mask')&&svg.includes('data:image/png;base64,'));
+    const oneEdge=structuredClone(p);
+    // Crop out the transparent margins, so each sample tests the image frame.
+    Object.assign(oneEdge.items[0],{crop:{x:.1,y:.125,width:.8,height:.75},softEdge:30,softEdgeMode:'single'});
+    const alphaByStrength=[];
+    for(const strength of [0,50,100,200,300]){
+      oneEdge.items[0].softEdgeStrength=strength;
+      const sample=await pixels(await exportPNG(oneEdge,96));
+      alphaByStrength.push([41,60,85].map(x=>sample(x,120)[3]));
+    }
+    const [off,half,full,double,triple]=alphaByStrength;
+    check('At fixed width, 0%, 50% and 100% change only the strength of the fade',
+      off.every(a=>a===255)&&full[0]<20&&full[1]>110&&full[1]<150&&full[2]===255&&
+      half.every((a,i)=>Math.abs(a-(off[i]+full[i])/2)<3));
+    const midpointOpacity=full[1]/255;
+    check('At 200% and 300% the middle of the same fade is progressively more transparent',
+      Math.abs(double[1]/255-midpointOpacity**2)<0.015&&Math.abs(triple[1]/255-midpointOpacity**3)<0.015);
+    check('Pixels beyond the original fade width stay fully opaque at boosted strengths',
+      double[2]===255&&triple[2]===255);
+    const edgeSamples=[[41,120],[140,41],[238,120],[140,198]];
+    for(const [index,angle] of [0,90,180,270].entries()){
+      oneEdge.items[0].softEdgeAngle=angle;
+      const sample=await pixels(await exportPNG(oneEdge,96));
+      const alpha=edgeSamples.map(([x,y])=>sample(x,y)[3]);
+      check(`At ${angle}° only the chosen side fades`,alpha[index]<35&&alpha.every((v,i)=>i===index||v>245));
+    }
+    oneEdge.items[0].softEdgeAngle=45;
+    const diagonal=await pixels(await exportPNG(oneEdge,96));
+    check('A diagonal angle fades the upper left and preserves the opposite corner',diagonal(42,42)[3]<60&&diagonal(237,197)[3]>245);
+    // The cropped picture spans (40,40) to (240,200), so a 50% radius = 80 pixels.
+    const radial=structuredClone(oneEdge),radialItem=radial.items[0];
+    delete radialItem.softEdge;
+    Object.assign(radialItem,{softEdgeMode:'radial',softEdgeAngle:0,softEdgeRadius:50,softEdgeStrength:100});
+    const left=await pixels(await exportPNG(radial,96));
+    const leftSamples=[[80,120],[64,152],[64,88]].map(([x,y])=>left(x,y)[3]);
+    check('A radial fade from the left has circular contours in a non-square picture',
+      left(41,120)[3]<12&&left(130,120)[3]===255&&leftSamples.every(alpha=>Math.abs(alpha-128)<6));
+    radialItem.softEdgeAngle=315;
+    const bottomLeft=await pixels(await exportPNG(radial,96));
+    const cornerSamples=[[80,198],[41,159],[64,167]].map(([x,y])=>bottomLeft(x,y)[3]);
+    check('A bottom-left radial fade is centered on the corner',
+      bottomLeft(41,198)[3]<12&&bottomLeft(41,41)[3]===255&&cornerSamples.every(alpha=>Math.abs(alpha-128)<6));
+    radialItem.softEdgeStrength=300;
+    const boostedCorner=await pixels(await exportPNG(radial,96));
+    check('In a 300% radial fade the circle midpoint follows the boosted opacity curve',
+      Math.abs(boostedCorner(80,198)[3]-32)<6&&boostedCorner(140,198)[3]===255);
     const pdf=await exportPDF(p,96);check('PDF contains a transparency mask for the feathered bitmap',/\/SMask/.test(await pdf.text()));
+    const directionalPDF=await exportPDF(oneEdge,96);
+    check('Single-edge PDF includes a grayscale alpha mask',/\/SMask\s+\d+\s+0\s+R/.test(await directionalPDF.text()));
     const local=await (await fetch('/api/local')).json();
-    const ppt=await exportPPTX(cropped), encoded=await new Promise(resolve=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.readAsDataURL(ppt);});
-    const response=await fetch('/api/pptx-import',{method:'POST',headers:{'Content-Type':'application/json','X-Figure-Token':local.token},body:JSON.stringify({name:'soft-edge.pptx',data:encoded,slide:1})});
-    const converted=await response.json();if(!response.ok)throw new Error(JSON.stringify(converted));
-    const reopened=await preparePPTXSlide(converted);
+    async function roundTripPPTX(project) {
+      const ppt=await exportPPTX(project);
+      const encoded=await new Promise(resolve=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.readAsDataURL(ppt);});
+      const response=await fetch('/api/pptx-import',{method:'POST',headers:{'Content-Type':'application/json','X-Figure-Token':local.token},body:JSON.stringify({name:'soft-edge.pptx',data:encoded,slide:1})});
+      const converted=await response.json();if(!response.ok)throw new Error(JSON.stringify(converted));
+      return preparePPTXSlide(converted);
+    }
+    const reopened=await roundTripPPTX(cropped);
     check('PPTX export and real import preserve editable soft edges and crop',reopened.deck.slides[0].items[0].softEdge===10&&reopened.deck.slides[0].items[0].crop.x===.25);
+    const paired=structuredClone(oneEdge);
+    paired.canvas.width=520;
+    paired.items.push({...paired.items[0],id:'plain-copy',x:280,softEdge:0});
+    const imported=slideProject((await roundTripPPTX(paired)).deck);
+    // PowerPoint supplies a slide background. Isolate the pictures' own alpha.
+    imported.canvas.background='transparent';
+    const pptPixels=await pixels(await exportPNG(imported,96));
+    const diagonalPoints=[[42,42],[52,52],[140,120],[237,197]];
+    check('PowerPoint preserves the diagonal fade through export and import',
+      diagonalPoints.every(([x,y])=>Math.abs(pptPixels(x,y)[3]-diagonal(x,y)[3])<8));
+    check('A second placement of the same picture stays opaque after PowerPoint round trip',
+      imported.items.length===2&&imported.items[0].assetId!==imported.items[1].assetId&&pptPixels(282,42)[3]>245);
     const data=async blob=>Array.from(new Uint8Array(await blob.arrayBuffer()));
-    return {results,png:await data(await exportPNG(p,96)),pdf:await data(pdf)};
+    return {results,png:await data(await exportPNG(p,96)),pdf:await data(pdf),directionalPDF:await data(directionalPDF)};
   },fixture);
   for(const result of raster.results)check(result.name,result.pass);
   await fs.writeFile(path.join(output,'soft-edge.png'),Buffer.from(raster.png));await fs.writeFile(path.join(output,'soft-edge.pdf'),Buffer.from(raster.pdf));
+  await fs.writeFile(path.join(output,'single-edge.pdf'),Buffer.from(raster.directionalPDF));
   check('Browser has no uncaught errors',errors.length===0);
   console.log(`${count} checks passed. Artifacts: ${output}`);
 }finally{await browser.close();}

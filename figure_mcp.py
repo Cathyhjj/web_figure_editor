@@ -34,7 +34,10 @@ PLACEMENT_FIELDS = {**{key: NUMBER for key in ("x", "y", "width", "height", "rot
                     "name": {"type": "string", "maxLength": 20000}}
 CROP_FIELDS = {key: {**NUMBER, "minimum": 0.00001 if key in ("width", "height") else 0, "maximum": 1}
                for key in ("x", "y", "width", "height")}
+SOFT_EDGE = {**NUMBER, "minimum": 0, "maximum": 100}
 IMAGE_FIELDS = {"imageFit": {"enum": ["contain", "stretch"]},
+                "softEdgeMode": {"enum": ["all", "single", "radial"]}, "softEdgeAngle": {**NUMBER, "minimum": 0, "maximum": 360},
+                "softEdgeStrength": {**NUMBER, "minimum": 0, "maximum": 300}, "softEdgeRadius": {**NUMBER, "minimum": 0, "maximum": 200},
                 "crop": {"oneOf": [obj(CROP_FIELDS, CROP_FIELDS), {"const": None}]}}
 STROKE_FIELDS = {"stroke": STRING, "strokeWidth": {**NUMBER, "minimum": 0, "maximum": 1000},
                  "strokeOpacity": {**NUMBER, "minimum": 0, "maximum": 1}, "strokeDash": {"enum": ["solid", "dash", "dot"]}}
@@ -43,7 +46,7 @@ SHAPE_FIELDS = {**STROKE_FIELDS, "fill": STRING, "fillOpacity": {**NUMBER, "mini
 CANVAS = {**obj({"width": {**NUMBER, "minimum": 64, "maximum": 8000},
                  "height": {**NUMBER, "minimum": 64, "maximum": 8000}, "background": STRING}), "minProperties": 1}
 SLIDE_FIELDS = {"name": {**STRING, "pattern": r"\S"}, "canvas": CANVAS}
-OBJECT_FIELDS = {**PLACEMENT_FIELDS, **SHAPE_FIELDS, "fontSize": NUMBER,
+OBJECT_FIELDS = {**PLACEMENT_FIELDS, **SHAPE_FIELDS, "fontSize": NUMBER, "softEdge": SOFT_EDGE,
                  **{key: {"type": "string", "maxLength": 20000} for key in ("text", "fontFamily", "fontStyle", "color", "align")},
                  "fontWeight": {"enum": [400, 700, "400", "700"]}}
 TARGETS = {"slideId": STRING, "itemIds": {"type": "array", "items": STRING, "minItems": 1, "maxItems": 2000}}
@@ -72,8 +75,8 @@ OPERATIONS = {"oneOf": [
     obj({"op": {"const": "add_text"}, "slideId": STRING, "properties": obj(OBJECT_FIELDS)}, ["op", "slideId", "properties"]),
     obj({"op": {"const": "add_shape"}, "slideId": STRING,
          "shapeType": {"enum": ["rect", "roundRect", "ellipse", "line", "arrow", "doubleArrow"]},
-         "properties": obj({**PLACEMENT_FIELDS, **SHAPE_FIELDS})}, ["op", "slideId", "shapeType"]),
-    obj({"op": {"const": "place_asset"}, "slideId": STRING, "assetId": STRING, "properties": obj({**PLACEMENT_FIELDS, **STROKE_FIELDS, **IMAGE_FIELDS})}, ["op", "slideId", "assetId"]),
+         "properties": obj({**PLACEMENT_FIELDS, **SHAPE_FIELDS, "softEdge": SOFT_EDGE})}, ["op", "slideId", "shapeType"]),
+    obj({"op": {"const": "place_asset"}, "slideId": STRING, "assetId": STRING, "properties": obj({**PLACEMENT_FIELDS, **STROKE_FIELDS, **IMAGE_FIELDS, "softEdge": SOFT_EDGE})}, ["op", "slideId", "assetId"]),
     obj({"op": {"const": "swap_asset"}, "slideId": STRING, "itemId": STRING, "assetId": STRING}, ["op", "slideId", "itemId", "assetId"]),
     obj({"op": {"const": "duplicate"}, **TARGETS, "offsetX": NUMBER, "offsetY": NUMBER}, ["op", "slideId", "itemIds"]),
     obj({"op": {"const": "delete"}, **TARGETS}, ["op", "slideId", "itemIds"]),
@@ -125,6 +128,7 @@ TOOLS = [
          "place_asset adds a slide object linked to a project asset. Use an assetId from get_state.assets. "
          "Omit properties for the editor's Place defaults. Set only width or height to preserve frame proportions, or both for an exact frame in CSS px. "
          "On images, place_asset and set accept imageFit and crop. Use contain to center proportional content or stretch (default) to fill the frame. "
+         "Set softEdge in points (0 to 100). On images, softEdgeMode single fades one side; softEdgeAngle sets the inward direction (0 left, 90 top, 180 right, 270 bottom). softEdgeStrength accepts 0 to 300 (default 100). Up to 100 it controls the percent of edge opacity removed. Above 100 it increases transparency inside the same fade width. In radial mode, softEdgeAngle locates a circular fade center along the picture perimeter (315 bottom-left). softEdgeRadius controls the radius as a percentage of the shorter displayed image dimension (0 to 200, default 50), independently of softEdge. Omitted mode uses all edges. "
          "Specify crop as {x,y,width,height} in original source fractions or null to restore. Fit applies first, followed by native crop and explicit frame geometry. "
          "Cropping keeps a contain frame fixed. In stretch mode it keeps the source scale and adjusts the frame like the editor Crop dialog. "
          "swap_asset replaces one unlocked image object's source with an existing project SVG or raster image. "

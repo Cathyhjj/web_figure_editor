@@ -1,6 +1,8 @@
 import { openSVGEditor, editableSVGAsset } from './svg-editor.js';
 import { shapeSVG as vectorShapeSVG, cloneShape } from './shape.js';
 import { initShapeGallery } from './shape-catalog.js';
+import { createSACStyle, initSACStyles } from './sac-styles.js';
+import { loadPosterPictures, attachPosterPictures } from './sac-poster.js';
 import { initShapeDrawing } from './shape-drawing.js';
 import { moveArrowPoint, rebuildArrow } from './vector-arrow.js';
 import { appendArrowHandles, arrowMidpoints } from './vector-arrow-editor.js';
@@ -25,9 +27,9 @@ import { POWERPOINT_MIME, initPowerPointPaste } from './pptx-clipboard.js';
 import { exportPDF } from './pdf.js';
 import { initWindows } from './windows.js';
 import { initSlideDrag } from './slide-drag.js';
-import { imageShadowSVG, objectShadowSVG, imageBorderSVG, objectBounds } from './shadow.js';
+import { imageShadowSVG, objectShadowSVG, imageBorderSVG, softEdgeBounds } from './shadow.js';
 import { shadowEditorMarkup, bindShadowEditor } from './shadow-editor.js';
-import { softEdgeSVG } from './soft-edge.js';
+import { hasSoftEdge, softEdgeSVG } from './soft-edge.js';
 import { softEdgeEditorMarkup, bindSoftEdgeEditor } from './soft-edge-editor.js';
 import { isShapeItem, isLineShape, shapeSVG, shapeBounds } from './shapes.js';
 import { opacityEditorMarkup, shapeEditorMarkup, bindShapeEditor } from './shape-editor.js';
@@ -206,7 +208,7 @@ function appendItemContent(g,item,context='stage'){
   else if(item.type==='shape')g.innerHTML=vectorShapeSVG(item,`vector-${context}-${item.id}`);
   else if(isShapeItem(item))g.innerHTML=shapeSVG(item,`preset-${context}-${item.id}`);
   if(item.type==='image')g.insertAdjacentHTML('beforeend',imageBorderSVG(item,`picture-border-${context}-${item.id}`));
-  if(item.softEdge>0)g.innerHTML=softEdgeSVG(item,g.innerHTML,`soft-edge-${context}-${item.id}`,objectBounds(item));
+  if(hasSoftEdge(item))g.innerHTML=softEdgeSVG(item,g.innerHTML,`soft-edge-${context}-${item.id}`,softEdgeBounds(item,item.assetId && assetById(item.assetId)));
   if(item.type==='image'&&item.shadow){const a=assetById(item.assetId);if(a)g.insertAdjacentHTML('afterbegin',imageShadowSVG(item,a,`shadow-${context}-${item.id}`));}
   if(!isMediaItem(item)&&item.shadow)g.innerHTML=objectShadowSVG(item,g.innerHTML,`native-shadow-${context}-${item.id}`);
 }
@@ -1182,6 +1184,29 @@ shapeDrawing=initShapeDrawing({workspace:$('workspace'),stage:$('stage'),point,
  context:()=>({project,slideId:project.activeSlideId}),insert:insertGalleryShape,status,
  prepare:()=>{flushText();closeHTMLChart();selected.clear();render();}});
 initShapeGallery($('shapes-menu'),{insert:insertGalleryShape,draw:tool=>shapeDrawing.start(tool),text:()=>$('add-text').click()});
+initSACStyles($('sac-styles-menu'),{insert:async entry=>{
+ shapeDrawing.cancel();
+ const originalProject=project,originalSlide=slide();
+ try{
+  const items=createSACStyle(entry.id,originalSlide.canvas);
+  const pictures=items.some(item=>item.type==='image') ? await loadPosterPictures(items) : [];
+  if(project!==originalProject || slide()!==originalSlide){status('Slide changed. Choose the SAC style again.');return;}
+  if(change(()=>{
+   attachPosterPictures(project,items,pictures);
+   slide().items.push(...items);selected=new Set(items.map(i=>i.id));
+  })){
+   $('workspace').focus({preventScroll:true});status(`${entry.name} added.`);
+  }
+ }catch(error){status(error.message,true);}
+}});
+function positionSACMenu(){
+ const button=$('sac-styles-toggle').getBoundingClientRect(),menu=$('sac-styles-menu');
+ menu.style.left=`${Math.max(8,Math.min(button.left,innerWidth-menu.offsetWidth-8))}px`;
+ menu.style.top=`${Math.max(8,Math.min(button.bottom+6,innerHeight-menu.offsetHeight-8))}px`;
+}
+$('sac-styles-menu').addEventListener('toggle',event=>{if(event.newState==='open')positionSACMenu();});
+$('sac-styles-menu').addEventListener('keydown',event=>event.stopPropagation());
+window.addEventListener('resize',()=>{if($('sac-styles-menu').matches(':popover-open'))positionSACMenu();});
 function positionShapesMenu(){
  const button=$('shapes-toggle').getBoundingClientRect(), menu=$('shapes-menu');
  menu.style.left=`${Math.max(8,Math.min(button.left,innerWidth-menu.offsetWidth-8))}px`;

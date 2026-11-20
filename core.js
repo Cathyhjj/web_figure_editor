@@ -4,8 +4,8 @@ import { isMP4, isMediaItem, posterSource } from './video.js';
 import { HTML_MIME, looksLikeHTML, requireHTMLSnapshots, validateSnapshot } from './html-chart.js';
 import { validateHTMLFigure } from './html-figure-model.js';
 import { validateCrop, imageContentRect, imageCrop } from './crop.js';
-import { validateShadow, imageShadowSVG, objectShadowSVG, imageBorderSVG, objectBounds } from './shadow.js';
-import { softEdgeSVG, MAX_SOFT_EDGE } from './soft-edge.js';
+import { validateShadow, imageShadowSVG, objectShadowSVG, imageBorderSVG, softEdgeBounds } from './shadow.js';
+import { hasSoftEdge, softEdgeSVG, MAX_SOFT_EDGE, MAX_SOFT_EDGE_STRENGTH, MAX_RADIAL_RADIUS } from './soft-edge.js';
 import { validateShape, validateGradient, shapeSVG as vectorShapeSVG } from './shape.js';
 import { SHAPE_TYPES, isLineShape, shapeSVG as presetShapeSVG } from './shapes.js';
 const LIMITS = Object.freeze({ assets: 500, items: 2000, assetBytes: 40 * 1024 * 1024, totalBytes: 160 * 1024 * 1024 });
@@ -240,6 +240,13 @@ function validateProjectInternal(input, assetCache) {
     }
     if (item.shadow !== undefined) canonical.shadow = validateShadow(item.shadow);
     if (item.softEdge !== undefined) canonical.softEdge = number(item.softEdge, 'item.softEdge', 0, MAX_SOFT_EDGE);
+    if (item.softEdgeMode !== undefined || item.softEdgeAngle !== undefined || item.softEdgeStrength !== undefined || item.softEdgeRadius !== undefined) {
+      if (type !== 'image') fail('softEdgeMode, softEdgeAngle, softEdgeRadius and softEdgeStrength require an image object.');
+      if (item.softEdgeMode !== undefined) canonical.softEdgeMode = choice(item.softEdgeMode, 'item.softEdgeMode', ['all', 'single', 'radial']);
+      if (item.softEdgeAngle !== undefined) canonical.softEdgeAngle = number(item.softEdgeAngle, 'item.softEdgeAngle', 0, 360);
+      if (item.softEdgeRadius !== undefined) canonical.softEdgeRadius = number(item.softEdgeRadius, 'item.softEdgeRadius', 0, MAX_RADIAL_RADIUS);
+      if (item.softEdgeStrength !== undefined) canonical.softEdgeStrength = number(item.softEdgeStrength, 'item.softEdgeStrength', 0, MAX_SOFT_EDGE_STRENGTH);
+    }
     project.items.push(canonical);
   }
   return project;
@@ -285,16 +292,19 @@ function manifest(project) {
 
 export function sourceManifest(project) { return manifest(validateProject(project)); }
 
-function svgFromCanonical(project, { gradientRotation } = {}) {
+function svgFromCanonical(project, { gradientRotation, pixelViewport = false } = {}) {
   requireHTMLSnapshots(project);
   const { width, height, background } = project.canvas;
+  // Raster patches must cover even the last source pixel. Converting their viewport
+  // through physical units can leave a partially transparent rim in the browser.
+  const viewportLength = value => pixelViewport ? n(value) + 'px' : n(value / 96 * 25.4) + 'mm';
   const assets = new Map(project.assets.map(a => [a.id, a]));
   const usedIDs = new Set(project.items.map(item => item.id));
   let shadowIndex = 0;
   const effectID = prefix => { let id; do { id = `${prefix}-${shadowIndex++}`; } while (usedIDs.has(id)); usedIDs.add(id); return id; };
   const lines = [
     '<?xml version="1.0" encoding="UTF-8"?>',
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${n(width / 96 * 25.4)}mm" height="${n(height / 96 * 25.4)}mm" viewBox="0 0 ${n(width)} ${n(height)}">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${viewportLength(width)}" height="${viewportLength(height)}" viewBox="0 0 ${n(width)} ${n(height)}">`,
     `<title>${xml(project.name)}</title>`,
     '<desc>Figure Editor export. Text, shapes and SVG assets are vector; bitmap images remain raster. Fonts are not embedded.</desc>',
     `<metadata>${xml(JSON.stringify(manifest(project)))}</metadata>`,
@@ -326,9 +336,10 @@ function svgFromCanonical(project, { gradientRotation } = {}) {
     } else {
       lines.push(presetShapeSVG(paintItem, `preset-${project.id}-${item.id}`));
     }
-    if (item.shadow || item.softEdge > 0) {
+    const feathered = hasSoftEdge(item);
+    if (item.shadow || feathered) {
       const source = lines.splice(contentStart).join('\n');
-      const content = item.softEdge > 0 ? softEdgeSVG(item, source, effectID(`figure-soft-edge-${project.id}-${item.id}`), objectBounds(item)) : source;
+      const content = feathered ? softEdgeSVG(item, source, effectID(`figure-soft-edge-${project.id}-${item.id}`), softEdgeBounds(item, assets.get(item.assetId))) : source;
       lines.push(item.type === 'image'
         ? imageShadowSVG(item, assets.get(item.assetId), effectID(`figure-shadow-${project.id}-${item.id}`)) + content
         : objectShadowSVG(item, content, effectID(`figure-native-shadow-${project.id}-${item.id}`)));
@@ -380,8 +391,13 @@ async function withPNGResolution(blob, dpi) {
 }
 
 /** Render once at physical DPI; release the canvas and SVG URL after the consumer finishes. */
-export async function withRasterCanvas(input, dpi, consume, format = 'PNG', { gradientRotation } = {}) {
+export async function withRasterCanvas(input, dpi, consume, format = 'PNG', { gradientRotation, patchSize } = {}) {
   const project = validateProject(input);
+  // A local picture patch can be smaller than one CSS pixel or larger than a slide.
+  // Use its true extent for the SVG viewBox while keeping the ordinary output pixel limits.
+  if (patchSize) {
+    for (const key of ['width', 'height']) project.canvas[key] = number(patchSize[key], `patch ${key}`, Number.MIN_VALUE, Number.MAX_SAFE_INTEGER);
+  }
   number(dpi, 'export DPI', 1, 2400);
   if(gradientRotation!==undefined)number(gradientRotation, 'gradient rotation', -36000, 36000);
   const width = Math.max(1, Math.round(project.canvas.width * dpi / 96));
@@ -389,7 +405,7 @@ export async function withRasterCanvas(input, dpi, consume, format = 'PNG', { gr
   if (width > 32767 || height > 32767 || width * height > 100000000) throw new Error(`${format} export exceeds 100 megapixels or 32767 pixels per side. Reduce canvas size or DPI.`);
   if (typeof document === 'undefined' || typeof Image === 'undefined') throw new Error(`${format} export requires a browser.`);
   if (document.fonts?.ready) await document.fonts.ready;
-  const svgBlob = new Blob([svgFromCanonical(project,{gradientRotation})], { type: 'image/svg+xml;charset=utf-8' });
+  const svgBlob = new Blob([svgFromCanonical(project,{gradientRotation, pixelViewport: !!patchSize})], { type: 'image/svg+xml;charset=utf-8' });
   const url = URL.createObjectURL(svgBlob);
   let canvas;
   try {

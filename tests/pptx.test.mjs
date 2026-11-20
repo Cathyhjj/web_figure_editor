@@ -109,6 +109,26 @@ function fixture() {
   return deck;
 }
 
+test('disabled single-edge and radial feathers preserve shared native pictures and crop', async () => {
+  const deck = createDeck();
+  deck.assets = [asset()];
+  const modes = [
+    { softEdgeMode: 'single', softEdge: 20, softEdgeStrength: 0 },
+    { softEdgeMode: 'radial', softEdgeRadius: 50, softEdgeStrength: 0 },
+    { softEdgeMode: 'radial', softEdgeRadius: 0, softEdgeStrength: 300 },
+  ];
+  deck.slides[0].items = modes.map((settings, i) => item('picture' + i, 'image', { assetId: 'png',
+    ...settings, softEdgeAngle: 45, crop: { x: .25, y: 0, width: .5, height: 1 } }));
+  const parts = await unzip(await exportPPTX(deck));
+  assert.deepEqual(parts.get('ppt/media/image1.png'), Buffer.from(PNG, 'base64'));
+  assert.equal([...parts.keys()].filter(path => path.startsWith('ppt/media/')).length, 1);
+  for (const picture of deck.slides[0].items) {
+    const xmlPicture = named(xml(parts, 'ppt/slides/slide1.xml'), picture.name);
+    assert.match(xmlPicture, /<a:srcRect l="25000" t="0" r="25000" b="0"/);
+    assert.doesNotMatch(xmlPicture, /<a:softEdge/);
+  }
+});
+
 test('PPTX is a valid ZIP package with resolved relationships, content types and slide order', async () => {
   const parts = await unzip(await exportPPTX(fixture()));
   for (const required of ['[Content_Types].xml', '_rels/.rels', 'ppt/presentation.xml', 'ppt/_rels/presentation.xml.rels', 'ppt/slides/slide1.xml', 'ppt/slides/slide2.xml']) assert.ok(parts.has(required), required);
