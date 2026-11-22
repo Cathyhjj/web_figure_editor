@@ -78,6 +78,39 @@ function dataURL(value, mime, label, inertOriginal = false) {
   return { value: result, byteLength };
 }
 
+/**
+ * Every edit, preview and save validates the whole project again, yet asset bytes rarely change.
+ * Remember each canonical asset so an identical one skips the base64 scan and SVG serialization.
+ * A hit requires every field to be identical: strings by value and SVG/HTML documents by reference.
+ * Parsed files and clipboard data always arrive as new objects, so they are still fully checked.
+ * Canonical documents are shared by undo snapshots and must never be mutated in place.
+ */
+const VALIDATED_ASSET_TTL = 10 * 60 * 1000;
+const validatedAssets = new Map();
+let validatedAssetSweep = 0;
+
+function validatedAsset(raw) {
+  const entry = validatedAssets.get(raw.id);
+  if (!entry) return null;
+  const keys = Object.keys(raw);
+  // Validation returns a new SVG/HTML document, while the project keeps the one that was checked.
+  if (keys.length !== entry.keys || !keys.every(key => Object.hasOwn(entry.asset, key)
+    && (raw[key] === entry.asset[key] || raw[key] === entry.source[key]))) return null;
+  entry.used = Date.now();
+  return entry;
+}
+
+function rememberValidatedAsset(asset, bytes, raw) {
+  const now = Date.now();
+  // Do not keep the images of closed projects alive: drop entries that are no longer validated.
+  if (now - validatedAssetSweep > 60000 || validatedAssets.size >= LIMITS.assets * 2) {
+    validatedAssetSweep = now;
+    for (const [key, entry] of validatedAssets) if (now - entry.used > VALIDATED_ASSET_TTL) validatedAssets.delete(key);
+    if (validatedAssets.size >= LIMITS.assets * 2) validatedAssets.clear();
+  }
+  validatedAssets.set(asset.id, { asset: { ...asset }, source: { svgDocument: raw.svgDocument, htmlFigure: raw.htmlFigure }, keys: Object.keys(asset).length, bytes, used: now });
+}
+
 /** Validate untrusted parsed JSON, discard unknown fields, and return a fresh model. */
 export function validateProject(input) {
   return validateProjectInternal(input);
@@ -111,6 +144,14 @@ function validateProjectInternal(input, assetCache) {
     const assetID = id(a.id, 'asset.id');
     if (assetIDs.has(assetID)) fail(`duplicate asset ID ${assetID}.`);
     assetIDs.add(assetID);
+    const known = validatedAsset(a);
+    if (known) {
+      totalBytes += known.bytes;
+      if (totalBytes > LIMITS.totalBytes) fail('embedded assets exceed the 160 MB project limit.');
+      project.assets.push({ ...known.asset });
+      continue;
+    }
+    const bytesBefore = totalBytes;
     const mime = string(a.mime, 'asset.mime', 100);
     const svgDocument = mime === 'image/svg+xml' ? validateSVGDocument(a.svgDocument) : null;
     if (svgDocument && svgDataURL(svgDocument) !== a.dataUrl) fail('SVG bytes do not match the validated vector document.');
@@ -171,6 +212,7 @@ function validateProjectInternal(input, assetCache) {
       totalBytes += bytes;
     }
     if (totalBytes > LIMITS.totalBytes) fail('embedded assets exceed the 160 MB project limit.');
+    rememberValidatedAsset(asset, totalBytes - bytesBefore, a);
     project.assets.push(asset);
   }
   if (assetCache && !cachedAssets) assetCache.set(p.assets, project.assets);

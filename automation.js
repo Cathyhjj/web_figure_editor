@@ -358,6 +358,9 @@ export async function renderAutomation(project, params, preview = false) {
 /** Same-origin long polling keeps the active browser document authoritative. */
 export function connectAutomation({ execute, summary, button, onSessionChange, fetcher = fetch }) {
   let enabled = true, resumeEnabled = true, stopped = false, sessionId = null, token = null, controller = null;
+  // After a network error or server restart, reconnect under the same ID so references
+  // already pasted into an agent keep working.
+  let previousId = null;
   let delay = 500;
   const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
   const show = (label, title) => { if (button) { button.textContent = label; button.title = title; button.setAttribute('aria-pressed', String(enabled)); } };
@@ -375,7 +378,8 @@ export function connectAutomation({ execute, summary, button, onSessionChange, f
   }
   if (button) button.onclick = () => {
     enabled = !enabled; controller?.abort();
-    if (!enabled) { void disconnect(); show('AI paused', 'Click to reconnect this page to local AI tools.'); }
+    // Pausing is a deliberate revocation: references to the old session must stop working.
+    if (!enabled) { previousId = null; void disconnect(); show('AI paused', 'Click to reconnect this page to local AI tools.'); }
   };
   async function run() {
     while (!stopped) {
@@ -385,7 +389,9 @@ export function connectAutomation({ execute, summary, button, onSessionChange, f
           const info = await (await fetcher('/api/local')).json();
           if (!info.automation) { show('AI unavailable', 'Restart the local Figure Editor server to enable AI control.'); await pause(10000); continue; }
           token = info.token;
-          sessionId = (await request('register', { summary: summary() })).sessionId;
+          try { sessionId = (await request('register', { summary: summary(), ...(previousId ? { sessionId: previousId } : {}) })).sessionId; }
+          catch (error) { if (error.status === 400) previousId = null; throw error; }
+          previousId = sessionId;
           if (!enabled || stopped) { await disconnect(); continue; }
           onSessionChange?.(sessionId);
         }

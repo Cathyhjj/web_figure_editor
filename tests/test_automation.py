@@ -70,6 +70,27 @@ class BridgeTests(unittest.TestCase):
         self.bridge.sessions[new]['seen'] -= 100
         self.assertEqual(self.bridge.handle('sessions', {})['sessions'], [])
 
+    def test_reconnecting_page_keeps_its_session_id(self):
+        self.bridge.handle('disconnect', {'sessionId': self.session})
+        resumed = self.bridge.handle('register', {'summary': SUMMARY, 'sessionId': self.session})['sessionId']
+        self.assertEqual(resumed, self.session)
+        # A restarted server has no memory of the page and still honors its ID.
+        fresh = AutomationBridge(command_timeout=.15, poll_timeout=.02)
+        self.assertEqual(fresh.handle('register', {'summary': SUMMARY, 'sessionId': self.session})['sessionId'], self.session)
+        for invalid in ('short', 'x' * 33, '../' + 'x' * 29, 7):
+            with self.assertRaisesRegex(AutomationError, 'Invalid session ID'):
+                self.bridge.handle('register', {'summary': SUMMARY, 'sessionId': invalid})
+
+    def test_reconnect_abandons_the_previous_poll_and_command(self):
+        with ThreadPoolExecutor() as pool:
+            pending = pool.submit(self.call)
+            self.assertIsNotNone(self.poll())
+            self.bridge.handle('register', {'summary': SUMMARY, 'sessionId': self.session})
+            with self.assertRaisesRegex(AutomationError, 'reconnected'):
+                pending.result()
+        self.assertIsNone(self.poll())
+        self.assertEqual(len(self.bridge.handle('sessions', {})['sessions']), 1)
+
     def test_browser_failure_is_returned_as_failure(self):
         with ThreadPoolExecutor() as pool:
             pending = pool.submit(self.call)

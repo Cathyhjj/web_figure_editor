@@ -320,3 +320,25 @@ test('single AI alignment still aligns to the canvas and invalid spacing leaves 
   assert.throws(() => prepareBatch(deck, [op(deck, { op: 'distribute', itemIds: ['a', 'b', 'c'], axis: 'x', gap: 100000 })]), /between/);
   assert.deepEqual(deck, before);
 });
+
+test('a page reconnects under the same session ID after a network error', async () => {
+  const { connectAutomation } = await import('../automation.js');
+  const registrations = []; let polls = 0, finish;
+  const done = new Promise(resolve => { finish = resolve; });
+  const reply = (value, status = 200) => ({ ok: status === 200, status, json: async () => value });
+  const fetcher = async (url, options) => {
+    if (url === '/api/local') return reply({ automation: true, token: 'token' });
+    const body = JSON.parse(options.body);
+    if (url.endsWith('/register')) { registrations.push(body); return reply({ sessionId: body.sessionId ?? 'a'.repeat(32) }); }
+    if (url.endsWith('/poll')) {
+      if (++polls === 1) throw new TypeError('network error');
+      finish(); return new Promise(() => {});
+    }
+    return reply({});
+  };
+  const changes = [];
+  const connection = connectAutomation({ execute: async () => ({}), summary: () => ({}), fetcher, onSessionChange: id => changes.push(id) });
+  await done; connection.stop();
+  assert.deepEqual(registrations.map(body => body.sessionId), [undefined, 'a'.repeat(32)]);
+  assert.deepEqual(changes.slice(0, 3), ['a'.repeat(32), null, 'a'.repeat(32)]);
+});
