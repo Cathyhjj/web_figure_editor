@@ -1,5 +1,6 @@
 import { shapeSVG } from './shape.js';
 import { ARROW_DRAWING_TOOLS, createVectorArrow } from './vector-arrow.js';
+import { sacShapeStyle } from './sac-theme.js';
 
 const names = { curve: 'Curve', freeform: 'Freeform', scribble: 'Scribble',drawCurveArrow:'Curved arrow',drawPolylineArrow:'Polyline arrow' };
 const distance = (a,b) => Math.hypot(a.x-b.x,a.y-b.y);
@@ -25,7 +26,7 @@ export function createDrawingShape(tool, input, closed = false) {
   const x=Math.min(...xs),y=Math.min(...ys),width=Math.max(1,Math.max(...xs)-x),height=Math.max(1,Math.max(...ys)-y);
   return { type:'shape',name:names[tool],x,y,width,height,
     paths:[{commands:commands.map(([op,...values])=>[op,...values.map((v,j)=>j%2?(v-y)/height:(v-x)/width)]),fillMode:closed?'norm':'none',stroke:true}],
-    fill:closed?'#ffffff':'none',stroke:'#252735',strokeWidth:2,fillOpacity:1,strokeOpacity:1,strokeDash:'solid',
+    ...sacShapeStyle({line:!closed}),
   };
 }
 

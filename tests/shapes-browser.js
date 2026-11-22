@@ -2,6 +2,7 @@ import { createDeck, validateDeck } from '../deck.js';
 import { exportPNG, projectToSVG } from '../core.js';
 import { selectionToPNG } from '../clipboard-image.js';
 import { SHAPE_CATEGORIES, DRAWING_TOOLS, createCatalogShape } from '../shape-catalog.js';
+import { SAC_PALETTE } from '../sac-theme.js';
 
 const checks = [];
 function check(name, passed) {
@@ -77,7 +78,7 @@ document.querySelector('#run').onclick = async () => {
     paint('stroke', 'none');
     check('No border retains the fill', selected().querySelector('rect[stroke="none"][fill="#ee7755"]') !== null);
     get('undo').click(); selectLatest();
-    check('Undo restores the border', selected().querySelector('rect[stroke="#252735"]') !== null);
+    check('Undo restores the border', selected().querySelector(`rect[stroke="${SAC_PALETTE.ink}"]`) !== null);
     get('duplicate').click();
     check('Duplicated shape retains independent transparency', selected().querySelector('rect[fill-opacity="0.2"][stroke-opacity="0.75"]') !== null);
     get('object-locked').click();
@@ -102,7 +103,7 @@ document.querySelector('#run').onclick = async () => {
     paint('stroke','none');
     check('New preset supports No border',Boolean(selected().querySelector('path[stroke="none"]')));
     get('undo').click();selectLatest();
-    check('Undo restores new preset outline',Boolean(selected().querySelector('path[stroke="#252735"]')));
+    check('Undo restores new preset outline',Boolean(selected().querySelector(`path[stroke="${SAC_PALETTE.ink}"]`)));
     get('duplicate').click();get('object-locked').click();
     check('New preset duplicate locks all paint controls', [...get('inspector').querySelectorAll('[data-transparency],[data-shape-color],[data-shape-paint],[data-property],[data-gradient-field],[data-gradient-action],[data-gradient-stop]')].every(node=>node.disabled));
     get('object-locked').click();

@@ -19,6 +19,11 @@ one insertion. Select an individual layer to change its text, paths, paint or
 picture. The four original PNGs in the reference sheet are replaceable pictures.
 Saving the project embeds each required picture once.
 
+New text uses Arial and charcoal. New shapes and drawn lines use white/transparent
+fill and a 2 px charcoal stroke; filled vector arrows use navy. UI and agent
+creation share these defaults. Explicit agent properties still override them.
+Opening, importing and pasting existing figures preserves their stored styling.
+
 ## Source and adaptations
 
 The reference sheet comes from editor page 14, **Slide 07**, in
@@ -58,7 +63,7 @@ Section panel and Blue title band are reusable arrangements of the poster's
 charcoal outline, Arial heading, blue `#0082CA`, navy `#00609C` and pale blue
 `#D7E2EA`. Their placeholder titles are directly editable text.
 
-`sac-theme.js` provides the gallery’s palette and text styles. `sac-motifs.js` stores source geometry;
+`sac-theme.js` owns creation defaults. `sac-motifs.js` stores source geometry;
 `sac-styles.js` clones it on every insertion and uses the normal SVG renderer for
 previews. `sac-poster-parts.js` records the source sheet’s geometry and colors,
 and `sac-poster.js` defines the reusable sections and their picture references.

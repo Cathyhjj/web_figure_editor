@@ -1,3 +1,5 @@
+import { SAC_PALETTE, sacShapeStyle } from './sac-theme.js';
+
 // Filled arrow outlines use ordinary shape paths in every renderer/exporter.
 // Editing coordinates live in a fixed reference box, so stretching an arrow
 // and then editing a point does not unexpectedly change its other proportions.
@@ -100,7 +102,7 @@ export function createVectorArrow(kind,points,{fade=false}={}) {
   const x=Math.min(...points.map(p=>p.x)),y=Math.min(...points.map(p=>p.y));
   const width=Math.max(1,Math.max(...points.map(p=>p.x))-x),height=Math.max(1,Math.max(...points.map(p=>p.y))-y);
   const item={type:'shape',name:kind==='curve'?'Curved vector arrow':'Polyline vector arrow',x,y,width,height,rotation:0,
-    fill:'#596675',stroke:'none',strokeWidth:0,fillOpacity:1,strokeOpacity:1,strokeDash:'solid',
+    ...sacShapeStyle(),fill:SAC_PALETTE.navy,stroke:'none',strokeWidth:0,
     editableArrow:{kind,viewWidth:width,viewHeight:height,points:points.map(p=>({x:(p.x-x)/width,y:(p.y-y)/height})),
       shaftWidth:6,headWidth:23,headLength:25,tailWidth:kind==='curve'?.15:1,headStyle:'stealth',heads:'end'}};
   rebuildArrow(item);
@@ -111,7 +113,7 @@ export function createVectorArrow(kind,points,{fade=false}={}) {
 export function fadeArrow(item) {
   const a=item.editableArrow,start=a.points[0],end=a.points.at(-1);
   const angle=Math.atan2((end.y-start.y)*item.height,(end.x-start.x)*item.width)*180/Math.PI;
-  const color=/^#[\da-f]{6}$/i.test(item.fill)?item.fill:'#596675';
+  const color=/^#[\da-f]{6}$/i.test(item.fill)?item.fill:SAC_PALETTE.navy;
   item.fillGradient={angle,stops:[{offset:0,color:color+'00'},{offset:.35,color:color+'88'},{offset:1,color}]};
 }
 

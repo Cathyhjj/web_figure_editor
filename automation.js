@@ -9,6 +9,7 @@ import { applyLayout } from './layout.js';
 import { inspectSVGAsset, patchSVGAsset } from './svg-edit.js';
 import { SHAPE_TYPES, SHAPE_NAMES, isShapeItem, isLineShape } from './shapes.js';
 import { checkLinkedAssetSource, isProjectRelativePath, MAX_IMPORT_BYTES } from './assets.js?v=locate-1';
+import { SAC_TEXT_STYLE, sacShapeStyle } from './sac-theme.js';
 
 // Small, explicit editing vocabulary. Neither document replacement nor arbitrary
 // JavaScript/asset writes are accepted through the live control interface.
@@ -225,7 +226,7 @@ export function prepareBatch(project, operations) {
         item = { id: uid(), type: op.shapeType, name: SHAPE_NAMES[op.shapeType], x: 80, y: 80,
           width: 160, height: ['line', 'arrow', 'doubleArrow'].includes(op.shapeType) ? 0 : 100,
           rotation: 0, opacity: 1, locked: false, hidden: false,
-          fill: ['line', 'arrow', 'doubleArrow'].includes(op.shapeType) ? 'none' : '#ffffff', stroke: '#111827', strokeWidth: 2 };
+          ...sacShapeStyle({line:['line', 'arrow', 'doubleArrow'].includes(op.shapeType)}) };
         if (op.properties !== undefined) properties(item, op.properties, { allowEmpty: true });
       } else if (op.op === 'place_asset') {
         const asset = next.assets.find(asset => asset.id === op.assetId);
@@ -235,7 +236,7 @@ export function prepareBatch(project, operations) {
       } else {
         item = { id: uid(), type: 'text', name: 'Text', x: 80, y: 80, width: 160, height: 40,
           rotation: 0, opacity: 1, locked: false, hidden: false, text: '', fontSize: 24,
-          fontFamily: 'Arial', fontWeight: 400, fontStyle: 'normal', color: '#222222', align: 'left' };
+          ...SAC_TEXT_STYLE };
         properties(item, op.properties);
       }
       slide.items.push(item); created.push(item.id); changed.add(item.id);

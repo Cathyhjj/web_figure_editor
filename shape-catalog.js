@@ -2,6 +2,7 @@ import { SHAPE_CATEGORIES as PRESET_CATEGORIES, PRESET_PATHS } from './shape-pre
 import { ARROW_PRESETS, ARROW_DRAWING_TOOLS, createArrowPreset } from './vector-arrow.js';
 import { shapeSVG as vectorSVG } from './shape.js';
 import { shapeSVG as basicSVG } from './shapes.js';
+import { sacShapeStyle } from './sac-theme.js';
 
 export const SHAPE_CATEGORIES = [{name:'Custom Arrows',shapes:ARROW_PRESETS},...PRESET_CATEGORIES];
 export const DRAWING_TOOLS = ['curve', 'freeform', 'scribble',...ARROW_DRAWING_TOOLS];
@@ -20,8 +21,7 @@ export function createCatalogShape(key) {
   const line = ['line', 'arrow', 'doubleArrow'].includes(type);
   return {
     type, name: entry.name, width: entry.width, height: line && !connector ? 0 : entry.height,
-    fill: line || entry.outline ? 'none' : '#ffffff', stroke: '#252735', strokeWidth: 2,
-    fillOpacity: 1, strokeOpacity: 1, strokeDash: 'solid',
+    ...sacShapeStyle({line:line || entry.outline}),
     ...(connector ? { connector } : {}),
     ...(type === 'shape' ? { paths: PRESET_PATHS[key].map(path => ({...path, commands: path.commands.map(command => [...command])})) } : {}),
   };

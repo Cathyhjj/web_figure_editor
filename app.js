@@ -1,6 +1,7 @@
 import { openSVGEditor, editableSVGAsset } from './svg-editor.js';
 import { shapeSVG as vectorShapeSVG, cloneShape } from './shape.js';
 import { initShapeGallery } from './shape-catalog.js';
+import { SAC_TEXT_STYLE } from './sac-theme.js';
 import { createSACStyle, initSACStyles } from './sac-styles.js';
 import { loadPosterPictures, attachPosterPictures } from './sac-poster.js';
 import { initShapeDrawing } from './shape-drawing.js';
@@ -1172,7 +1173,7 @@ $('stage').ondblclick=e=>{
  }
 };
 $('add-text').onclick=()=>{
- const item={...base('text',60,50,260,44),name:'Text',text:'Type here',fontFamily:'Arial',fontSize:28,fontWeight:400,fontStyle:'normal',color:'#20212b',align:'left'};
+ const item={...base('text',60,50,260,44),name:'Text',text:'Type here',fontSize:28,...SAC_TEXT_STYLE};
  if(change(()=>{slide().items.push(item);selected=new Set([item.id]);}))editCanvasText(item,{selectAll:true});
 };
 function insertGalleryShape(shape){
