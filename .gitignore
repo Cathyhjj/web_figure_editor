@@ -12,6 +12,7 @@
 !/render-cache.js
 !/slide-preview-cache.js
 !/draft-persistence.js
+!/draft-store.js
 !/automation.js
 !/export-check.js
 !/automation_bridge.py

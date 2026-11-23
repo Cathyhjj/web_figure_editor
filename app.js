@@ -12,6 +12,7 @@ import { createChartFrame } from './html-chart.js';
 import { initHTMLImport } from './html-import.js';
 import { openHTMLFigureEditor, isHTMLFigure } from './html-figure-editor.js';
 import { uid, projectToSVG, exportPNG, downloadBlob } from './core.js';
+import { splitDraft, sameDraftData, mergeDraft, draftAssetKey, draftAssetRange } from './draft-store.js';
 import { createDeck, validateDeck, cloneDeck, currentSlide, createAssetItem, slideProject, deckSourceManifest, addSlide, duplicateSlide, moveSlides } from './deck.js';
 import { pickProjectFile, readProjectFile, readProjectFileState, writeProjectFile, checkProjectFileRevision } from './project-files.js';
 import { createRecentProjects, openRecentProject } from './recent-projects.js';
@@ -1640,18 +1641,29 @@ document.addEventListener('keydown',e=>{
  else if(!inSlideSorter()&&['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)&&selected.size){e.preventDefault();const n=e.shiftKey?10:1;change(()=>{for(const i of chosen().filter(i=>!i.locked)){if(e.key==='ArrowLeft')i.x-=n;if(e.key==='ArrowRight')i.x+=n;if(e.key==='ArrowUp')i.y-=n;if(e.key==='ArrowDown')i.y+=n;}});}
 });
 async function openDraftDB(){return new Promise((resolve,reject)=>{const r=indexedDB.open('figure-editor-drafts',1);r.onupgradeneeded=()=>r.result.createObjectStore('drafts');r.onerror=()=>reject(r.error);r.onsuccess=()=>resolve(r.result);});}
+// Asset data records this page last committed to the draft store, by asset ID.
+let draftAssetData=new Map();
 function writeDraftRecord(savedProject,file,tokens){
  return new Promise((resolve,reject)=>{
   const tx=draftDb.transaction('drafts','readwrite'),store=tx.objectStore('drafts');
-  let result={persistent:true};
-  tx.oncomplete=()=>resolve(result);tx.onerror=tx.onabort=()=>reject(tx.error||new Error('Draft transaction aborted.'));
+  let result={persistent:true},written=null;
+  tx.oncomplete=()=>{if(written)draftAssetData=written;resolve(result);};tx.onerror=tx.onabort=()=>reject(tx.error||new Error('Draft transaction aborted.'));
   const request=store.get('current-file');
   request.onsuccess=()=>{
    const stored=request.result,ownsContent=stored?.draftContentToken===tokens.content;
    const commit=hasContent=>{
     if(hasContent&&stored.draftFileToken===tokens.file){result={persistent:!file.handle||!!stored.handle};return;}
     try{
-     if(!hasContent)store.put(savedProject,'current');
+     if(!hasContent){
+      const draft=splitDraft(savedProject),writer=token=>typeof token==='string'?token.split(':')[0]:null;
+      // Asset data this page stored is still in place unless another tab or version replaced the draft.
+      let known=draftAssetData;
+      if(writer(stored?.draftContentToken)!==writer(tokens.content)){store.delete(draftAssetRange());known=new Map();}
+      for(const id of known.keys())if(!draft.data.has(id))store.delete(draftAssetKey(id));
+      for(const [id,record] of draft.data)if(!sameDraftData(known.get(id),record))store.put(record,draftAssetKey(id));
+      store.put(draft.project,'current');
+      written=draft.data;
+     }
      store.put({...file,draftContentToken:tokens.content,draftFileToken:tokens.file},'current-file');
     }catch(error){tx.abort();reject(error);}
    };
@@ -1700,7 +1712,10 @@ async function loadDraft(){
   draftDb=await openDraftDB();
   const store=draftDb.transaction('drafts').objectStore('drafts');
   const read=key=>new Promise((resolve,reject)=>{const req=store.get(key);req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});
-  const [savedProject,file]=await Promise.all([read('current'),read('current-file')]);
+  const all=request=>new Promise((resolve,reject)=>{request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
+  // One transaction, so another tab cannot replace the draft between its records.
+  const [stored,file,dataKeys,dataRecords]=await Promise.all([read('current'),read('current-file'),all(store.getAllKeys(draftAssetRange())),all(store.getAll(draftAssetRange()))]);
+  const savedProject=mergeDraft(stored,new Map(dataKeys.map((key,index)=>[key,dataRecords[index]])));
   if(!savedProject||epoch!==projectEpoch||revision!==editRevision)return;
   let restored=validateDeck(savedProject),restoredDirty=file?.dirty!==false,restoredRevision=file?.revision??null,problem=null;
   const handle=file?.handle?.kind==='file'&&typeof file.handle.createWritable==='function'?file.handle:null;
@@ -1741,9 +1756,27 @@ function automationBusy(){
   :$('workspace').classList.contains('shape-drawing')?'Finish drawing the shape first.'
   :libraryImports||readingSlideClipboard?'An import operation is in progress.':null;
 }
+// Agents usually drive this page unseen, so record how the previous page in this tab ended.
+// sessionStorage follows the tab through reloads, discards and a restored browser session.
+const pageDiagnostics=(()=>{
+ const key='figure-editor-page-run',started=Date.now();let previousExit='first';
+ try{
+  const previous=JSON.parse(sessionStorage.getItem(key)||'null');
+  if(document.wasDiscarded)previousExit='discarded';
+  else if(previous)previousExit=previous.clean?'clean':'unexpected';
+  const mark=clean=>{try{sessionStorage.setItem(key,JSON.stringify({started,clean}));}catch{}};
+  mark(false);
+  window.addEventListener('pagehide',()=>mark(true));
+  window.addEventListener('pageshow',event=>{if(event.persisted)mark(false);});
+ }catch{previousExit='unknown';}
+ const megabytes=value=>Math.round(value/1048576*10)/10;
+ return ()=>({previousExit,uptimeSeconds:Math.round((Date.now()-started)/1000),
+  embeddedMB:megabytes(project.assets.reduce((sum,asset)=>sum+asset.dataUrl.length+(asset.posterDataUrl?.length||0)+(asset.originalDataUrl?.length||0),0)*0.75),
+  ...(performance.memory?{jsHeapMB:megabytes(performance.memory.usedJSHeapSize),jsHeapLimitMB:megabytes(performance.memory.jsHeapSizeLimit)}:{})});
+})();
 function automationState(slideId){
  return {...describeProject(project,slideId),revision:automationRevision(),selectedItemIds:[...selected],selectedSlideIds:[...selectedSlideIds],
-  busy:automationBusy(),history:{undo:undoStack.length,redo:redoStack.length},
+  busy:automationBusy(),history:{undo:undoStack.length,redo:redoStack.length},diagnostics:pageDiagnostics(),
   save:{dirty,autoSave:autosaveEnabled,fileName:projectFileName||null,hasFile:Boolean(projectFileHandle),
    savedToFile:Boolean(projectFileHandle)&&!dirty,draftCurrent:draftRevision===editRevision&&!draftError,draftError,
    error:autosaveError?.detail??null,status:$('autosave-status').textContent}};
@@ -1858,6 +1891,9 @@ function enableAIReference(sessionId){
  };
 }
 render();panelWindows=initWindows({onLayoutChange:fit});requestAnimationFrame(fit);await Promise.all([loadDraft(),recentProjects.load()]);recentMenu.render();fileOperation=false;renderFileActions();scheduleAutosave();
+{const exit=pageDiagnostics().previousExit;
+ if(exit==='discarded')status('Chrome discarded this background tab to free memory and reloaded it. The local draft was restored. To prevent this, add this site to Chrome Settings → Performance → Always keep these sites active.');
+ else if(exit==='unexpected')status('The previous page in this tab ended unexpectedly (a crash, or Chrome was closed by force). The local draft was restored.',true);}
 connectAutomation({execute:executeAutomation,summary:()=>({name:project.name,projectId:project.id,slideId:project.activeSlideId,revision:automationRevision()}),button:$('ai-control-toggle'),onSessionChange:enableAIReference});
 // Agents drive this page while it sits in a background tab. Chrome does not freeze a tab that holds a Web Lock.
 void navigator.locks?.request('figure-editor-ai-bridge',{mode:'shared'},()=>new Promise(()=>{})).catch(()=>{});

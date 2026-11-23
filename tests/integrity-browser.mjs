@@ -19,7 +19,11 @@ async function readDraft(page) {
     const db = await new Promise((resolve, reject) => { const r = indexedDB.open('figure-editor-drafts', 1); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
     try {
       const store = db.transaction('drafts').objectStore('drafts');
-      return await Promise.all(['current', 'current-file'].map(key => new Promise((resolve, reject) => { const r = store.get(key); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); })));
+      const read = key => new Promise((resolve, reject) => { const r = store.get(key); r.onsuccess = () => resolve(r.result); r.onerror = () => reject(r.error); });
+      const [project, file] = await Promise.all([read('current'), read('current-file')]);
+      // Embedded asset data lives in separate records; return the complete project.
+      if (project) project.assets = await Promise.all(project.assets.map(async ({ draftData, ...asset }) => draftData ? { ...asset, ...await read('asset:' + asset.id) } : asset));
+      return [project, file];
     } finally { db.close(); }
   });
 }
