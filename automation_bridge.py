@@ -1,4 +1,5 @@
 """In-memory rendezvous between local MCP clients and live editor pages."""
+import re
 import secrets
 import threading
 import time
@@ -6,6 +7,7 @@ import time
 MAX_AUTOMATION_BODY = 36 * 1024 * 1024
 METHODS = {"get_state", "import_assets", "check_sources", "inspect_svg", "batch_edit", "duplicate_slide", "preview", "preview_batch",
            "check_export", "export", "history", "save"}
+SESSION_ID = re.compile(r"[A-Za-z0-9_-]{32}")
 
 
 class AutomationError(Exception):
@@ -52,11 +54,19 @@ class AutomationBridge:
         with self.condition:
             self._prune()
             if action == "register":
-                fields(data, {"summary"}, {"summary"})
+                fields(data, {"summary", "sessionId"}, {"summary"})
                 metadata = summary(data["summary"])
+                # A page that reconnects after a server restart, sleep or network error keeps
+                # its ID, so references already given to an agent remain valid.
+                identifier = data.get("sessionId")
+                if identifier is not None:
+                    if not isinstance(identifier, str) or not SESSION_ID.fullmatch(identifier):
+                        raise AutomationError(400, "Invalid session ID.")
+                    self.sessions.pop(identifier, None)
+                    self.condition.notify_all()
                 if len(self.sessions) >= 32:
                     raise AutomationError(429, "Too many connected editor pages.")
-                identifier = secrets.token_urlsafe(24)
+                identifier = identifier or secrets.token_urlsafe(24)
                 self.sessions[identifier] = {"summary": metadata, "seen": time.monotonic(), "pending": None, "polling": False}
                 return {"sessionId": identifier}
             if action == "sessions":
@@ -92,7 +102,8 @@ class AutomationBridge:
             try:
                 deadline = time.monotonic() + self.poll_timeout
                 while True:
-                    self._session(data["sessionId"])
+                    if self._session(data["sessionId"]) is not session:
+                        raise AutomationError(404, "Page disconnected or expired. List sessions and read state again.")
                     pending = session["pending"]
                     if pending and not pending["delivered"] and time.monotonic() < pending["deadline"]:
                         pending["delivered"] = True
@@ -122,7 +133,8 @@ class AutomationBridge:
             self.condition.notify_all()
             try:
                 while pending["result"] is None:
-                    self._session(data["sessionId"])
+                    if self._session(data["sessionId"]) is not session:
+                        raise AutomationError(404, "Page reconnected while the command was pending. Read state before retrying.")
                     remaining = pending["deadline"] - time.monotonic()
                     if remaining <= 0:
                         detail = "It was delivered; the outcome is unknown. Read state before retrying any edit." if pending["delivered"] else "It was not delivered and will not execute."

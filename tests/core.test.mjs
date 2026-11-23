@@ -193,3 +193,28 @@ test('PNG scales pixels to physical DPI, writes pHYs metadata with CRC, and clea
     URL.revokeObjectURL = originalRevoke;
   }
 });
+
+test('revalidating unchanged assets reuses earlier checks without trusting changed ones', async () => {
+  const { svgDataURL } = await import('../svg-vector.js');
+  const svgDocument = { tag: 'svg', attrs: { xmlns: 'http://www.w3.org/2000/svg', width: '10', height: '10', viewBox: '0 0 10 10' }, children: [{ tag: 'rect', attrs: { width: '10', height: '10' }, children: [] }] };
+  const p = fixture();
+  p.assets.push({ id: 'vector-1', name: 'plot.svg', mime: 'image/svg+xml', dataUrl: svgDataURL(svgDocument), svgDocument, width: 10, height: 10, size: 1, lastModified: 0, sourceKind: 'copy' });
+  const first = validateProject(p);
+  // The checked project and its canonical copy both validate again, as fresh objects.
+  for (const project of [p, first, structuredClone(first)]) {
+    const again = validateProject(project);
+    assert.deepEqual(again, first);
+    assert.notEqual(again.assets[0], first.assets[0]);
+  }
+  const tampered = structuredClone(first);
+  tampered.assets[0].dataUrl = 'data:image/png;base64,@@@=';
+  assert.throws(() => validateProject(tampered), /invalid base64/);
+  const scripted = { ...first, assets: first.assets.map(asset => ({ ...asset })) };
+  scripted.assets[1].svgDocument = { ...svgDocument, children: [{ tag: 'script', attrs: {}, children: [] }] };
+  assert.throws(() => validateProject(scripted), /Invalid SVG/);
+  const mismatched = { ...first, assets: first.assets.map(asset => ({ ...asset })) };
+  mismatched.assets[1].svgDocument = { ...svgDocument, children: [] };
+  assert.throws(() => validateProject(mismatched), /do not match/);
+  const extra = { ...first, assets: first.assets.map(asset => ({ ...asset, unknown: 'dropped' })) };
+  assert.deepEqual(validateProject(extra), first);
+});
