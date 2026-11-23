@@ -101,6 +101,8 @@ TOOLS = [
          "For a pasted Layers / Copy AI reference, pass only sessionId and slideId. Match project.id and the copied selectedItemIds against slide.items before editing with the returned revision. "
          "For images, omitted crop means the full source and omitted imageFit means stretch. "
          "Assets are metadata only. Each asset's usedBy lists its placements across all slides. "
+         "diagnostics.previousExit tells how the previous page in this tab ended: clean, discarded (Chrome freed a background tab), "
+         "unexpected (crash or forced quit) or first; embeddedMB is the size of embedded assets. "
          "Use relativePath and fingerprint when available to identify the source. Defaults to the active slide. Pass slideId to inspect another slide.",
          obj({**SESSION, "slideId": STRING}, SESSION), True),
     tool("import_assets", "Import 1–32 explicit PNG, JPEG or SVG paths relative to the adapter's configured --asset-root "

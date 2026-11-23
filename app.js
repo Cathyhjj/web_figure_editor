@@ -1741,9 +1741,27 @@ function automationBusy(){
   :$('workspace').classList.contains('shape-drawing')?'Finish drawing the shape first.'
   :libraryImports||readingSlideClipboard?'An import operation is in progress.':null;
 }
+// Agents usually drive this page unseen, so record how the previous page in this tab ended.
+// sessionStorage follows the tab through reloads, discards and a restored browser session.
+const pageDiagnostics=(()=>{
+ const key='figure-editor-page-run',started=Date.now();let previousExit='first';
+ try{
+  const previous=JSON.parse(sessionStorage.getItem(key)||'null');
+  if(document.wasDiscarded)previousExit='discarded';
+  else if(previous)previousExit=previous.clean?'clean':'unexpected';
+  const mark=clean=>{try{sessionStorage.setItem(key,JSON.stringify({started,clean}));}catch{}};
+  mark(false);
+  window.addEventListener('pagehide',()=>mark(true));
+  window.addEventListener('pageshow',event=>{if(event.persisted)mark(false);});
+ }catch{previousExit='unknown';}
+ const megabytes=value=>Math.round(value/1048576*10)/10;
+ return ()=>({previousExit,uptimeSeconds:Math.round((Date.now()-started)/1000),
+  embeddedMB:megabytes(project.assets.reduce((sum,asset)=>sum+asset.dataUrl.length+(asset.posterDataUrl?.length||0)+(asset.originalDataUrl?.length||0),0)*0.75),
+  ...(performance.memory?{jsHeapMB:megabytes(performance.memory.usedJSHeapSize),jsHeapLimitMB:megabytes(performance.memory.jsHeapSizeLimit)}:{})});
+})();
 function automationState(slideId){
  return {...describeProject(project,slideId),revision:automationRevision(),selectedItemIds:[...selected],selectedSlideIds:[...selectedSlideIds],
-  busy:automationBusy(),history:{undo:undoStack.length,redo:redoStack.length},
+  busy:automationBusy(),history:{undo:undoStack.length,redo:redoStack.length},diagnostics:pageDiagnostics(),
   save:{dirty,autoSave:autosaveEnabled,fileName:projectFileName||null,hasFile:Boolean(projectFileHandle),
    savedToFile:Boolean(projectFileHandle)&&!dirty,draftCurrent:draftRevision===editRevision&&!draftError,draftError,
    error:autosaveError?.detail??null,status:$('autosave-status').textContent}};
@@ -1858,6 +1876,9 @@ function enableAIReference(sessionId){
  };
 }
 render();panelWindows=initWindows({onLayoutChange:fit});requestAnimationFrame(fit);await Promise.all([loadDraft(),recentProjects.load()]);recentMenu.render();fileOperation=false;renderFileActions();scheduleAutosave();
+{const exit=pageDiagnostics().previousExit;
+ if(exit==='discarded')status('Chrome discarded this background tab to free memory and reloaded it. The local draft was restored. To prevent this, add this site to Chrome Settings → Performance → Always keep these sites active.');
+ else if(exit==='unexpected')status('The previous page in this tab ended unexpectedly (a crash, or Chrome was closed by force). The local draft was restored.',true);}
 connectAutomation({execute:executeAutomation,summary:()=>({name:project.name,projectId:project.id,slideId:project.activeSlideId,revision:automationRevision()}),button:$('ai-control-toggle'),onSessionChange:enableAIReference});
 // Agents drive this page while it sits in a background tab. Chrome does not freeze a tab that holds a Web Lock.
 void navigator.locks?.request('figure-editor-ai-bridge',{mode:'shared'},()=>new Promise(()=>{})).catch(()=>{});

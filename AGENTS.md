@@ -6,6 +6,7 @@ For drawing tasks, use the live editor tools; implementation changes are only ne
 ## Draw and refine
 
 - Use the open editor when available. To start one, run `python3 server.py` and open `http://127.0.0.1:8766/`. The page must show **AI connected**. For first-time MCP setup, `python3 figure_cli.py setup` prints registration commands for Codex and Claude Code.
+- List sessions before opening the URL. Reuse a connected page; every extra tab loads the whole project into memory again and shares the same browser draft.
 - Prefer the `figure_*` MCP tools. Without MCP, use `python3 figure_cli.py tools` to discover the same schemas, then `sessions` and `call TOOL --args FILE.json` (or `--args -` for stdin).
 - Read sessions, identify the intended page, then `get_state`. Do not guess if several pages match. Read actual slide/object/asset IDs and the current revision.
 - When the user supplies a reference from **Layers → Copy AI reference**, call `get_state` with the copied `sessionId` and `slideId`. Verify the live project's ID matches `projectId` and that every `selectedItemIds` entry exists on that slide. Use those IDs and the live revision for edits. If the session expired, project changed or an item is missing, ask for a fresh reference from the intended page.
